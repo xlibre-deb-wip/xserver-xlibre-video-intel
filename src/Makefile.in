@@ -82,14 +82,15 @@ am__installdirs = "$(DESTDIR)$(i810_drv_ladir)"
 i810_drv_laLTLIBRARIES_INSTALL = $(INSTALL)
 LTLIBRARIES = $(i810_drv_la_LTLIBRARIES)
 i810_drv_la_LIBADD =
-am__i810_drv_la_SOURCES_DIST = common.h i810_accel.c i810_common.h \
-	i810_cursor.c i810_dga.c i810_driver.c i810.h i810_io.c \
-	i810_memory.c i810_reg.h i810_video.c i810_wmark.c \
-	i830_accel.c i830_common.h i830_cursor.c i830_dga.c \
-	i830_driver.c i830.h i830_io.c i830_memory.c i830_modes.c \
-	i830_video.c i830_rotate.c i830_randr.c i830_3d.c i830_reg.h \
-	i915_3d.c i915_3d.h i915_reg.h i810_dri.c i810_dri.h \
-	i830_dri.c i810_hwmc.c i830_dri.h
+am__i810_drv_la_SOURCES_DIST = brw_defines.h brw_structs.h wm_prog.h \
+	common.h i810_accel.c i810_common.h i810_cursor.c i810_dga.c \
+	i810_driver.c i810.h i810_io.c i810_memory.c i810_reg.h \
+	i810_video.c i810_wmark.c i830_accel.c i830_common.h \
+	i830_cursor.c i830_dga.c i830_driver.c i830.h i830_io.c \
+	i830_memory.c i830_modes.c i830_video.c i830_rotate.c \
+	i830_randr.c i830_3d.c i830_reg.h i915_3d.c i915_3d.h \
+	i915_reg.h i810_dri.c i810_dri.h i830_dri.c i810_hwmc.c \
+	i830_dri.h
 @DRI_TRUE@am__objects_1 = i810_dri.lo i830_dri.lo i810_hwmc.lo
 am_i810_drv_la_OBJECTS = i810_accel.lo i810_cursor.lo i810_dga.lo \
 	i810_driver.lo i810_io.lo i810_memory.lo i810_video.lo \
@@ -262,13 +263,14 @@ AM_CFLAGS = @XORG_CFLAGS@ @DRI_CFLAGS@ -DI830_XV
 i810_drv_la_LTLIBRARIES = i810_drv.la
 i810_drv_la_LDFLAGS = -module -avoid-version
 i810_drv_ladir = @moduledir@/drivers
-i810_drv_la_SOURCES = common.h i810_accel.c i810_common.h \
-	i810_cursor.c i810_dga.c i810_driver.c i810.h i810_io.c \
-	i810_memory.c i810_reg.h i810_video.c i810_wmark.c \
-	i830_accel.c i830_common.h i830_cursor.c i830_dga.c \
-	i830_driver.c i830.h i830_io.c i830_memory.c i830_modes.c \
-	i830_video.c i830_rotate.c i830_randr.c i830_3d.c i830_reg.h \
-	i915_3d.c i915_3d.h i915_reg.h $(am__append_1)
+i810_drv_la_SOURCES = brw_defines.h brw_structs.h wm_prog.h common.h \
+	i810_accel.c i810_common.h i810_cursor.c i810_dga.c \
+	i810_driver.c i810.h i810_io.c i810_memory.c i810_reg.h \
+	i810_video.c i810_wmark.c i830_accel.c i830_common.h \
+	i830_cursor.c i830_dga.c i830_driver.c i830.h i830_io.c \
+	i830_memory.c i830_modes.c i830_video.c i830_rotate.c \
+	i830_randr.c i830_3d.c i830_reg.h i915_3d.c i915_3d.h \
+	i915_reg.h $(am__append_1)
 all: all-recursive
 
 .SUFFIXES:
@@ -282,9 +284,9 @@ $(srcdir)/Makefile.in: @MAINTAINER_MODE_TRUE@ $(srcdir)/Makefile.am  $(am__confi
 	      exit 1;; \
 	  esac; \
 	done; \
-	echo ' cd $(top_srcdir) && $(AUTOMAKE) --gnu  src/Makefile'; \
+	echo ' cd $(top_srcdir) && $(AUTOMAKE) --foreign  src/Makefile'; \
 	cd $(top_srcdir) && \
-	  $(AUTOMAKE) --gnu  src/Makefile
+	  $(AUTOMAKE) --foreign  src/Makefile
 .PRECIOUS: Makefile
 Makefile: $(srcdir)/Makefile.in $(top_builddir)/config.status
 	@case '$?' in \
