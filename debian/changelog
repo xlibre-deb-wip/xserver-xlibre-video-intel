@@ -1,3 +1,9 @@
+xserver-xorg-video-i810-modesetting (1.7.2.git20070210-2) UNRELEASED; urgency=low
+
+  * Update metadata for xserver 1.2 and video driver ABI 1.1
+
+ -- David Nusinow <dnusinow@debian.org>  Sun, 11 Feb 2007 11:50:21 -0500
+
 xserver-xorg-video-i810-modesetting (1.7.2.git20070210-1) experimental; urgency=low
 
   [ Julien Cristau ]
