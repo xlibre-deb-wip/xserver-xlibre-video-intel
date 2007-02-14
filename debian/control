@@ -1,4 +1,4 @@
-Source: xserver-xorg-video-i810-modesetting
+Source: xserver-xorg-video-intel-modesetting
 Section: x11
 Priority: optional
 Maintainer: Debian X Strike Force <debian-x@lists.debian.org>
@@ -6,7 +6,7 @@ Uploaders: David Nusinow <dnusinow@debian.org>, Branden Robinson <branden@debian
 Build-Depends: debhelper (>= 5), pkg-config, quilt, xserver-xorg-dev (>= 2:1.2.0), x11proto-gl-dev, x11proto-video-dev, libgl1-mesa-dev | libgl-dev, libxvmc-dev (>= 1:1.0.1-1), x11proto-core-dev, x11proto-fonts-dev, x11proto-randr-dev, x11proto-render-dev, x11proto-xinerama-dev, libdrm-dev (>> 2.0), x11proto-xf86dri-dev
 Standards-Version: 3.7.2
 
-Package: xserver-xorg-video-i810-modesetting
+Package: xserver-xorg-video-intel-modesetting
 Architecture: alpha amd64 arm hppa hurd-i386 i386 ia64 kfreebsd-i386 m68k mips mipsel netbsd-i386 powerpc
 Depends: ${shlibs:Depends}, ${misc:Depends}, xserver-xorg-core (>= 2:1.2.0)
 Provides: xserver-xorg-video-1.1
@@ -23,7 +23,7 @@ Description: X.Org X server -- Intel i8xx, i9xx display driver (modesetting)
  This modesetting branch is designed to provide more control over the modes
  available to the driver, without having to depend on the VideoBIOS.  It will 
  write extra debugging text to the Xorg log file. The modesetting version may
- become the stable i810 in the future but is provided here for your testing 
+ become the stable intel in the future but is provided here for your testing 
  convenience.  Please use the stable i810 driver instead if you do not want 
  to experiment with this driver.
  .
@@ -38,3 +38,11 @@ Description: X.Org X server -- Intel i8xx, i9xx display driver (modesetting)
  This module may be found as the modesetting branch of module 
  'driver/xf86-video-intel' at
  git://anongit.freedesktop.org/git/xorg/driver/xf86-video-intel
+
+Package: xserver-xorg-video-i810-modesetting
+Architecture: alpha amd64 arm hppa hurd-i386 i386 ia64 kfreebsd-i386 m68k mips mipsel netbsd-i386 powerpc
+Depends: ${shlibs:Depends}, ${misc:Depends}, xserver-xorg-video-intel-modesetting
+Description: Intel i8xx, i9xx display driver (modesetting) transitional package
+ This package is a transitional package for the
+ xserver-xorg-video-intel-modesetting package. Please see that package's
+ description for more information.
