@@ -1,10 +1,10 @@
-xserver-xorg-video-intel-modesetting (1.7.2.git20070213-1) unstable; urgency=low
+xserver-xorg-video-intel-modesetting (1.7.2.git20070213-1) experimental; urgency=low
 
   * Upstream renamed the driver to intel. Provide an i810 transition package
     and make the name of this package intel
   * Update metadata for xserver 1.2 and video driver ABI 1.1
 
- -- David Nusinow <dnusinow@debian.org>  Tue, 13 Feb 2007 22:15:30 -0500
+ -- David Nusinow <dnusinow@debian.org>  Tue, 13 Feb 2007 22:31:11 -0500
 
 xserver-xorg-video-i810-modesetting (1.7.2.git20070210-1) experimental; urgency=low
 
