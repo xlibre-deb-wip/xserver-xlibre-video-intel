@@ -10,8 +10,8 @@ Package: xserver-xorg-video-intel-modesetting
 Architecture: alpha amd64 arm hppa hurd-i386 i386 ia64 kfreebsd-i386 m68k mips mipsel netbsd-i386 powerpc
 Depends: ${shlibs:Depends}, ${misc:Depends}, xserver-xorg-core (>= 2:1.2.0)
 Provides: xserver-xorg-video-1.1
-Conflicts: xserver-xorg-video-i810
-Replaces: xserver-xorg (<< 6.8.2-35), xserver-xorg-video-i810
+Conflicts: xserver-xorg-video-i810, xserver-xorg-video-i810-modesetting (<= 1.6.5.git20061014.ac1-1)
+Replaces: xserver-xorg (<< 6.8.2-35), xserver-xorg-video-i810, xserver-xorg-video-i810-modesetting (<= 1.6.5.git20061014.ac1-1)
 Description: X.Org X server -- Intel i8xx, i9xx display driver (modesetting)
  This package is a development snapshot, it should be considered experimental.
  Please use xserver-xorg-video-i810 instead if you have any doubts.
