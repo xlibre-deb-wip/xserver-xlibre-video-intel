@@ -56,7 +56,15 @@ PRE_UNINSTALL = :
 POST_UNINSTALL = :
 build_triplet = @build@
 host_triplet = @host@
-@DRI_TRUE@am__append_1 = \
+@HAVE_GEN4ASM_FALSE@am__append_1 = \
+@HAVE_GEN4ASM_FALSE@	sf_prog.h		\
+@HAVE_GEN4ASM_FALSE@	wm_prog.h 		\
+@HAVE_GEN4ASM_FALSE@	exa_sf_prog.h 		\
+@HAVE_GEN4ASM_FALSE@	exa_sf_mask_prog.h	\
+@HAVE_GEN4ASM_FALSE@	exa_wm_nomask_prog.h 	\
+@HAVE_GEN4ASM_FALSE@	exa_wm_masknoca_prog.h
+
+@DRI_TRUE@am__append_2 = \
 @DRI_TRUE@         i810_dri.c \
 @DRI_TRUE@         i810_dri.h \
 @DRI_TRUE@         i830_dri.c \
@@ -78,11 +86,11 @@ am__vpath_adj = case $$p in \
     *) f=$$p;; \
   esac;
 am__strip_dir = `echo $$p | sed -e 's|^.*/||'`;
-am__installdirs = "$(DESTDIR)$(i810_drv_ladir)"
-i810_drv_laLTLIBRARIES_INSTALL = $(INSTALL)
-LTLIBRARIES = $(i810_drv_la_LTLIBRARIES)
-i810_drv_la_LIBADD =
-am__i810_drv_la_SOURCES_DIST = brw_defines.h brw_structs.h sf_prog.h \
+am__installdirs = "$(DESTDIR)$(intel_drv_ladir)"
+intel_drv_laLTLIBRARIES_INSTALL = $(INSTALL)
+LTLIBRARIES = $(intel_drv_la_LTLIBRARIES)
+intel_drv_la_LIBADD =
+am__intel_drv_la_SOURCES_DIST = brw_defines.h brw_structs.h sf_prog.h \
 	wm_prog.h common.h i2c_vid.h i810_accel.c i810_common.h \
 	i810_cursor.c i810_dga.c i810_driver.c i810.h i810_io.c \
 	i810_memory.c i810_reg.h i810_video.c i810_wmark.c i830_3d.c \
@@ -96,10 +104,11 @@ am__i810_drv_la_SOURCES_DIST = brw_defines.h brw_structs.h sf_prog.h \
 	i830_xf86cvt.c i830_xf86Crtc.h i830_xf86Crtc.c \
 	i830_xf86Rotate.c i915_3d.c i915_3d.h i915_reg.h i915_video.c \
 	i965_video.c i830_exa.c i830_xaa.c i830_render.c i915_render.c \
-	i965_render.c i810_dri.c i810_dri.h i830_dri.c i810_hwmc.c \
-	i830_dri.h
+	i965_render.c i830_xf86Rename.h local_xf86Rename.h \
+	xf86Parser.h xf86Optrec.h i830_randr.h i810_dri.c i810_dri.h \
+	i830_dri.c i810_hwmc.c i830_dri.h
 @DRI_TRUE@am__objects_1 = i810_dri.lo i830_dri.lo i810_hwmc.lo
-am_i810_drv_la_OBJECTS = i810_accel.lo i810_cursor.lo i810_dga.lo \
+am_intel_drv_la_OBJECTS = i810_accel.lo i810_cursor.lo i810_dga.lo \
 	i810_driver.lo i810_io.lo i810_memory.lo i810_video.lo \
 	i810_wmark.lo i830_3d.lo i830_accel.lo i830_bios.lo \
 	i830_crt.lo i830_cursor.lo i830_debug.lo i830_dga.lo \
@@ -110,7 +119,7 @@ am_i810_drv_la_OBJECTS = i810_accel.lo i810_cursor.lo i810_dga.lo \
 	i830_xf86Rotate.lo i915_3d.lo i915_video.lo i965_video.lo \
 	i830_exa.lo i830_xaa.lo i830_render.lo i915_render.lo \
 	i965_render.lo $(am__objects_1)
-i810_drv_la_OBJECTS = $(am_i810_drv_la_OBJECTS)
+intel_drv_la_OBJECTS = $(am_intel_drv_la_OBJECTS)
 DEFAULT_INCLUDES = -I. -I$(srcdir) -I$(top_builddir)
 depcomp = $(SHELL) $(top_srcdir)/depcomp
 am__depfiles_maybe = depfiles
@@ -122,8 +131,8 @@ LTCOMPILE = $(LIBTOOL) --tag=CC --mode=compile $(CC) $(DEFS) \
 CCLD = $(CC)
 LINK = $(LIBTOOL) --tag=CC --mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) \
 	$(AM_LDFLAGS) $(LDFLAGS) -o $@
-SOURCES = $(i810_drv_la_SOURCES)
-DIST_SOURCES = $(am__i810_drv_la_SOURCES_DIST)
+SOURCES = $(intel_drv_la_SOURCES)
+DIST_SOURCES = $(am__intel_drv_la_SOURCES_DIST)
 RECURSIVE_TARGETS = all-recursive check-recursive dvi-recursive \
 	html-recursive info-recursive install-data-recursive \
 	install-exec-recursive install-info-recursive \
@@ -287,10 +296,10 @@ SUBDIRS = xvmc bios_reader ch7017 ch7xxx ivch sil164
 AM_CFLAGS = @WARN_CFLAGS@ @XORG_CFLAGS@ @DRI_CFLAGS@ \
 	-DI830_XV -DI830_USE_XAA -DI830_USE_EXA
 
-i810_drv_la_LTLIBRARIES = i810_drv.la
-i810_drv_la_LDFLAGS = -module -avoid-version
-i810_drv_ladir = @moduledir@/drivers
-i810_drv_la_SOURCES = brw_defines.h brw_structs.h sf_prog.h wm_prog.h \
+intel_drv_la_LTLIBRARIES = intel_drv.la
+intel_drv_la_LDFLAGS = -module -avoid-version
+intel_drv_ladir = @moduledir@/drivers
+intel_drv_la_SOURCES = brw_defines.h brw_structs.h sf_prog.h wm_prog.h \
 	common.h i2c_vid.h i810_accel.c i810_common.h i810_cursor.c \
 	i810_dga.c i810_driver.c i810.h i810_io.c i810_memory.c \
 	i810_reg.h i810_video.c i810_wmark.c i830_3d.c i830_accel.c \
@@ -304,11 +313,9 @@ i810_drv_la_SOURCES = brw_defines.h brw_structs.h sf_prog.h wm_prog.h \
 	i830_xf86Crtc.h i830_xf86Crtc.c i830_xf86Rotate.c i915_3d.c \
 	i915_3d.h i915_reg.h i915_video.c i965_video.c i830_exa.c \
 	i830_xaa.c i830_render.c i915_render.c i965_render.c \
-	$(am__append_1)
-EXTRA_DIST = \
-	packed_yuv_sf.g4a \
-	packed_yuv_wm.g4a
-
+	i830_xf86Rename.h local_xf86Rename.h xf86Parser.h xf86Optrec.h \
+	i830_randr.h $(am__append_2)
+EXTRA_DIST = packed_yuv_sf.g4a packed_yuv_wm.g4a $(am__append_1)
 all: all-recursive
 
 .SUFFIXES:
@@ -342,35 +349,35 @@ $(top_srcdir)/configure: @MAINTAINER_MODE_TRUE@ $(am__configure_deps)
 	cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh
 $(ACLOCAL_M4): @MAINTAINER_MODE_TRUE@ $(am__aclocal_m4_deps)
 	cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh
-install-i810_drv_laLTLIBRARIES: $(i810_drv_la_LTLIBRARIES)
+install-intel_drv_laLTLIBRARIES: $(intel_drv_la_LTLIBRARIES)
 	@$(NORMAL_INSTALL)
-	test -z "$(i810_drv_ladir)" || $(mkdir_p) "$(DESTDIR)$(i810_drv_ladir)"
-	@list='$(i810_drv_la_LTLIBRARIES)'; for p in $$list; do \
+	test -z "$(intel_drv_ladir)" || $(mkdir_p) "$(DESTDIR)$(intel_drv_ladir)"
+	@list='$(intel_drv_la_LTLIBRARIES)'; for p in $$list; do \
 	  if test -f $$p; then \
 	    f=$(am__strip_dir) \
-	    echo " $(LIBTOOL) --mode=install $(i810_drv_laLTLIBRARIES_INSTALL) $(INSTALL_STRIP_FLAG) '$$p' '$(DESTDIR)$(i810_drv_ladir)/$$f'"; \
-	    $(LIBTOOL) --mode=install $(i810_drv_laLTLIBRARIES_INSTALL) $(INSTALL_STRIP_FLAG) "$$p" "$(DESTDIR)$(i810_drv_ladir)/$$f"; \
+	    echo " $(LIBTOOL) --mode=install $(intel_drv_laLTLIBRARIES_INSTALL) $(INSTALL_STRIP_FLAG) '$$p' '$(DESTDIR)$(intel_drv_ladir)/$$f'"; \
+	    $(LIBTOOL) --mode=install $(intel_drv_laLTLIBRARIES_INSTALL) $(INSTALL_STRIP_FLAG) "$$p" "$(DESTDIR)$(intel_drv_ladir)/$$f"; \
 	  else :; fi; \
 	done
 
-uninstall-i810_drv_laLTLIBRARIES:
+uninstall-intel_drv_laLTLIBRARIES:
 	@$(NORMAL_UNINSTALL)
-	@set -x; list='$(i810_drv_la_LTLIBRARIES)'; for p in $$list; do \
+	@set -x; list='$(intel_drv_la_LTLIBRARIES)'; for p in $$list; do \
 	  p=$(am__strip_dir) \
-	  echo " $(LIBTOOL) --mode=uninstall rm -f '$(DESTDIR)$(i810_drv_ladir)/$$p'"; \
-	  $(LIBTOOL) --mode=uninstall rm -f "$(DESTDIR)$(i810_drv_ladir)/$$p"; \
+	  echo " $(LIBTOOL) --mode=uninstall rm -f '$(DESTDIR)$(intel_drv_ladir)/$$p'"; \
+	  $(LIBTOOL) --mode=uninstall rm -f "$(DESTDIR)$(intel_drv_ladir)/$$p"; \
 	done
 
-clean-i810_drv_laLTLIBRARIES:
-	-test -z "$(i810_drv_la_LTLIBRARIES)" || rm -f $(i810_drv_la_LTLIBRARIES)
-	@list='$(i810_drv_la_LTLIBRARIES)'; for p in $$list; do \
+clean-intel_drv_laLTLIBRARIES:
+	-test -z "$(intel_drv_la_LTLIBRARIES)" || rm -f $(intel_drv_la_LTLIBRARIES)
+	@list='$(intel_drv_la_LTLIBRARIES)'; for p in $$list; do \
 	  dir="`echo $$p | sed -e 's|/[^/]*$$||'`"; \
 	  test "$$dir" != "$$p" || dir=.; \
 	  echo "rm -f \"$${dir}/so_locations\""; \
 	  rm -f "$${dir}/so_locations"; \
 	done
-i810_drv.la: $(i810_drv_la_OBJECTS) $(i810_drv_la_DEPENDENCIES) 
-	$(LINK) -rpath $(i810_drv_ladir) $(i810_drv_la_LDFLAGS) $(i810_drv_la_OBJECTS) $(i810_drv_la_LIBADD) $(LIBS)
+intel_drv.la: $(intel_drv_la_OBJECTS) $(intel_drv_la_DEPENDENCIES) 
+	$(LINK) -rpath $(intel_drv_ladir) $(intel_drv_la_LDFLAGS) $(intel_drv_la_OBJECTS) $(intel_drv_la_LIBADD) $(LIBS)
 
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)
@@ -632,7 +639,7 @@ check: check-recursive
 all-am: Makefile $(LTLIBRARIES)
 installdirs: installdirs-recursive
 installdirs-am:
-	for dir in "$(DESTDIR)$(i810_drv_ladir)"; do \
+	for dir in "$(DESTDIR)$(intel_drv_ladir)"; do \
 	  test -z "$$dir" || $(mkdir_p) "$$dir"; \
 	done
 install: install-recursive
@@ -661,7 +668,7 @@ maintainer-clean-generic:
 	@echo "it deletes files that may require special tools to rebuild."
 clean: clean-recursive
 
-clean-am: clean-generic clean-i810_drv_laLTLIBRARIES clean-libtool \
+clean-am: clean-generic clean-intel_drv_laLTLIBRARIES clean-libtool \
 	mostlyclean-am
 
 distclean: distclean-recursive
@@ -680,7 +687,7 @@ info: info-recursive
 
 info-am:
 
-install-data-am: install-i810_drv_laLTLIBRARIES
+install-data-am: install-data-local install-intel_drv_laLTLIBRARIES
 
 install-exec-am:
 
@@ -708,25 +715,27 @@ ps: ps-recursive
 
 ps-am:
 
-uninstall-am: uninstall-i810_drv_laLTLIBRARIES uninstall-info-am
+uninstall-am: uninstall-info-am uninstall-intel_drv_laLTLIBRARIES \
+	uninstall-local
 
 uninstall-info: uninstall-info-recursive
 
 .PHONY: $(RECURSIVE_TARGETS) CTAGS GTAGS all all-am check check-am \
-	clean clean-generic clean-i810_drv_laLTLIBRARIES clean-libtool \
-	clean-recursive ctags ctags-recursive distclean \
+	clean clean-generic clean-intel_drv_laLTLIBRARIES \
+	clean-libtool clean-recursive ctags ctags-recursive distclean \
 	distclean-compile distclean-generic distclean-libtool \
 	distclean-recursive distclean-tags distdir dvi dvi-am html \
 	html-am info info-am install install-am install-data \
-	install-data-am install-exec install-exec-am \
-	install-i810_drv_laLTLIBRARIES install-info install-info-am \
-	install-man install-strip installcheck installcheck-am \
-	installdirs installdirs-am maintainer-clean \
-	maintainer-clean-generic maintainer-clean-recursive \
-	mostlyclean mostlyclean-compile mostlyclean-generic \
-	mostlyclean-libtool mostlyclean-recursive pdf pdf-am ps ps-am \
-	tags tags-recursive uninstall uninstall-am \
-	uninstall-i810_drv_laLTLIBRARIES uninstall-info-am
+	install-data-am install-data-local install-exec \
+	install-exec-am install-info install-info-am \
+	install-intel_drv_laLTLIBRARIES install-man install-strip \
+	installcheck installcheck-am installdirs installdirs-am \
+	maintainer-clean maintainer-clean-generic \
+	maintainer-clean-recursive mostlyclean mostlyclean-compile \
+	mostlyclean-generic mostlyclean-libtool mostlyclean-recursive \
+	pdf pdf-am ps ps-am tags tags-recursive uninstall uninstall-am \
+	uninstall-info-am uninstall-intel_drv_laLTLIBRARIES \
+	uninstall-local
 
 
 @HAVE_GEN4ASM_TRUE@sf_prog.h: packed_yuv_sf.g4a
@@ -741,6 +750,12 @@ uninstall-info: uninstall-info-recursive
 @HAVE_GEN4ASM_TRUE@	intel-gen4asm -o exa_wm_nomask_prog.h exa_wm_nomask.g4a
 @HAVE_GEN4ASM_TRUE@exa_wm_masknoca_prog.h: exa_wm_masknoca.g4a
 @HAVE_GEN4ASM_TRUE@	intel-gen4asm -o exa_wm_masknoca_prog.h exa_wm_masknoca.g4a
+
+install-data-local: install-intel_drv_laLTLIBRARIES
+	(cd $(DESTDIR)$(intel_drv_ladir) && rm -f i810_drv.so && ln -s intel_drv.so i810_drv.so)
+
+uninstall-local:
+	(cd $(DESTDIR)$(intel_drv_ladir) && rm -f i810_drv.so)
 # Tell versions [3.59,3.63) of GNU make to not export all variables.
 # Otherwise a system limit (for SysV at least) may be exceeded.
 .NOEXPORT:
