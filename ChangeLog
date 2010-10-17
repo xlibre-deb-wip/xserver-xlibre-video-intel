@@ -1,18 +1,262 @@
-commit 9f232ad67c72b7869dcd112207bc41dc01d7d104
-Author: Carl Worth <cworth@cworth.org>
-Date:   Thu Sep 30 08:45:49 2010 -0700
+commit 33133a1d38a4dce60d2e135663b545895fc85abc
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Oct 17 09:21:06 2010 +0100
 
-    Increment version to 2.13.0
+    display: do not report failure for setting unrecognised properties
     
-    For the new, major release.
-
-commit 99ec9bb0f1eaf2e5c04614957a51624a928526e5
-Author: Carl Worth <cworth@cworth.org>
-Date:   Thu Sep 30 08:45:15 2010 -0700
-
-    Add release notes for the 2.13.0 release.
+    We need to accept any changes to properties not handled by ourselves -- we
+    can't validate the changes ourselves. Denying those changes breaks EDID
+    reporting, for example.
     
-    Which is functionalliy identical to 2.12.902.
+    Reported-by: Elvis Pranskevichus <el@prans.net>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8507ef50ba08061ac158848a7c4c136e1755d87e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Oct 13 09:45:59 2010 +0100
+
+    Fix driverName regression for i830 from 4083197a
+    
+    Reported-by: Stefan Glasenhardt <stefan@glasen-hardt.de>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=30808
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 15aab1ef982fb67eb2ea463089f070afd9a2cfe5
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Oct 13 09:50:25 2010 +0100
+
+    Move EDID_COMPLETE_RAWDATA define to intel.h to avoid redifinition warning
+    
+    The compiler was simply warning that we defined the name prior to
+    including the original definition, so reorder.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d2bc2212f8be746e697a65555d6d83bc66d9ce43
+Author: Stefan Dirsch <sndirsch@suse.de>
+Date:   Fri Oct 8 17:48:38 2010 +0200
+
+    Make driver compile for 1.6 Xserver series again. Part deux.
+    
+    Signed-off-by: Matthias Hopf <mhopf@suse.de>
+    Acked-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 5472359d6860af655a3c286d30558540376c9fdb
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Oct 8 15:23:13 2010 +0100
+
+    dri: Check for pixmap privates before dereferencing them
+    
+    It is still possible for the pixmap allocator to return a software only
+    pixmap (i.e. without an associated GEM buffer or intel_pixmap), so check
+    before dereferencing.
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=30707
+    Reported-by: Matthias Hopf <mhopf@suse.de>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4083197a44d1a1a05d33654b3c7d6e96d7472fe7
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Oct 7 12:45:02 2010 +0100
+
+    Include a chipset generation number to clarify device specific paths.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1444ea35706992a1f094fe029e6a7d9eec0f93c6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Oct 6 12:36:30 2010 +0100
+
+    dri+shadow: Only tweak the acceleration of CopyRegion if using shadow.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f286891d1415fc607f0c1b574e6bce4b3759493e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Oct 6 11:38:48 2010 +0100
+
+    dri: Reattach the fake pixmap for the shadow scanout to the drawable.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 23ee926bcd8ddd7a2785786efdf119e4fae75bfd
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Oct 6 10:20:49 2010 +0100
+
+    uxa: Skip a pixmap lookup if there is no driver finish access function
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 707901bf98073fb56179a0b61c806f85ef8f413c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Oct 6 08:47:20 2010 +0100
+
+    uxa: Re-enable acceleration.
+    
+    A side-effect of discriminating offscreen based on the devPrivate.ptr
+    was that it broke uxa_finish_access and so after any fallback to s/w on
+    a Pixmap, it remained in software for the reminder of its life.
+    
+    Introduce an explicit boolean to mark whether or not hardware
+    acceleration is enabled for a pixmap (with a GEM buffer).
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 54f545e0631a287f421ef6a6f20831624b212cf2
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Oct 6 08:50:13 2010 +0100
+
+    Revert "Clear pixmap->devPrivate.ptr [regression in 7c7294e]"
+    
+    This reverts commit 48b4e224297fa807be0e2bc7a67bf7e94579e8de.
+    
+    The better fix is to manually mark the pixmap when acceleration is and
+    is not permitted. Whilst the devPrivate.ptr are invalid upon creation,
+    it is not worth carring code that serves no purpose.
+
+commit d1925deedd70c6c4374e42de5aa44989fe328b58
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Oct 6 00:17:03 2010 +0100
+
+    Clear pixmap->devPrivate.ptr [regression from 7c7294e]
+    
+    ModifyPixmapHeader(pixdata = NULL) does not clear the
+    pixmap->devPrivate.ptr, instead the NULL value is interpreted as meaning
+    to keep the current value. (This is similar to the interpretation of the
+    other invalid values like depth=-1 which also mean not to change the
+    current property). However pixadata=NULL is indeed a valid value, and in
+    7c7294e, devPrivate.ptr == NULL was used to differentiate a bo pixmap
+    from a system pixmap. Except that we never did clear the ptr as
+    intended, and so X would immediately crash.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4bf2182bf9ee64795e2bf524fedf7b6c36f3cd03
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Oct 5 09:59:04 2010 +0100
+
+    shadow: Use a cacheable shadow for all generations
+    
+    Always avoid direct rendering to the uncached scanout buffer,
+    redirecting all 2D access to the shadow instead. Then for the couple of
+    platforms where either the BLT is not ready or cannot be trusted (i8xx)
+    perform the front buffer fixup using the uncached writes from the CPU.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b27a521214728052b8b10342aaacbaf1622b8e2c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Oct 4 20:31:44 2010 +0100
+
+    shadow: Enable shadow by default on SandyBridge
+    
+    SandyBridge 2D support is far from complete, so instead of
+    permanently falling back and always using uncached GTT mapping for
+    rendering, use the shadow buffer instead.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 3e641459f8997f45288cc3cb314e50f2b5a629fd
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Oct 4 20:31:01 2010 +0100
+
+    shadow: Disable BLT for SandyBridge
+    
+    The blitting code is incorrect for SandyBridge so disable until
+    the BLT ring is ready.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 7c7294ec00d6c3a454a17a1b9983d14d0655162c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Oct 4 11:56:27 2010 +0100
+
+    shadow+dri2: Allow dri2 to be independently enabled with shadow
+    
+    To enable DRI we create GEM buffers for the client to render into with
+    hardware acceleration. In order to maintain coherency between any 2D
+    render operations with the independent 3D clients (this includes the
+    reading of 2D rasterisation by the direct rendering client, e.g.
+    compiz using texture_from_pixmap) we need to replace the shadow pixmap
+    with the GTT mapping. Therefore 2D rendering to a DRI buffer will be to
+    uncached memory and thus penalised -- but the direct rendering clients
+    will have full hardware acceleration.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 16a5d0ee3ca4d41af6a6876a8baf81e3f715781d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Oct 4 11:21:17 2010 +0100
+
+    shadow: Map the scanout directly on i8xx
+    
+    Even with the minimal use of the BLT to copy from the GTT shadow to the
+    GTT scanout, i830 was still hanging. Just write to the scanout directly.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 516d235c5b3bd51e9533925140d95d3b4533129c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Oct 4 11:10:57 2010 +0100
+
+    Split shadow handling routines to their own file.
+    
+    This is about to get messy, so separate out the shadow from the normal
+    code.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 455f2939a661764ebb8d1747d44e16a0a8937808
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Oct 2 13:32:58 2010 +0100
+
+    Do not claim the PCI device if !KMS
+    
+    By returning FALSE whilst probing if we can't find a KMS driver, we
+    allow X to fallback to trying the VESA driver -- rather than failing.
+    
+    The initial idea for this was by Julien Cristau.
+    
+    Reported-by: Julien Cristau <jcristau@debian.org>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 97fea2fd0c36d78f4e940b124a7886c4a3f3dfc7
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Oct 2 10:05:59 2010 +0100
+
+    legacy/i810: Remove pVisualConfigs
+    
+    Completely unused pulling in an undesired glxproto dependency.
+    
+    Reported-by: Cyril Brulebois <kibi@debian.org>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=30554
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8784c4f5a1524fb979b00c7ce7981cbc1dcf0ec0
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Oct 1 21:40:36 2010 +0100
+
+    video: Disable TextureAdaptor for Sandybridge
+    
+    The acceleration code does not yet exist, so we try to use gen4 shaders
+    which hangs the chip and makes everybody upset. Disable it until such a
+    time as support is written for Sandybridge XVideo.
+    
+    Reported-by: Matthias Hopf <mhopf@suse.de>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=30500
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 345c963e443ec325f1ff530512a356ddb318ff70
+Author: Zhenyu Wang <zhenyuw@linux.intel.com>
+Date:   Thu Sep 30 10:58:49 2010 +0800
+
+    Always use tiling on Sandybridge
+    
+    Sandybridge requires kind of buffer must be tiling, like depth.
+    And we would or have all tiling cases handled fine. So not allow
+    user to turn off tiling on Sandybridge+ may be fine.
+    
+    Signed-off-by: Zhenyu Wang <zhenyuw@linux.intel.com>
 
 commit d4c013cb9d92d2959c9a98eca20e43ab14ae22e3
 Author: Carl Worth <cworth@cworth.org>
