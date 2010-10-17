@@ -262,33 +262,6 @@ static void PreInitCleanup(ScrnInfoPtr scrn)
 	scrn->driverPrivate = NULL;
 }
 
-/*
- * DRM mode setting Linux only at this point... later on we could
- * add a wrapper here.
- */
-static Bool intel_kernel_mode_enabled(ScrnInfoPtr scrn)
-{
-	struct pci_device *dev;
-	char id[20];
-	int ret;
-
-	dev = xf86GetPciInfoForEntity(xf86GetEntityInfo(scrn->entityList[0])->index);
-	snprintf(id, sizeof(id),
-		 "pci:%04x:%02x:%02x.%d",
-		 dev->domain, dev->bus, dev->dev, dev->func);
-
-	ret = drmCheckModesettingSupported(id);
-	if (ret) {
-		if (xf86LoadKernelModule("i915"))
-			ret = drmCheckModesettingSupported(id);
-	}
-	/* Be nice to the user and load fbcon too */
-	if (!ret)
-		(void)xf86LoadKernelModule("fbcon");
-
-	return ret == 0;
-}
-
 static void intel_check_chipset_option(ScrnInfoPtr scrn)
 {
 	intel_screen_private *intel = intel_get_screen_private(scrn);
@@ -513,17 +486,9 @@ static Bool I830PreInit(ScrnInfoPtr scrn, int flags)
 	EntityInfoPtr pEnt;
 	int flags24;
 	Gamma zeros = { 0.0, 0.0, 0.0 };
-	int drm_mode_setting;
 
 	if (scrn->numEntities != 1)
 		return FALSE;
-
-	drm_mode_setting = intel_kernel_mode_enabled(scrn);
-	if (!drm_mode_setting) {
-		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
-			   "No kernel modesetting driver detected.\n");
-		return FALSE;
-	}
 
 	pEnt = xf86GetEntityInfo(scrn->entityList[0]);
 
@@ -595,22 +560,27 @@ static Bool I830PreInit(ScrnInfoPtr scrn, int flags)
 
 	intel->force_fallback =
 		drmCommandNone(intel->drmSubFD, DRM_I915_GEM_THROTTLE) != 0;
-	intel->use_shadow = FALSE;
 
 	/* Enable tiling by default */
 	intel->tiling = TRUE;
 
 	/* Allow user override if they set a value */
-	if (xf86IsOptionSet(intel->Options, OPTION_TILING)) {
+	if (!ALWAYS_TILING(intel) && xf86IsOptionSet(intel->Options, OPTION_TILING)) {
 		if (xf86ReturnOptValBool(intel->Options, OPTION_TILING, FALSE))
 			intel->tiling = TRUE;
 		else
 			intel->tiling = FALSE;
 	}
 
+	intel->use_shadow = FALSE;
+	if (IS_GEN6(intel))
+		intel->use_shadow = TRUE;
+
 	if (xf86IsOptionSet(intel->Options, OPTION_SHADOW)) {
-		if (xf86ReturnOptValBool(intel->Options, OPTION_SHADOW, FALSE))
-			intel->force_fallback = intel->use_shadow = TRUE;
+		intel->use_shadow =
+			xf86ReturnOptValBool(intel->Options,
+					     OPTION_SHADOW,
+					     FALSE);
 	}
 
 	if (intel->use_shadow) {
@@ -698,12 +668,10 @@ void IntelEmitInvarientState(ScrnInfoPtr scrn)
 	if (intel->last_3d != LAST_3D_OTHER)
 		return;
 
-	if (!IS_I965G(intel)) {
-		if (IS_I9XX(intel))
-			I915EmitInvarientState(scrn);
-		else
-			I830EmitInvarientState(scrn);
-	}
+	if (IS_GEN2(intel))
+		I830EmitInvarientState(scrn);
+	else if IS_GEN3(intel)
+		I915EmitInvarientState(scrn);
 }
 
 static void
@@ -846,7 +814,7 @@ I830ScreenInit(int scrnIndex, ScreenPtr screen, int argc, char **argv)
 	MessageType from;
 #endif
 	struct pci_device *const device = intel->PciInfo;
-	int fb_bar = IS_I9XX(intel) ? 2 : 0;
+	int fb_bar = IS_GEN2(intel) ? 0 : 2;
 
 	/*
 	 * The "VideoRam" config file parameter specifies the maximum amount of
@@ -902,7 +870,7 @@ I830ScreenInit(int scrnIndex, ScreenPtr screen, int argc, char **argv)
 
 	intel_batch_init(scrn);
 
-	if (IS_I965G(intel))
+	if (INTEL_INFO(intel)->gen >= 40)
 		gen4_render_state_init(scrn);
 
 	miClearVisualTypes();
@@ -1002,7 +970,7 @@ I830ScreenInit(int scrnIndex, ScreenPtr screen, int argc, char **argv)
 	xf86DPMSInit(screen, xf86DPMSSet, 0);
 
 #ifdef INTEL_XVMC
-	if (IS_I965G(intel))
+	if (INTEL_INFO(intel)->gen >= 40)
 		intel->XvMCEnabled = TRUE;
 	from = ((intel->directRenderingType == DRI_DRI2) &&
 		xf86GetOptValBool(intel->Options, OPTION_XVMC,
@@ -1145,10 +1113,7 @@ static Bool I830CloseScreen(int scrnIndex, ScreenPtr screen)
 	}
 
 	if (intel->shadow_buffer) {
-		if (IS_I8XX(intel))
-			drm_intel_bo_unreference(intel->shadow_buffer);
-		else
-			free(intel->shadow_buffer);
+		free(intel->shadow_buffer);
 		intel->shadow_buffer = NULL;
 	}
 
@@ -1161,7 +1126,7 @@ static Bool I830CloseScreen(int scrnIndex, ScreenPtr screen)
 
 	intel_batch_teardown(scrn);
 
-	if (IS_I965G(intel))
+	if (INTEL_INFO(intel)->gen >= 40)
 		gen4_render_state_cleanup(scrn);
 
 	xf86_cursors_fini(screen);
