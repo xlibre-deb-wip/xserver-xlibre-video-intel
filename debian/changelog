@@ -1,6 +1,10 @@
 xserver-xorg-video-intel (2:2.13.0+git20101017.33133a1d-1) UNRELEASED; urgency=low
 
   * New upstream snapshot.
+  * Lower build-dep on libdrm-dev from 2.4.22 to 2.4.21-1~squeeze3 since
+    the latter contains the needed bits, making it possible to build
+    within unstable.
+  * Add patch to make configure.ac happy: 10-libdrm-from-sid-is-ok.diff
 
  -- Cyril Brulebois <kibi@debian.org>  Sun, 17 Oct 2010 19:14:04 +0200
 
