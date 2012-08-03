@@ -1,0 +1,33 @@
+From 1ced4f1ddcf30b518e1760c7aa4a5ed4f934b9f5 Mon Sep 17 00:00:00 2001
+From: Chris Wilson <chris@chris-wilson.co.uk>
+Date: Thu, 26 Jul 2012 09:50:31 +0000
+Subject: Reduce maximum thread count for IVB GT1 to avoid spontaneous combustion
+
+Somewhere along the way it seems that IVB GT1 was reduced to only allow
+a maximum of 48 threads, as revealed in the lastest bspecs.
+
+Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=52473
+Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+---
+--- a/src/i965_render.c
++++ b/src/i965_render.c
+@@ -2645,7 +2645,7 @@
+ 	OUT_BATCH((1 << GEN7_PS_SAMPLER_COUNT_SHIFT) |
+ 		  (num_surfaces << GEN7_PS_BINDING_TABLE_ENTRY_COUNT_SHIFT));
+ 	OUT_BATCH(0); /* scratch space base offset */
+-	OUT_BATCH(((86 - 1) << GEN7_PS_MAX_THREADS_SHIFT) |
++	OUT_BATCH(((48 - 1) << GEN7_PS_MAX_THREADS_SHIFT) |
+ 		  GEN7_PS_ATTRIBUTE_ENABLE |
+ 		  GEN7_PS_16_DISPATCH_ENABLE);
+ 	OUT_BATCH((6 << GEN7_PS_DISPATCH_START_GRF_SHIFT_0));
+--- a/src/i965_video.c
++++ b/src/i965_video.c
+@@ -1724,7 +1724,7 @@
+ 
+ 	OUT_BATCH(0); /* scratch space base offset */
+ 	OUT_BATCH(
+-		((86 - 1) << GEN7_PS_MAX_THREADS_SHIFT) |
++		((48 - 1) << GEN7_PS_MAX_THREADS_SHIFT) |
+ 		GEN7_PS_ATTRIBUTE_ENABLE |
+ 		GEN7_PS_16_DISPATCH_ENABLE);
+ 	OUT_BATCH(
