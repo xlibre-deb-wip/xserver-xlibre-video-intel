@@ -1,3 +1,11 @@
+xserver-xorg-video-intel (2:2.17.0-1ubuntu4.1.1) UNRELEASED; urgency=low
+
+  * Add 106-uxa-only-consider-attached-outputs-valid.patch, two upstream
+    commits merged together that fix GPU hangs on resume, due to outputs
+    getting marked valid before the kernel reports them attached.
+
+ -- Timo Aaltonen <tjaalton@ubuntu.com>  Fri, 24 Aug 2012 13:07:41 +0300
+
 xserver-xorg-video-intel (2:2.17.0-1ubuntu4.1) precise-proposed; urgency=low
 
   * Add 105_reduce_ivb_gt1_max_thread_count.patch, backported commit

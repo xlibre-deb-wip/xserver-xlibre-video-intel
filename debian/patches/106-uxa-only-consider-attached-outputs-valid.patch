@@ -1,0 +1,106 @@
+commit 3f3bde4f0c72f6f31aae322bcdc20b95eade6631
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 24 11:58:46 2012 +0100
+
+    uxa: Only consider an output valid if the kernel reports it attached
+    
+    Reported-by: Kyle Hill <kyle.hill@tacomafia.net>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=50078
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c4eb5528a456b65c673f7c984d14a622ac67cdca
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 5 16:04:16 2012 +0100
+
+    uxa: Check for DPMS off before scheduling a WAIT_ON_EVENT
+    
+    Regression from commit 3f3bde4f0c72f6f31aae322bcdc20b95eade6631
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Thu May 24 11:58:46 2012 +0100
+    
+        uxa: Only consider an output valid if the kernel reports it attached
+    
+    When backporting from SNA, a key difference that UXA does not track DPMS
+    state in its enabled flag and that a DPMS off CRTC is still bound to the
+    fb. So we do need to rescan the outputs and check that we have a
+    connector enabled *and* the pipe is running prior to emitting a scanline
+    wait.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=50668
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+--- a/src/intel_display.c
++++ b/src/intel_display.c
+@@ -1716,6 +1716,43 @@
+ 	return intel_crtc->pipe;
+ }
+ 
++Bool intel_crtc_on(xf86CrtcPtr crtc)
++{
++       ScrnInfoPtr scrn = crtc->scrn;
++       xf86CrtcConfigPtr xf86_config = XF86_CRTC_CONFIG_PTR(crtc->scrn);
++       struct intel_crtc *intel_crtc = crtc->driver_private;
++       drmModeCrtcPtr drm_crtc;
++       Bool ret;
++       int i;
++
++       if (!crtc->enabled)
++               return FALSE;
++
++       /* Kernel manages CRTC status based on output config */
++       ret = FALSE;
++       for (i = 0; i < xf86_config->num_output; i++) {
++               xf86OutputPtr output = xf86_config->output[i];
++               if (output->crtc == crtc &&
++                   intel_output_dpms_status(output) == DPMSModeOn) {
++                       ret = TRUE;
++                       break;
++               }
++       }
++       if (!ret)
++               return FALSE;
++
++       /* And finally check with the kernel that the fb is bound */
++       drm_crtc = drmModeGetCrtc(intel_crtc->mode->fd, crtc_id(intel_crtc));
++       if (drm_crtc == NULL)
++               return FALSE;
++
++       ret = (drm_crtc->mode_valid &&
++              intel_crtc->mode->fb_id == drm_crtc->buffer_id);
++       free(drm_crtc);
++
++       return ret;
++}
++
+ static PixmapPtr
+ intel_create_pixmap_for_fbcon(ScrnInfoPtr scrn)
+ {
+--- a/src/intel_driver.c
++++ b/src/intel_driver.c
+@@ -789,26 +789,6 @@
+ 	return TRUE;
+ }
+ 
+-Bool intel_crtc_on(xf86CrtcPtr crtc)
+-{
+-	ScrnInfoPtr scrn = crtc->scrn;
+-	xf86CrtcConfigPtr xf86_config = XF86_CRTC_CONFIG_PTR(scrn);
+-	int i;
+-
+-	if (!crtc->enabled)
+-		return FALSE;
+-
+-	/* Kernel manages CRTC status based out output config */
+-	for (i = 0; i < xf86_config->num_output; i++) {
+-		xf86OutputPtr output = xf86_config->output[i];
+-		if (output->crtc == crtc &&
+-		    intel_output_dpms_status(output) == DPMSModeOn)
+-			return TRUE;
+-	}
+-
+-	return FALSE;
+-}
+-
+ static void
+ intel_flush_callback(CallbackListPtr *list,
+ 		     pointer user_data, pointer call_data)
