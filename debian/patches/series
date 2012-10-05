@@ -6,3 +6,4 @@
 104_uxa_fix_gtt_mapping_limits.patch
 105_reduce_ivb_gt1_max_thread_count.patch
 106-uxa-only-consider-attached-outputs-valid.patch
+107-uxa-fix-pageflip-race.patch
