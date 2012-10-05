@@ -1,8 +1,11 @@
-xserver-xorg-video-intel (2:2.17.0-1ubuntu4.1.1) UNRELEASED; urgency=low
+xserver-xorg-video-intel (2:2.17.0-1ubuntu4.1.1) precise; urgency=low
 
   * Add 106-uxa-only-consider-attached-outputs-valid.patch, two upstream
     commits merged together that fix GPU hangs on resume, due to outputs
     getting marked valid before the kernel reports them attached.
+  * Replace 101_copy-fb.patch with the patch that went upstream, backported
+    to build against the older xserver. Needed for other backports.
+    - refreshed patch 104 to apply.
 
  -- Timo Aaltonen <tjaalton@ubuntu.com>  Fri, 24 Aug 2012 13:07:41 +0300
 

@@ -30,14 +30,12 @@ diff -Nurp patched/src/intel_display.c build/src/intel_display.c
 diff -Nurp patched/src/intel_driver.c build/src/intel_driver.c
 --- patched/src/intel_driver.c	2012-02-15 17:31:03.643780719 -0800
 +++ build/src/intel_driver.c	2012-02-15 17:28:59.439522179 -0800
-@@ -1164,8 +1164,6 @@ static Bool I830EnterVT(int scrnIndex, i
+@@ -1164,6 +1164,4 @@ static Bool I830EnterVT(int scrnIndex, i
  			   strerror(errno));
  	}
  
 -	intel_set_gem_max_sizes(scrn);
 -
- 	intel_copy_fb(scrn);
- 
  	if (!xf86SetDesiredModes(scrn))
 diff -Nurp patched/src/intel.h build/src/intel.h
 --- patched/src/intel.h	2012-02-15 17:31:03.643780719 -0800
