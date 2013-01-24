@@ -7,3 +7,4 @@
 105_reduce_ivb_gt1_max_thread_count.patch
 106-uxa-only-consider-attached-outputs-valid.patch
 107-uxa-fix-pageflip-race.patch
+108-Add-support-for-IVB-GT2-server.patch

@@ -1,3 +1,11 @@
+xserver-xorg-video-intel (2:2.17.0-1ubuntu4.3) precise-proposed; urgency=low
+
+  * Add 108-Add-support-for-IVB-GT2-server.patch: Backport a commit from a
+    later release that adds the Ivybridge Server GT2 PCI id used in newer
+    Xeon processors. (lp: #1091068)
+
+ -- Robert Hooker <sarvatt@ubuntu.com>  Mon, 17 Dec 2012 13:28:49 -0500
+
 xserver-xorg-video-intel (2:2.17.0-1ubuntu4.2) precise-proposed; urgency=low
 
   * Add 106-uxa-only-consider-attached-outputs-valid.patch, two upstream
