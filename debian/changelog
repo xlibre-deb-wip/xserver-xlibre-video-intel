@@ -1,3 +1,11 @@
+xserver-xorg-video-intel (2:2.20.9-0ubuntu2.1) quantal-proposed; urgency=low
+
+  * debian/xserver-xorg-video-intel.udev: Drop udev rule for gpu lockup
+    apport hook.  This hook is now provided by the xdiagnose package.
+    (LP: #997470)
+
+ -- Bryce Harrington <bryce@ubuntu.com>  Thu, 11 Apr 2013 13:24:19 -0700
+
 xserver-xorg-video-intel (2:2.20.9-0ubuntu2) quantal; urgency=low
 
   [ Maarten Lankhorst ]
