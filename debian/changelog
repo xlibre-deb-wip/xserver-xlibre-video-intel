@@ -1,3 +1,9 @@
+xserver-xorg-video-intel (2:2.21.6-0ubuntu5) UNRELEASED; urgency=low
+
+  * rules: Add --enable-valgrind again.
+
+ -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Thu, 23 May 2013 09:24:06 +0200
+
 xserver-xorg-video-intel (2:2.21.6-0ubuntu4) raring-proposed; urgency=low
 
   [Chris Arges]
