@@ -1,11 +1,11 @@
-xserver-xorg-video-intel (2:2.21.9-0ubuntu1) UNRELEASED; urgency=low
+xserver-xorg-video-intel (2:2.21.9-0ubuntu1) saucy; urgency=low
 
   * Merge from unreleased debian git, remaining changes:
     - Use SNA by default.
   * Add support for haswell graphics. (LP: #1175533)
   * Fix crash in xserver when using the unity dash. (LP: #118123)
 
- -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Thu, 23 May 2013 09:44:44 +0200
+ -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Thu, 06 Jun 2013 15:05:00 +0200
 
 xserver-xorg-video-intel (2:2.21.9-1) UNRELEASED; urgency=low
 
