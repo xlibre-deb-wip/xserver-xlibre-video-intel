@@ -1,4 +1,4 @@
-xserver-xorg-video-intel (2:2.21.7-1) UNRELEASED; urgency=low
+xserver-xorg-video-intel (2:2.21.9-1) UNRELEASED; urgency=low
 
   [ Timo Aaltonen ]
   * New upstream release.
