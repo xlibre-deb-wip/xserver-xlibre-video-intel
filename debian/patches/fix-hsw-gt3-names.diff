@@ -1,0 +1,217 @@
+commit ee96de8b1e7e4a305ee31c0ece1d9d38df8328f9
+Author: Rodrigo Vivi <rodrigo.vivi@gmail.com>
+Date:   Mon May 13 17:56:29 2013 -0300
+
+    Fix Haswell GT3 names.
+    
+    When publishing first HSW ids we weren't allowed to use "GT3" codname.
+    But this is the correct codname and Mesa is using it already.
+    So to avoid people getting confused why in Mesa it is called GT3 and here
+    it is called GT2_PLUS let's fix this name in a standard and correct way.
+    
+    Signed-off-by: Rodrigo Vivi <rodrigo.vivi@gmail.com>
+
+diff --git a/src/intel_driver.h b/src/intel_driver.h
+index d109c7e..4b05e25 100644
+--- a/src/intel_driver.h
++++ b/src/intel_driver.h
+@@ -194,55 +194,55 @@
+ 
+ #define PCI_CHIP_HASWELL_D_GT1		0x0402
+ #define PCI_CHIP_HASWELL_D_GT2		0x0412
+-#define PCI_CHIP_HASWELL_D_GT2_PLUS	0x0422
++#define PCI_CHIP_HASWELL_D_GT3		0x0422
+ #define PCI_CHIP_HASWELL_M_GT1		0x0406
+ #define PCI_CHIP_HASWELL_M_GT2		0x0416
+-#define PCI_CHIP_HASWELL_M_GT2_PLUS	0x0426
++#define PCI_CHIP_HASWELL_M_GT3		0x0426
+ #define PCI_CHIP_HASWELL_S_GT1		0x040A
+ #define PCI_CHIP_HASWELL_S_GT2		0x041A
+-#define PCI_CHIP_HASWELL_S_GT2_PLUS	0x042A
++#define PCI_CHIP_HASWELL_S_GT3		0x042A
+ #define PCI_CHIP_HASWELL_GT1_RSVD		0x040E
+ #define PCI_CHIP_HASWELL_GT2_RSVD		0x041E
+-#define PCI_CHIP_HASWELL_GT2_PLUS_RSVD		0x042E
++#define PCI_CHIP_HASWELL_GT3_RSVD		0x042E
+ 
+ #define PCI_CHIP_HASWELL_SDV_D_GT1	0x0C02
+ #define PCI_CHIP_HASWELL_SDV_D_GT2	0x0C12
+-#define PCI_CHIP_HASWELL_SDV_D_GT2_PLUS	0x0C22
++#define PCI_CHIP_HASWELL_SDV_D_GT3	0x0C22
+ #define PCI_CHIP_HASWELL_SDV_M_GT1	0x0C06
+ #define PCI_CHIP_HASWELL_SDV_M_GT2	0x0C16
+-#define PCI_CHIP_HASWELL_SDV_M_GT2_PLUS	0x0C26
++#define PCI_CHIP_HASWELL_SDV_M_GT3	0x0C26
+ #define PCI_CHIP_HASWELL_SDV_S_GT1	0x0C0A
+ #define PCI_CHIP_HASWELL_SDV_S_GT2	0x0C1A
+-#define PCI_CHIP_HASWELL_SDV_S_GT2_PLUS	0x0C2A
++#define PCI_CHIP_HASWELL_SDV_S_GT3	0x0C2A
+ #define PCI_CHIP_HASWELL_SDV_GT1_RSVD		0x0C0E
+ #define PCI_CHIP_HASWELL_SDV_GT2_RSVD		0x0C1E
+-#define PCI_CHIP_HASWELL_SDV_GT2_PLUS_RSVD	0x0C2E
++#define PCI_CHIP_HASWELL_SDV_GT3_RSVD	0x0C2E
+ 
+ #define PCI_CHIP_HASWELL_ULT_D_GT1	0x0A02
+ #define PCI_CHIP_HASWELL_ULT_D_GT2	0x0A12
+-#define PCI_CHIP_HASWELL_ULT_D_GT2_PLUS	0x0A22
++#define PCI_CHIP_HASWELL_ULT_D_GT3	0x0A22
+ #define PCI_CHIP_HASWELL_ULT_M_GT1	0x0A06
+ #define PCI_CHIP_HASWELL_ULT_M_GT2	0x0A16
+-#define PCI_CHIP_HASWELL_ULT_M_GT2_PLUS	0x0A26
++#define PCI_CHIP_HASWELL_ULT_M_GT3	0x0A26
+ #define PCI_CHIP_HASWELL_ULT_S_GT1	0x0A0A
+ #define PCI_CHIP_HASWELL_ULT_S_GT2	0x0A1A
+-#define PCI_CHIP_HASWELL_ULT_S_GT2_PLUS	0x0A2A
++#define PCI_CHIP_HASWELL_ULT_S_GT3	0x0A2A
+ #define PCI_CHIP_HASWELL_ULT_GT1_RSVD		0x0A0E
+ #define PCI_CHIP_HASWELL_ULT_GT2_RSVD		0x0A1E
+-#define PCI_CHIP_HASWELL_ULT_GT2_PLUS_RSVD	0x0A2E
++#define PCI_CHIP_HASWELL_ULT_GT3_RSVD		0x0A2E
+ 
+ #define PCI_CHIP_HASWELL_CRW_D_GT1	0x0D02
+ #define PCI_CHIP_HASWELL_CRW_D_GT2	0x0D12
+-#define PCI_CHIP_HASWELL_CRW_D_GT2_PLUS	0x0D22
++#define PCI_CHIP_HASWELL_CRW_D_GT3	0x0D22
+ #define PCI_CHIP_HASWELL_CRW_M_GT1	0x0D06
+ #define PCI_CHIP_HASWELL_CRW_M_GT2	0x0D16
+-#define PCI_CHIP_HASWELL_CRW_M_GT2_PLUS	0x0D26
++#define PCI_CHIP_HASWELL_CRW_M_GT3	0x0D26
+ #define PCI_CHIP_HASWELL_CRW_S_GT1	0x0D0A
+ #define PCI_CHIP_HASWELL_CRW_S_GT2	0x0D1A
+-#define PCI_CHIP_HASWELL_CRW_S_GT2_PLUS	0x0D2A
++#define PCI_CHIP_HASWELL_CRW_S_GT3	0x0D2A
+ #define PCI_CHIP_HASWELL_CRW_GT1_RSVD		0x0D0E
+ #define PCI_CHIP_HASWELL_CRW_GT2_RSVD		0x0D1E
+-#define PCI_CHIP_HASWELL_CRW_GT2_PLUS_RSVD	0x0D2E
++#define PCI_CHIP_HASWELL_CRW_GT3_RSVD		0x0D2E
+ 
+ #define PCI_CHIP_VALLEYVIEW_PO		0x0f30
+ #define PCI_CHIP_VALLEYVIEW_1		0x0f31
+diff --git a/src/intel_module.c b/src/intel_module.c
+index 73cfa97..6439eea 100644
+--- a/src/intel_module.c
++++ b/src/intel_module.c
+@@ -162,40 +162,40 @@ static const SymTabRec intel_chipsets[] = {
+ 	{PCI_CHIP_IVYBRIDGE_S_GT2,		"Ivybridge Server (GT2)" },
+ 	{PCI_CHIP_HASWELL_D_GT1,		"Haswell Desktop (GT1)" },
+ 	{PCI_CHIP_HASWELL_D_GT2,		"Haswell Desktop (GT2)" },
+-	{PCI_CHIP_HASWELL_D_GT2_PLUS,		"Haswell Desktop (GT2+)" },
++	{PCI_CHIP_HASWELL_D_GT3,		"Haswell Desktop (GT3)" },
+ 	{PCI_CHIP_HASWELL_M_GT1,		"Haswell Mobile (GT1)" },
+ 	{PCI_CHIP_HASWELL_M_GT2,		"Haswell Mobile (GT2)" },
+-	{PCI_CHIP_HASWELL_M_GT2_PLUS,		"Haswell Mobile (GT2+)" },
++	{PCI_CHIP_HASWELL_M_GT3,		"Haswell Mobile (GT3)" },
+ 	{PCI_CHIP_HASWELL_S_GT1,		"Haswell Server (GT1)" },
+ 	{PCI_CHIP_HASWELL_S_GT2,		"Haswell Server (GT2)" },
+-	{PCI_CHIP_HASWELL_S_GT2_PLUS,		"Haswell Server (GT2+)" },
++	{PCI_CHIP_HASWELL_S_GT3,		"Haswell Server (GT3)" },
+ 	{PCI_CHIP_HASWELL_SDV_D_GT1,		"Haswell SDV Desktop (GT1)" },
+ 	{PCI_CHIP_HASWELL_SDV_D_GT2,		"Haswell SDV Desktop (GT2)" },
+-	{PCI_CHIP_HASWELL_SDV_D_GT2_PLUS,	"Haswell SDV Desktop (GT2+)" },
++	{PCI_CHIP_HASWELL_SDV_D_GT3,		"Haswell SDV Desktop (GT3)" },
+ 	{PCI_CHIP_HASWELL_SDV_M_GT1,		"Haswell SDV Mobile (GT1)" },
+ 	{PCI_CHIP_HASWELL_SDV_M_GT2,		"Haswell SDV Mobile (GT2)" },
+-	{PCI_CHIP_HASWELL_SDV_M_GT2_PLUS,	"Haswell SDV Mobile (GT2+)" },
++	{PCI_CHIP_HASWELL_SDV_M_GT3,		"Haswell SDV Mobile (GT3)" },
+ 	{PCI_CHIP_HASWELL_SDV_S_GT1,		"Haswell SDV Server (GT1)" },
+ 	{PCI_CHIP_HASWELL_SDV_S_GT2,		"Haswell SDV Server (GT2)" },
+-	{PCI_CHIP_HASWELL_SDV_S_GT2_PLUS,	"Haswell SDV Server (GT2+)" },
++	{PCI_CHIP_HASWELL_SDV_S_GT3,		"Haswell SDV Server (GT3)" },
+ 	{PCI_CHIP_HASWELL_ULT_D_GT1,		"Haswell ULT Desktop (GT1)" },
+ 	{PCI_CHIP_HASWELL_ULT_D_GT2,		"Haswell ULT Desktop (GT2)" },
+-	{PCI_CHIP_HASWELL_ULT_D_GT2_PLUS,	"Haswell ULT Desktop (GT2+)" },
++	{PCI_CHIP_HASWELL_ULT_D_GT3,		"Haswell ULT Desktop (GT3)" },
+ 	{PCI_CHIP_HASWELL_ULT_M_GT1,		"Haswell ULT Mobile (GT1)" },
+ 	{PCI_CHIP_HASWELL_ULT_M_GT2,		"Haswell ULT Mobile (GT2)" },
+-	{PCI_CHIP_HASWELL_ULT_M_GT2_PLUS,	"Haswell ULT Mobile (GT2+)" },
++	{PCI_CHIP_HASWELL_ULT_M_GT3,		"Haswell ULT Mobile (GT3)" },
+ 	{PCI_CHIP_HASWELL_ULT_S_GT1,		"Haswell ULT Server (GT1)" },
+ 	{PCI_CHIP_HASWELL_ULT_S_GT2,		"Haswell ULT Server (GT2)" },
+-	{PCI_CHIP_HASWELL_ULT_S_GT2_PLUS,	"Haswell ULT Server (GT2+)" },
++	{PCI_CHIP_HASWELL_ULT_S_GT3,		"Haswell ULT Server (GT3)" },
+ 	{PCI_CHIP_HASWELL_CRW_D_GT1,		"Haswell CRW Desktop (GT1)" },
+ 	{PCI_CHIP_HASWELL_CRW_D_GT2,		"Haswell CRW Desktop (GT2)" },
+-	{PCI_CHIP_HASWELL_CRW_D_GT2_PLUS,	"Haswell CRW Desktop (GT2+)" },
++	{PCI_CHIP_HASWELL_CRW_D_GT3,		"Haswell CRW Desktop (GT3)" },
+ 	{PCI_CHIP_HASWELL_CRW_M_GT1,		"Haswell CRW Mobile (GT1)" },
+ 	{PCI_CHIP_HASWELL_CRW_M_GT2,		"Haswell CRW Mobile (GT2)" },
+-	{PCI_CHIP_HASWELL_CRW_M_GT2_PLUS,	"Haswell CRW Mobile (GT2+)" },
++	{PCI_CHIP_HASWELL_CRW_M_GT3,		"Haswell CRW Mobile (GT3)" },
+ 	{PCI_CHIP_HASWELL_CRW_S_GT1,		"Haswell CRW Server (GT1)" },
+ 	{PCI_CHIP_HASWELL_CRW_S_GT2,		"Haswell CRW Server (GT2)" },
+-	{PCI_CHIP_HASWELL_CRW_S_GT2_PLUS,	"Haswell CRW Server (GT2+)" },
++	{PCI_CHIP_HASWELL_CRW_S_GT3,		"Haswell CRW Server (GT3)" },
+ 	{PCI_CHIP_VALLEYVIEW_PO,		"ValleyView PO board" },
+ 	{-1,					NULL}
+ };
+@@ -270,54 +270,54 @@ static const struct pci_id_match intel_device_match[] = {
+ 
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_D_GT1, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_D_GT2, &intel_haswell_info ),
+-	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_D_GT2_PLUS, &intel_haswell_info ),
++	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_D_GT3, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_M_GT1, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_M_GT2, &intel_haswell_info ),
+-	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_M_GT2_PLUS, &intel_haswell_info ),
++	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_M_GT3, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_S_GT1, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_S_GT2, &intel_haswell_info ),
+-	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_S_GT2_PLUS, &intel_haswell_info ),
++	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_S_GT3, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_GT1_RSVD, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_GT2_RSVD, &intel_haswell_info ),
+-	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_GT2_PLUS_RSVD, &intel_haswell_info ),
++	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_GT3_RSVD, &intel_haswell_info ),
+ 
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_SDV_D_GT1, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_SDV_D_GT2, &intel_haswell_info ),
+-	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_SDV_D_GT2_PLUS, &intel_haswell_info ),
++	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_SDV_D_GT3, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_SDV_M_GT1, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_SDV_M_GT2, &intel_haswell_info ),
+-	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_SDV_M_GT2_PLUS, &intel_haswell_info ),
++	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_SDV_M_GT3, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_SDV_S_GT1, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_SDV_S_GT2, &intel_haswell_info ),
+-	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_SDV_S_GT2_PLUS, &intel_haswell_info ),
++	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_SDV_S_GT3, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_SDV_GT1_RSVD, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_SDV_GT2_RSVD, &intel_haswell_info ),
+-	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_SDV_GT2_PLUS_RSVD, &intel_haswell_info ),
++	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_SDV_GT3_RSVD, &intel_haswell_info ),
+ 
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_ULT_D_GT1, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_ULT_D_GT2, &intel_haswell_info ),
+-	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_ULT_D_GT2_PLUS, &intel_haswell_info ),
++	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_ULT_D_GT3, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_ULT_M_GT1, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_ULT_M_GT2, &intel_haswell_info ),
+-	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_ULT_M_GT2_PLUS, &intel_haswell_info ),
++	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_ULT_M_GT3, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_ULT_S_GT1, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_ULT_S_GT2, &intel_haswell_info ),
+-	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_ULT_S_GT2_PLUS, &intel_haswell_info ),
++	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_ULT_S_GT3, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_ULT_GT1_RSVD, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_ULT_GT2_RSVD, &intel_haswell_info ),
+-	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_ULT_GT2_PLUS_RSVD, &intel_haswell_info ),
++	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_ULT_GT3_RSVD, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_CRW_D_GT1, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_CRW_D_GT2, &intel_haswell_info ),
+-	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_CRW_D_GT2_PLUS, &intel_haswell_info ),
++	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_CRW_D_GT3, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_CRW_M_GT1, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_CRW_M_GT2, &intel_haswell_info ),
+-	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_CRW_M_GT2_PLUS, &intel_haswell_info ),
++	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_CRW_M_GT3, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_CRW_S_GT1, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_CRW_S_GT2, &intel_haswell_info ),
+-	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_CRW_S_GT2_PLUS, &intel_haswell_info ),
++	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_CRW_S_GT3, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_CRW_GT1_RSVD, &intel_haswell_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_CRW_GT2_RSVD, &intel_haswell_info ),
+-	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_CRW_GT2_PLUS_RSVD, &intel_haswell_info ),
++	INTEL_DEVICE_MATCH (PCI_CHIP_HASWELL_CRW_GT3_RSVD, &intel_haswell_info ),
+ 
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_VALLEYVIEW_PO, &intel_valleyview_info ),
+ 	INTEL_DEVICE_MATCH (PCI_CHIP_VALLEYVIEW_1, &intel_valleyview_info ),
