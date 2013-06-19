@@ -1,3 +1,16 @@
+xserver-xorg-video-intel (2:2.20.9-0ubuntu2.2) UNRELEASED; urgency=low
+
+  * Added patches to add/fix Haswell pci-id's (LP: #1175533)
+    - add-vlv-ids.diff
+    - fix-hsw-crw-ids.diff
+    - add-reserved-hsw-ids.diff
+    - fix-hsw-gt3-names.diff
+    - add-more-reserved-hsw-ids.diff
+    - add-known-hsw-names.diff
+    - add-more-correct-hsw-names.diff
+
+ -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Wed, 19 Jun 2013 11:12:48 +0200
+
 xserver-xorg-video-intel (2:2.20.9-0ubuntu2.1) quantal-proposed; urgency=low
 
   * debian/xserver-xorg-video-intel.udev: Drop udev rule for gpu lockup

@@ -1,1 +1,8 @@
 fix-glamor-check.diff
+add-vlv-ids.diff
+fix-hsw-crw-ids.diff
+add-reserved-hsw-ids.diff
+fix-hsw-gt3-names.diff
+add-more-reserved-hsw-ids.diff
+add-known-hsw-names.diff
+add-more-correct-hsw-names.diff
