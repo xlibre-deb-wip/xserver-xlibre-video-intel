@@ -1,2 +1,7 @@
 0002-Update-manpage-for-new-accelmethod-option.patch
 sna-flush-scanout-cache-after-resizing.patch
+add-reserved-hsw-ids.diff
+fix-hsw-gt3-names.diff
+add-more-reserved-hsw-ids.diff
+add-known-hsw-names.diff
+add-more-correct-hsw-names.diff
