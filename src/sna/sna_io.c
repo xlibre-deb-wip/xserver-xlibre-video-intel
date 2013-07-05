@@ -53,6 +53,52 @@ static inline bool must_tile(struct sna *sna, int width, int height)
 		upload_too_large(sna, width, height));
 }
 
+static bool bo_inplace_tiled(struct kgem *kgem, struct kgem_bo *bo, bool write)
+{
+	if (bo->tiling != I915_TILING_X)
+		return false;
+
+	return kgem_bo_can_map__cpu(kgem, bo, write);
+}
+
+static bool download_inplace__tiled(struct kgem *kgem, struct kgem_bo *bo)
+{
+	if (!kgem->memcpy_from_tiled_x)
+		return false;
+
+	return bo_inplace_tiled(kgem, bo, false);
+}
+
+static bool
+read_boxes_inplace__tiled(struct kgem *kgem,
+			  struct kgem_bo *bo, int16_t src_dx, int16_t src_dy,
+			  PixmapPtr pixmap, int16_t dst_dx, int16_t dst_dy,
+			  const BoxRec *box, int n)
+{
+	int bpp = pixmap->drawable.bitsPerPixel;
+	void *src, *dst = pixmap->devPrivate.ptr;
+	int src_pitch = bo->pitch;
+	int dst_pitch = pixmap->devKind;
+
+	assert(bo->tiling == I915_TILING_X);
+
+	src = __kgem_bo_map__cpu(kgem, bo);
+	if (src == NULL)
+		return false;
+
+	kgem_bo_sync__cpu_full(kgem, bo, 0);
+	do {
+		memcpy_from_tiled_x(kgem, src, dst, bpp, src_pitch, dst_pitch,
+				  box->x1 + src_dx, box->y1 + src_dy,
+				  box->x1 + dst_dx, box->y1 + dst_dy,
+				  box->x2 - box->x1, box->y2 - box->y1);
+		box++;
+	} while (--n);
+	__kgem_bo_unmap__cpu(kgem, bo, src);
+
+	return true;
+}
+
 static void read_boxes_inplace(struct kgem *kgem,
 			       struct kgem_bo *bo, int16_t src_dx, int16_t src_dy,
 			       PixmapPtr pixmap, int16_t dst_dx, int16_t dst_dy,
@@ -62,6 +108,12 @@ static void read_boxes_inplace(struct kgem *kgem,
 	void *src, *dst = pixmap->devPrivate.ptr;
 	int src_pitch = bo->pitch;
 	int dst_pitch = pixmap->devKind;
+
+	if (download_inplace__tiled(kgem, bo) &&
+	    read_boxes_inplace__tiled(kgem, bo, src_dx, src_dy,
+				      pixmap, dst_dx, dst_dy,
+				      box, n))
+		return;
 
 	DBG(("%s x %d, tiling=%d\n", __FUNCTION__, n, bo->tiling));
 
@@ -74,6 +126,7 @@ static void read_boxes_inplace(struct kgem *kgem,
 	if (src == NULL)
 		return;
 
+	assert(src != dst);
 	do {
 		DBG(("%s: copying box (%d, %d), (%d, %d)\n",
 		     __FUNCTION__, box->x1, box->y1, box->x2, box->y2));
@@ -105,7 +158,7 @@ static bool download_inplace(struct kgem *kgem, struct kgem_bo *bo)
 	if (unlikely(kgem->wedged))
 		return true;
 
-	if (!kgem_bo_can_map(kgem, bo))
+	if (!kgem_bo_can_map(kgem, bo) && !download_inplace__tiled(kgem, bo))
 		return false;
 
 	if (FORCE_INPLACE)
@@ -114,7 +167,9 @@ static bool download_inplace(struct kgem *kgem, struct kgem_bo *bo)
 	if (kgem->can_blt_cpu && kgem->max_cpu_size)
 		return false;
 
-	return !__kgem_bo_is_busy(kgem, bo) || bo->tiling == I915_TILING_NONE;
+	return !__kgem_bo_is_busy(kgem, bo) ||
+		bo->tiling == I915_TILING_NONE ||
+		download_inplace__tiled(kgem, bo);
 }
 
 void sna_read_boxes(struct sna *sna,
@@ -476,25 +531,10 @@ fallback:
 
 static bool upload_inplace__tiled(struct kgem *kgem, struct kgem_bo *bo)
 {
-#ifndef __x86_64__
-	/* Between a register starved compiler emitting attrocious code
-	 * and the extra overhead in the kernel for managing the tight
-	 * 32-bit address space, unless we have a 64-bit system,
-	 * using memcpy_to_tiled_x() is extremely slow.
-	 */
-	return false;
-#endif
-
-	if (kgem->gen < 050) /* bit17 swizzling :( */
+	if (!kgem->memcpy_to_tiled_x)
 		return false;
 
-	if (bo->tiling != I915_TILING_X)
-		return false;
-
-	if (bo->scanout)
-		return false;
-
-	return bo->domain == DOMAIN_CPU || kgem->has_llc;
+	return bo_inplace_tiled(kgem, bo, true);
 }
 
 static bool
@@ -504,7 +544,6 @@ write_boxes_inplace__tiled(struct kgem *kgem,
                            const BoxRec *box, int n)
 {
 	uint8_t *dst;
-	int swizzle;
 
 	assert(bo->tiling == I915_TILING_X);
 
@@ -513,9 +552,8 @@ write_boxes_inplace__tiled(struct kgem *kgem,
 		return false;
 
 	kgem_bo_sync__cpu(kgem, bo);
-	swizzle = kgem_bo_get_swizzling(kgem, bo);
 	do {
-		memcpy_to_tiled_x(src, dst, bpp, swizzle, stride, bo->pitch,
+		memcpy_to_tiled_x(kgem, src, dst, bpp, stride, bo->pitch,
 				  box->x1 + src_dx, box->y1 + src_dy,
 				  box->x1 + dst_dx, box->y1 + dst_dy,
 				  box->x2 - box->x1, box->y2 - box->y1);
@@ -1392,48 +1430,44 @@ bool sna_replace(struct sna *sna,
 			bo = new_bo;
 	}
 
-	if (bo->tiling == I915_TILING_NONE && bo->pitch == stride) {
-		if (!kgem_bo_write(kgem, bo, src,
-				   (pixmap->drawable.height-1)*stride + pixmap->drawable.width*pixmap->drawable.bitsPerPixel/8))
-			goto err;
+	if (bo->tiling == I915_TILING_NONE && bo->pitch == stride &&
+	    kgem_bo_write(kgem, bo, src,
+			  (pixmap->drawable.height-1)*stride + pixmap->drawable.width*pixmap->drawable.bitsPerPixel/8))
+			goto done;
+
+	if (upload_inplace__tiled(kgem, bo)) {
+		BoxRec box;
+
+		box.x1 = box.y1 = 0;
+		box.x2 = pixmap->drawable.width;
+		box.y2 = pixmap->drawable.height;
+
+		if (write_boxes_inplace__tiled(kgem, src,
+					       stride, pixmap->drawable.bitsPerPixel, 0, 0,
+					       bo, 0, 0, &box, 1))
+			goto done;
+	}
+
+	if (kgem_bo_is_mappable(kgem, bo) &&
+	    (dst = kgem_bo_map(kgem, bo)) != NULL) {
+		memcpy_blt(src, dst, pixmap->drawable.bitsPerPixel,
+			   stride, bo->pitch,
+			   0, 0,
+			   0, 0,
+			   pixmap->drawable.width,
+			   pixmap->drawable.height);
 	} else {
-		if (upload_inplace__tiled(kgem, bo)) {
-			BoxRec box;
+		BoxRec box;
 
-			box.x1 = box.y1 = 0;
-			box.x2 = pixmap->drawable.width;
-			box.y2 = pixmap->drawable.height;
+		box.x1 = box.y1 = 0;
+		box.x2 = pixmap->drawable.width;
+		box.y2 = pixmap->drawable.height;
 
-			if (write_boxes_inplace__tiled(kgem, src,
-						       stride, pixmap->drawable.bitsPerPixel, 0, 0,
-						       bo, 0, 0, &box, 1))
-				goto done;
-		}
-
-		if (kgem_bo_is_mappable(kgem, bo)) {
-			dst = kgem_bo_map(kgem, bo);
-			if (!dst)
-				goto err;
-
-			memcpy_blt(src, dst, pixmap->drawable.bitsPerPixel,
-				   stride, bo->pitch,
-				   0, 0,
-				   0, 0,
-				   pixmap->drawable.width,
-				   pixmap->drawable.height);
-		} else {
-			BoxRec box;
-
-			box.x1 = box.y1 = 0;
-			box.x2 = pixmap->drawable.width;
-			box.y2 = pixmap->drawable.height;
-
-			if (!sna_write_boxes(sna, pixmap,
-					     bo, 0, 0,
-					     src, stride, 0, 0,
-					     &box, 1))
-				goto err;
-		}
+		if (!sna_write_boxes(sna, pixmap,
+				     bo, 0, 0,
+				     src, stride, 0, 0,
+				     &box, 1))
+			goto err;
 	}
 
 done:

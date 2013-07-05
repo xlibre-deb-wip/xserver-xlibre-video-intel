@@ -38,8 +38,8 @@
 
 static Atom xvBrightness, xvContrast, xvSyncToVblank;
 
-static const XvFormatRec Formats[] = {
-	{15, TrueColor}, {16, TrueColor}, {24, TrueColor}
+static XvFormatRec Formats[] = {
+	{15}, {16}, {24}
 };
 
 static const XvAttributeRec Attributes[] = {
@@ -192,7 +192,7 @@ sna_video_textured_put_image(ClientPtr client,
 	     drw_x, drw_y, drw_w, drw_h,
 	     format->id, width, height, sync));
 
-	DBG(("%s: region %d:(%d, %d), (%d, %d)\n", __FUNCTION__,
+	DBG(("%s: region %ld:(%d, %d), (%d, %d)\n", __FUNCTION__,
 	     RegionNumRects(&clip),
 	     clip.extents.x1, clip.extents.y1,
 	     clip.extents.x2, clip.extents.y2));
@@ -350,10 +350,14 @@ void sna_video_textured_setup(struct sna *sna, ScreenPtr screen)
 		return;
 
 	video = calloc(nports, sizeof(struct sna_video));
-	if ( video == NULL) {
+	adaptor->pPorts = calloc(nports, sizeof(XvPortRec));
+	if (video == NULL || adaptor->pPorts == NULL) {
+		free(video);
+		free(adaptor->pPorts);
 		sna->xv.num_adaptors--;
 		return;
 	}
+
 
 	adaptor->type = XvInputMask | XvImageMask;
 	adaptor->pScreen = screen;
@@ -367,8 +371,9 @@ void sna_video_textured_setup(struct sna *sna, ScreenPtr screen)
 	adaptor->pEncodings[0].height = sna->render.max_3d_size;
 	adaptor->pEncodings[0].rate.numerator = 1;
 	adaptor->pEncodings[0].rate.denominator = 1;
-	adaptor->nFormats = ARRAY_SIZE(Formats);
 	adaptor->pFormats = Formats;
+	adaptor->nFormats = sna_xv_fixup_formats(screen, Formats,
+						 ARRAY_SIZE(Formats));
 	adaptor->nAttributes = ARRAY_SIZE(Attributes);
 	adaptor->pAttributes = Attributes;
 	adaptor->nImages = ARRAY_SIZE(Images);
@@ -386,8 +391,6 @@ void sna_video_textured_setup(struct sna *sna, ScreenPtr screen)
 	adaptor->ddPutImage = sna_video_textured_put_image;
 	adaptor->ddQueryImageAttributes = sna_video_textured_query;
 
-	adaptor->nPorts = nports;
-	adaptor->pPorts = calloc(nports, sizeof(XvPortRec));
 	for (i = 0; i < nports; i++) {
 		struct sna_video *v = &video[i];
 		XvPortPtr port = &adaptor->pPorts[i];
@@ -396,7 +399,7 @@ void sna_video_textured_setup(struct sna *sna, ScreenPtr screen)
 		v->textured = true;
 		v->alignment = 4;
 		v->rotation = RR_Rotate_0;
-		v->SyncToVblank = 1;
+		v->SyncToVblank = (sna->flags & SNA_NO_WAIT) == 0;
 
 		RegionNull(&v->clip);
 
@@ -412,6 +415,7 @@ void sna_video_textured_setup(struct sna *sna, ScreenPtr screen)
 		port->devPriv.ptr = v;
 	}
 	adaptor->base_id = adaptor->pPorts[0].id;
+	adaptor->nPorts = nports;
 
 	xvBrightness = MAKE_ATOM("XV_BRIGHTNESS");
 	xvContrast = MAKE_ATOM("XV_CONTRAST");

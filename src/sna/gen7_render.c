@@ -1048,6 +1048,8 @@ gen7_emit_state(struct sna *sna,
 {
 	bool need_stall;
 
+	assert(op->dst.bo->exec);
+
 	if (sna->render_state.gen7.emit_flush)
 		gen7_emit_pipe_flush(sna);
 
@@ -1063,8 +1065,8 @@ gen7_emit_state(struct sna *sna,
 	if (kgem_bo_is_dirty(op->src.bo) || kgem_bo_is_dirty(op->mask.bo)) {
 		gen7_emit_pipe_invalidate(sna);
 		kgem_clear_dirty(&sna->kgem);
-		if (op->dst.bo->exec)
-			kgem_bo_mark_dirty(op->dst.bo);
+		assert(op->dst.bo->exec);
+		kgem_bo_mark_dirty(op->dst.bo);
 		need_stall = false;
 	}
 	if (need_stall)
@@ -1636,33 +1638,41 @@ gen7_composite_create_blend_state(struct sna_static_stream *stream)
 }
 
 static uint32_t gen7_bind_video_source(struct sna *sna,
-				       struct kgem_bo *src_bo,
-				       uint32_t src_offset,
-				       int src_width,
-				       int src_height,
-				       int src_pitch,
-				       uint32_t src_surf_format)
+				       struct kgem_bo *bo,
+				       uint32_t offset,
+				       int width,
+				       int height,
+				       int pitch,
+				       uint32_t format)
 {
-	struct gen7_surface_state *ss;
+	uint32_t *ss, bind;
 
-	sna->kgem.surface -= sizeof(struct gen7_surface_state) / sizeof(uint32_t);
+	bind = sna->kgem.surface -=
+		sizeof(struct gen7_surface_state) / sizeof(uint32_t);
 
-	ss = memset(sna->kgem.batch + sna->kgem.surface, 0, sizeof(*ss));
-	ss->ss0.surface_type = GEN7_SURFACE_2D;
-	ss->ss0.surface_format = src_surf_format;
+	assert(bo->tiling == I915_TILING_NONE);
 
-	ss->ss1.base_addr =
-		kgem_add_reloc(&sna->kgem,
-			       sna->kgem.surface + 1,
-			       src_bo,
+	ss = sna->kgem.batch + bind;
+	ss[0] = (GEN7_SURFACE_2D << GEN7_SURFACE_TYPE_SHIFT |
+		 format << GEN7_SURFACE_FORMAT_SHIFT);
+	ss[1] = kgem_add_reloc(&sna->kgem, bind + 1, bo,
 			       I915_GEM_DOMAIN_SAMPLER << 16,
-			       src_offset);
+			       offset);
+	ss[2] = ((width - 1)  << GEN7_SURFACE_WIDTH_SHIFT |
+		 (height - 1) << GEN7_SURFACE_HEIGHT_SHIFT);
+	ss[3] = (pitch - 1) << GEN7_SURFACE_PITCH_SHIFT;
+	ss[4] = 0;
+	ss[5] = 0;
+	ss[6] = 0;
+	ss[7] = 0;
+	if (sna->kgem.gen == 075)
+		ss[7] |= HSW_SURFACE_SWIZZLE(RED, GREEN, BLUE, ALPHA);
 
-	ss->ss2.width  = src_width - 1;
-	ss->ss2.height = src_height - 1;
-	ss->ss3.pitch  = src_pitch - 1;
+	DBG(("[%x] bind bo(handle=%d, addr=%d), format=%d, width=%d, height=%d, pitch=%d, offset=%d\n",
+	     bind, bo->handle, ss[1],
+	     format, width, height, pitch, offset));
 
-	return sna->kgem.surface * sizeof(uint32_t);
+	return bind * sizeof(uint32_t);
 }
 
 static void gen7_emit_video_state(struct sna *sna,
@@ -1751,7 +1761,7 @@ gen7_render_video(struct sna *sna,
 	unsigned filter;
 	BoxPtr box;
 
-	DBG(("%s: src=(%d, %d), dst=(%d, %d), %dx[(%d, %d), (%d, %d)...]\n",
+	DBG(("%s: src=(%d, %d), dst=(%d, %d), %ldx[(%d, %d), (%d, %d)...]\n",
 	     __FUNCTION__,
 	     src_width, src_height, dst_width, dst_height,
 	     REGION_NUM_RECTS(dstRegion),
@@ -1872,7 +1882,6 @@ gen7_render_video(struct sna *sna,
 		}
 		box++;
 	}
-	priv->clear = false;
 
 	gen4_vertex_flush(sna);
 	return true;
@@ -2129,7 +2138,7 @@ try_blt(struct sna *sna,
 }
 
 static bool
-check_gradient(PicturePtr picture)
+check_gradient(PicturePtr picture, bool precise)
 {
 	if (picture->pDrawable)
 		return false;
@@ -2139,7 +2148,7 @@ check_gradient(PicturePtr picture)
 	case SourcePictTypeLinear:
 		return false;
 	default:
-		return true;
+		return precise;
 	}
 }
 
@@ -2172,13 +2181,13 @@ source_is_busy(PixmapPtr pixmap)
 }
 
 static bool
-source_fallback(PicturePtr p, PixmapPtr pixmap)
+source_fallback(PicturePtr p, PixmapPtr pixmap, bool precise)
 {
 	if (sna_picture_is_solid(p, NULL))
 		return false;
 
 	if (p->pSourcePict)
-		return check_gradient(p);
+		return check_gradient(p, precise);
 
 	if (!gen7_check_repeat(p) || !gen7_check_format(p->format))
 		return true;
@@ -2209,11 +2218,13 @@ gen7_composite_fallback(struct sna *sna,
 	dst_pixmap = get_drawable_pixmap(dst->pDrawable);
 
 	src_pixmap = src->pDrawable ? get_drawable_pixmap(src->pDrawable) : NULL;
-	src_fallback = source_fallback(src, src_pixmap);
+	src_fallback = source_fallback(src, src_pixmap,
+				       dst->polyMode == PolyModePrecise);
 
 	if (mask) {
 		mask_pixmap = mask->pDrawable ? get_drawable_pixmap(mask->pDrawable) : NULL;
-		mask_fallback = source_fallback(mask, mask_pixmap);
+		mask_fallback = source_fallback(mask, mask_pixmap,
+						dst->polyMode == PolyModePrecise);
 	} else {
 		mask_pixmap = NULL;
 		mask_fallback = false;
@@ -2932,14 +2943,14 @@ fallback_blt:
 
 		extents = box[0];
 		for (i = 1; i < n; i++) {
-			if (extents.x1 < box[i].x1)
+			if (box[i].x1 < extents.x1)
 				extents.x1 = box[i].x1;
-			if (extents.y1 < box[i].y1)
+			if (box[i].y1 < extents.y1)
 				extents.y1 = box[i].y1;
 
-			if (extents.x2 > box[i].x2)
+			if (box[i].x2 > extents.x2)
 				extents.x2 = box[i].x2;
-			if (extents.y2 > box[i].y2)
+			if (box[i].y2 > extents.y2)
 				extents.y2 = box[i].y2;
 		}
 

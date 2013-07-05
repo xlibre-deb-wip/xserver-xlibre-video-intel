@@ -564,6 +564,35 @@ sna_xv_free_port(XvPortPtr port)
 	return Success;
 }
 
+int
+sna_xv_fixup_formats(ScreenPtr screen, XvFormatPtr formats, int num_formats)
+{
+	XvFormatPtr out = formats;
+	int count = 0;
+
+	while (num_formats--) {
+		int num_visuals = screen->numVisuals;
+		VisualPtr v = screen->visuals;
+
+		while (num_visuals--) {
+			if (v->class == TrueColor &&
+			    v->nplanes == formats->depth) {
+				int tmp = out[count].depth;
+				out[count].depth = formats->depth;
+				out[count].visual = v->vid;
+				formats->depth = tmp;
+				count++;
+				break;
+			}
+			v++;
+		}
+
+		formats++;
+	}
+
+	return count;
+}
+
 static int
 sna_xv_query_adaptors(ScreenPtr screen,
 		      XvAdaptorPtr *adaptors,
@@ -577,8 +606,21 @@ sna_xv_query_adaptors(ScreenPtr screen,
 }
 
 static Bool
-sna_xv_close_screen(ScreenPtr screen)
+sna_xv_close_screen(CLOSE_SCREEN_ARGS_DECL)
 {
+	struct sna *sna = to_sna_from_screen(screen);
+	int i;
+
+	for (i = 0; i < sna->xv.num_adaptors; i++) {
+		free(sna->xv.adaptors[i].pPorts->devPriv.ptr);
+		free(sna->xv.adaptors[i].pPorts);
+		free(sna->xv.adaptors[i].pEncodings);
+	}
+	free(sna->xv.adaptors);
+
+	sna->xv.adaptors = NULL;
+	sna->xv.num_adaptors = 0;
+
 	return TRUE;
 }
 

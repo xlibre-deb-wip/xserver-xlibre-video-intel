@@ -217,6 +217,7 @@ struct sna {
 #define SNA_TRIPLE_BUFFER	0x4
 #define SNA_TEAR_FREE		0x10
 #define SNA_FORCE_SHADOW	0x20
+#define SNA_FLUSH_GTT		0x40
 #define SNA_REPROBE		0x80000000
 
 	unsigned cpu_features;
@@ -292,7 +293,6 @@ struct sna {
 
 	bool dri_available;
 	bool dri_open;
-	char *deviceName;
 
 	/* Broken-out options. */
 	OptionInfoPtr Options;
@@ -847,12 +847,7 @@ memcpy_blt(const void *src, void *dst, int bpp,
 	   int16_t src_x, int16_t src_y,
 	   int16_t dst_x, int16_t dst_y,
 	   uint16_t width, uint16_t height);
-void
-memcpy_to_tiled_x(const void *src, void *dst, int bpp, int swizzling,
-		  int32_t src_stride, int32_t dst_stride,
-		  int16_t src_x, int16_t src_y,
-		  int16_t dst_x, int16_t dst_y,
-		  uint16_t width, uint16_t height);
+
 void
 memmove_box(const void *src, void *dst,
 	    int bpp, int32_t stride,

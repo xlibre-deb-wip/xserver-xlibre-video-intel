@@ -29,7 +29,6 @@
 #endif
 
 #include <unistd.h>
-#include <xf86_OSproc.h>
 #include <xf86Parser.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -435,49 +434,46 @@ static Bool intel_driver_func(ScrnInfoPtr pScrn,
 	}
 }
 
-static Bool has_kernel_mode_setting(const struct pci_device *dev)
+static Bool is_i915_device(int fd)
 {
-	char id[20];
+	drm_version_t version;
+	char name[5] = "";
+
+	memset(&version, 0, sizeof(version));
+	version.name_len = 4;
+	version.name = name;
+
+	if (drmIoctl(fd, DRM_IOCTL_VERSION, &version))
+		return FALSE;
+
+	return strcmp("i915", name) == 0;
+}
+
+static Bool has_kernel_mode_setting(int entity_num,
+				    const struct pci_device *dev,
+				    const char *path)
+{
 	int ret, fd;
 
-	snprintf(id, sizeof(id),
-		 "pci:%04x:%02x:%02x.%d",
-		 dev->domain, dev->bus, dev->dev, dev->func);
-
-	ret = drmCheckModesettingSupported(id);
-	if (ret) {
-		if (xf86LoadKernelModule("i915"))
-			ret = drmCheckModesettingSupported(id);
-		if (ret)
-			return FALSE;
-		/* Be nice to the user and load fbcon too */
-		(void)xf86LoadKernelModule("fbcon");
-	}
+	fd = intel_open_device(entity_num, dev, path);
+	if (fd == -1)
+		return FALSE;
 
 	/* Confirm that this is a i915.ko device with GEM/KMS enabled */
-	ret = FALSE;
-	fd = drmOpen(NULL, id);
-	if (fd != -1) {
-		drmVersionPtr version = drmGetVersion(fd);
-		if (version) {
-			ret = strcmp ("i915", version->name) == 0;
-			drmFreeVersion(version);
-		}
-		if (ret) {
-			struct drm_i915_getparam gp;
-			gp.param = I915_PARAM_HAS_GEM;
-			gp.value = &ret;
-			if (drmIoctl(fd, DRM_IOCTL_I915_GETPARAM, &gp))
-				ret = FALSE;
-		}
-		if (ret) {
-			struct drm_mode_card_res res;
+	ret = is_i915_device(fd);
+	if (ret) {
+		struct drm_i915_getparam gp;
+		gp.param = I915_PARAM_HAS_GEM;
+		gp.value = &ret;
+		if (drmIoctl(fd, DRM_IOCTL_I915_GETPARAM, &gp))
+			ret = FALSE;
+	}
+	if (ret) {
+		struct drm_mode_card_res res;
 
-			memset(&res, 0, sizeof(res));
-			if (drmIoctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &res))
-				ret = FALSE;
-		}
-		close(fd);
+		memset(&res, 0, sizeof(res));
+		if (drmIoctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &res))
+			ret = FALSE;
 	}
 
 	return ret;
@@ -578,7 +574,7 @@ static Bool intel_pci_probe(DriverPtr		driver,
 			    struct pci_device	*device,
 			    intptr_t		match_data)
 {
-	if (!has_kernel_mode_setting(device)) {
+	if (!has_kernel_mode_setting(entity_num, device, NULL)) {
 #if KMS_ONLY
 		return FALSE;
 #else
@@ -609,7 +605,8 @@ intel_platform_probe(DriverPtr driver,
 	if (!dev->pdev)
 		return FALSE;
 
-	if (!has_kernel_mode_setting(dev->pdev))
+	if (!has_kernel_mode_setting(entity_num, dev->pdev,
+				     xf86_get_platform_device_attrib(dev, ODEV_ATTRIB_PATH)))
 		return FALSE;
 
 	/* Allow ourselves to act as a slaved output if not primary */

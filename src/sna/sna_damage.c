@@ -415,7 +415,7 @@ static void __sna_damage_reduce(struct sna_damage *damage)
 	assert(damage->mode != DAMAGE_ALL);
 	assert(damage->dirty);
 
-	DBG(("    reduce: before region.n=%d\n", REGION_NUM_RECTS(region)));
+	DBG(("    reduce: before region.n=%ld\n", REGION_NUM_RECTS(region)));
 
 	nboxes = damage->embedded_box.size;
 	list_for_each_entry(iter, &damage->embedded_box.list, list)
@@ -529,7 +529,7 @@ done:
 	free_list(&damage->embedded_box.list);
 	reset_embedded_box(damage);
 
-	DBG(("    reduce: after region.n=%d\n", REGION_NUM_RECTS(region)));
+	DBG(("    reduce: after region.n=%ld\n", REGION_NUM_RECTS(region)));
 }
 
 static void damage_union(struct sna_damage *damage, const BoxRec *box)
@@ -1251,7 +1251,6 @@ fastcall struct sna_damage *_sna_damage_subtract_boxes(struct sna_damage *damage
 						       int dx, int dy)
 {
 	char damage_buf[1000];
-	char region_buf[120];
 
 	ErrorF("%s(%s - [(%d,%d), (%d,%d)...x%d])...\n", __FUNCTION__,
 	       _debug_describe_damage(damage_buf, sizeof(damage_buf), damage),
@@ -1333,18 +1332,59 @@ int _sna_damage_contains_box(struct sna_damage *damage,
 }
 #endif
 
+static bool box_overlaps(const BoxRec *a, const BoxRec *b)
+{
+	return (a->x1 < b->x2 && a->x2 > b->x1 &&
+		a->y1 < b->y2 && a->y2 > b->y1);
+}
+
 bool _sna_damage_contains_box__no_reduce(const struct sna_damage *damage,
 					 const BoxRec *box)
 {
-	assert(damage && damage->mode != DAMAGE_ALL);
-	if (damage->mode == DAMAGE_SUBTRACT)
-		return false;
+	struct sna_damage_box *iter;
+	int ret;
 
+	assert(damage && damage->mode != DAMAGE_ALL);
 	if (!sna_damage_overlaps_box(damage, box))
 		return false;
 
-	return pixman_region_contains_rectangle((RegionPtr)&damage->region,
-						(BoxPtr)box) == PIXMAN_REGION_IN;
+	ret = pixman_region_contains_rectangle(&damage->region, (BoxPtr)box);
+	if (!damage->dirty)
+		return ret == PIXMAN_REGION_IN;
+
+	if (damage->mode == DAMAGE_ADD) {
+		if (ret == PIXMAN_REGION_IN)
+			return true;
+
+		list_for_each_entry(iter, &damage->embedded_box.list, list) {
+			BoxPtr b;
+			int n;
+
+			b = (BoxPtr)(iter + 1);
+			for (n = 0; n < iter->size; n++) {
+				if (box_contains(&b[n], box))
+					return true;
+			}
+		}
+
+		return false;
+	} else {
+		if (ret != PIXMAN_REGION_IN)
+			return false;
+
+		list_for_each_entry(iter, &damage->embedded_box.list, list) {
+			BoxPtr b;
+			int n;
+
+			b = (BoxPtr)(iter + 1);
+			for (n = 0; n < iter->size; n++) {
+				if (box_overlaps(&b[n], box))
+					return false;
+			}
+		}
+
+		return true;
+	}
 }
 
 static bool __sna_damage_intersect(struct sna_damage *damage,
