@@ -28,13 +28,7 @@
 #include "config.h"
 #endif
 
-#include <unistd.h>
-#include <xf86_OSproc.h>
 #include <xf86Parser.h>
-#include <xf86drm.h>
-#include <xf86drmMode.h>
-#include <i915_drm.h>
-
 #include <xorgVersion.h>
 
 #if XORG_VERSION_CURRENT < XORG_VERSION_NUMERIC(1,6,99,0,0)
@@ -435,54 +429,6 @@ static Bool intel_driver_func(ScrnInfoPtr pScrn,
 	}
 }
 
-static Bool has_kernel_mode_setting(const struct pci_device *dev)
-{
-	char id[20];
-	int ret, fd;
-
-	snprintf(id, sizeof(id),
-		 "pci:%04x:%02x:%02x.%d",
-		 dev->domain, dev->bus, dev->dev, dev->func);
-
-	ret = drmCheckModesettingSupported(id);
-	if (ret) {
-		if (xf86LoadKernelModule("i915"))
-			ret = drmCheckModesettingSupported(id);
-		if (ret)
-			return FALSE;
-		/* Be nice to the user and load fbcon too */
-		(void)xf86LoadKernelModule("fbcon");
-	}
-
-	/* Confirm that this is a i915.ko device with GEM/KMS enabled */
-	ret = FALSE;
-	fd = drmOpen(NULL, id);
-	if (fd != -1) {
-		drmVersionPtr version = drmGetVersion(fd);
-		if (version) {
-			ret = strcmp ("i915", version->name) == 0;
-			drmFreeVersion(version);
-		}
-		if (ret) {
-			struct drm_i915_getparam gp;
-			gp.param = I915_PARAM_HAS_GEM;
-			gp.value = &ret;
-			if (drmIoctl(fd, DRM_IOCTL_I915_GETPARAM, &gp))
-				ret = FALSE;
-		}
-		if (ret) {
-			struct drm_mode_card_res res;
-
-			memset(&res, 0, sizeof(res));
-			if (drmIoctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &res))
-				ret = FALSE;
-		}
-		close(fd);
-	}
-
-	return ret;
-}
-
 #if !UMS_ONLY
 extern XF86ConfigPtr xf86configptr;
 
@@ -578,7 +524,7 @@ static Bool intel_pci_probe(DriverPtr		driver,
 			    struct pci_device	*device,
 			    intptr_t		match_data)
 {
-	if (!has_kernel_mode_setting(device)) {
+	if (intel_open_device(entity_num, device, NULL) == -1) {
 #if KMS_ONLY
 		return FALSE;
 #else
@@ -609,7 +555,8 @@ intel_platform_probe(DriverPtr driver,
 	if (!dev->pdev)
 		return FALSE;
 
-	if (!has_kernel_mode_setting(dev->pdev))
+	if (intel_open_device(entity_num, dev->pdev,
+			      xf86_get_platform_device_attrib(dev, ODEV_ATTRIB_PATH)) == -1)
 		return FALSE;
 
 	/* Allow ourselves to act as a slaved output if not primary */

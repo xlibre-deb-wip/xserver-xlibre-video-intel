@@ -149,7 +149,7 @@ struct sna_glyph {
 	uint16_t size, pos;
 };
 
-static inline WindowPtr root(ScreenPtr screen)
+static inline WindowPtr get_root_window(ScreenPtr screen)
 {
 #if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,10,0,0,0)
 	return screen->root;
@@ -217,6 +217,7 @@ struct sna {
 #define SNA_TRIPLE_BUFFER	0x4
 #define SNA_TEAR_FREE		0x10
 #define SNA_FORCE_SHADOW	0x20
+#define SNA_FLUSH_GTT		0x40
 #define SNA_REPROBE		0x80000000
 
 	unsigned cpu_features;
@@ -292,7 +293,6 @@ struct sna {
 
 	bool dri_available;
 	bool dri_open;
-	char *deviceName;
 
 	/* Broken-out options. */
 	OptionInfoPtr Options;
@@ -321,7 +321,6 @@ bool sna_mode_pre_init(ScrnInfoPtr scrn, struct sna *sna);
 bool sna_mode_fake_init(struct sna *sna);
 void sna_mode_adjust_frame(struct sna *sna, int x, int y);
 extern void sna_mode_update(struct sna *sna);
-extern void sna_mode_disable_unused(struct sna *sna);
 extern void sna_mode_wakeup(struct sna *sna);
 extern void sna_mode_redisplay(struct sna *sna);
 extern void sna_mode_close(struct sna *sna);
@@ -802,9 +801,7 @@ void sna_glyphs__shared(CARD8 op,
 void sna_glyph_unrealize(ScreenPtr screen, GlyphPtr glyph);
 void sna_glyphs_close(struct sna *sna);
 
-void sna_read_boxes(struct sna *sna,
-		    struct kgem_bo *src_bo, int16_t src_dx, int16_t src_dy,
-		    PixmapPtr dst, int16_t dst_dx, int16_t dst_dy,
+void sna_read_boxes(struct sna *sna, PixmapPtr dst, struct kgem_bo *src_bo,
 		    const BoxRec *box, int n);
 bool sna_write_boxes(struct sna *sna, PixmapPtr dst,
 		     struct kgem_bo *dst_bo, int16_t dst_dx, int16_t dst_dy,
@@ -847,12 +844,7 @@ memcpy_blt(const void *src, void *dst, int bpp,
 	   int16_t src_x, int16_t src_y,
 	   int16_t dst_x, int16_t dst_y,
 	   uint16_t width, uint16_t height);
-void
-memcpy_to_tiled_x(const void *src, void *dst, int bpp, int swizzling,
-		  int32_t src_stride, int32_t dst_stride,
-		  int16_t src_x, int16_t src_y,
-		  int16_t dst_x, int16_t dst_y,
-		  uint16_t width, uint16_t height);
+
 void
 memmove_box(const void *src, void *dst,
 	    int bpp, int32_t stride,

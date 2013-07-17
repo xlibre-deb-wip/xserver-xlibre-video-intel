@@ -46,9 +46,6 @@ bool sna_composite_create(struct sna *sna)
 	xRenderColor color = { 0 };
 	int error;
 
-	if (!can_render(sna))
-		return true;
-
 	sna->clear = CreateSolidPicture(0, &color, &error);
 	return sna->clear != NULL;
 }
@@ -562,7 +559,8 @@ sna_composite(CARD8 op,
 	if (op == PictOpClear) {
 		DBG(("%s: discarding source and mask for clear\n", __FUNCTION__));
 		mask = NULL;
-		src = sna->clear;
+		if (sna->clear)
+			src = sna->clear;
 	}
 
 	if (mask && sna_composite_mask_is_opaque(mask)) {
@@ -920,7 +918,7 @@ sna_composite_rectangles(CARD8		 op,
 	 * operation, then we may as well delete it without moving it
 	 * first to the GPU.
 	 */
-	hint = PREFER_GPU;
+	hint = can_render(sna) ? PREFER_GPU : 0;
 	if (op <= PictOpSrc) {
 		if (priv->cpu_damage &&
 		    region_subsumes_damage(&region, priv->cpu_damage)) {

@@ -585,10 +585,7 @@ static Bool I830PreInit(ScrnInfoPtr scrn, int flags)
 
 	intel->has_prime_vmap_flush = has_prime_vmap_flush(intel);
 
-	intel->has_relaxed_fencing =
-		xf86ReturnOptValBool(intel->Options,
-				     OPTION_RELAXED_FENCING,
-				     INTEL_INFO(intel)->gen >= 033);
+	intel->has_relaxed_fencing = INTEL_INFO(intel)->gen >= 033;
 	/* And override the user if there is no kernel support */
 	if (intel->has_relaxed_fencing)
 		intel->has_relaxed_fencing = has_relaxed_fencing(intel);
@@ -1298,6 +1295,8 @@ static Bool I830PMEvent(SCRN_ARG_TYPE arg, pmEvent event, Bool undo)
 
 Bool intel_init_scrn(ScrnInfoPtr scrn)
 {
+	__intel_uxa_release_device(scrn);
+
 	scrn->PreInit = I830PreInit;
 	scrn->ScreenInit = I830ScreenInit;
 	scrn->SwitchMode = I830SwitchMode;

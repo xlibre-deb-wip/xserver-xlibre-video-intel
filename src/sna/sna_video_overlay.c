@@ -57,9 +57,7 @@ static Atom xvSyncToVblank;
 #define IMAGE_MAX_WIDTH_LEGACY	1024
 #define IMAGE_MAX_HEIGHT_LEGACY	1088
 
-static const XvFormatRec Formats[] = {
-	{15, TrueColor}, {16, TrueColor}, {24, TrueColor}
-};
+static XvFormatRec Formats[] = { {15}, {16}, {24} };
 
 static const XvAttributeRec Attributes[] = {
 	{XvSettable | XvGettable, 0, (1 << 24) - 1, "XV_COLORKEY"},
@@ -495,7 +493,7 @@ sna_video_overlay_put_image(ClientPtr client,
 	     drw_x, drw_y, drw_w, drw_h,
 	     format->id, width, height, sync));
 
-	DBG(("%s: region %d:(%d, %d), (%d, %d)\n", __FUNCTION__,
+	DBG(("%s: region %ld:(%d, %d), (%d, %d)\n", __FUNCTION__,
 	     RegionNumRects(&clip),
 	     clip.extents.x1, clip.extents.y1,
 	     clip.extents.x2, clip.extents.y2));
@@ -715,8 +713,9 @@ void sna_video_overlay_setup(struct sna *sna, ScreenPtr screen)
 	adaptor->pEncodings[0].height = sna->kgem.gen < 021 ? IMAGE_MAX_HEIGHT_LEGACY : IMAGE_MAX_HEIGHT;
 	adaptor->pEncodings[0].rate.numerator = 1;
 	adaptor->pEncodings[0].rate.denominator = 1;
-	adaptor->nFormats = ARRAY_SIZE(Formats);
 	adaptor->pFormats = Formats;
+	adaptor->nFormats = sna_xv_fixup_formats(screen, Formats,
+						 ARRAY_SIZE(Formats));
 	adaptor->nAttributes = NUM_ATTRIBUTES;
 	if (HAS_GAMMA(sna))
 		adaptor->nAttributes += GAMMA_ATTRIBUTES;
@@ -738,7 +737,6 @@ void sna_video_overlay_setup(struct sna *sna, ScreenPtr screen)
 
 	adaptor->nPorts = 1;
 	adaptor->pPorts = port;
-
 	adaptor->base_id = port->id = FakeClientID(0);
 	AddResource(port->id, XvGetRTPort(), port);
 

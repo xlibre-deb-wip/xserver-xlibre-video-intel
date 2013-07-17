@@ -1975,6 +1975,7 @@ static void gen3_emit_target(struct sna *sna,
 
 		state->current_dst = bo->unique_id;
 	}
+	assert(bo->exec);
 	kgem_bo_mark_dirty(bo);
 }
 
@@ -3306,10 +3307,29 @@ source_is_busy(PixmapPtr pixmap)
 }
 
 static bool
-source_fallback(PicturePtr p, PixmapPtr pixmap)
+is_unhandled_gradient(PicturePtr picture, bool precise)
+{
+	if (picture->pDrawable)
+		return false;
+
+	switch (picture->pSourcePict->type) {
+	case SourcePictTypeSolidFill:
+	case SourcePictTypeLinear:
+	case SourcePictTypeRadial:
+		return false;
+	default:
+		return precise;
+	}
+}
+
+static bool
+source_fallback(PicturePtr p, PixmapPtr pixmap, bool precise)
 {
 	if (sna_picture_is_solid(p, NULL))
 		return false;
+
+	if (is_unhandled_gradient(p, precise))
+		return true;
 
 	if (!gen3_check_xformat(p) || !gen3_check_repeat(p))
 		return true;
@@ -3341,11 +3361,13 @@ gen3_composite_fallback(struct sna *sna,
 	dst_pixmap = get_drawable_pixmap(dst->pDrawable);
 
 	src_pixmap = src->pDrawable ? get_drawable_pixmap(src->pDrawable) : NULL;
-	src_fallback = source_fallback(src, src_pixmap);
+	src_fallback = source_fallback(src, src_pixmap,
+				       dst->polyMode == PolyModePrecise);
 
 	if (mask) {
 		mask_pixmap = mask->pDrawable ? get_drawable_pixmap(mask->pDrawable) : NULL;
-		mask_fallback = source_fallback(mask, mask_pixmap);
+		mask_fallback = source_fallback(mask, mask_pixmap,
+						dst->polyMode == PolyModePrecise);
 	} else {
 		mask_pixmap = NULL;
 		mask_fallback = false;
@@ -3528,7 +3550,8 @@ gen3_render_composite(struct sna *sna,
 	if (too_large(tmp->dst.width, tmp->dst.height) ||
 	    !gen3_check_pitch_3d(tmp->dst.bo)) {
 		if (!sna_render_composite_redirect(sna, tmp,
-						   dst_x, dst_y, width, height))
+						   dst_x, dst_y, width, height,
+						   op > PictOpSrc || dst->pCompositeClip->data))
 			return false;
 	}
 
@@ -4873,7 +4896,8 @@ gen3_render_composite_spans(struct sna *sna,
 	if (too_large(tmp->base.dst.width, tmp->base.dst.height) ||
 	    !gen3_check_pitch_3d(tmp->base.dst.bo)) {
 		if (!sna_render_composite_redirect(sna, &tmp->base,
-						   dst_x, dst_y, width, height))
+						   dst_x, dst_y, width, height,
+						   true))
 			return false;
 	}
 
@@ -5532,7 +5556,6 @@ gen3_render_video(struct sna *sna,
 						  pix_xoff, pix_yoff);
 		}
 	}
-	priv->clear = false;
 
 	return true;
 }
@@ -5654,7 +5677,8 @@ fallback_blt:
 						   extents.x1 + dst_dx,
 						   extents.y1 + dst_dy,
 						   extents.x2 - extents.x1,
-						   extents.y2 - extents.y1))
+						   extents.y2 - extents.y1,
+						   n > 1))
 			goto fallback_tiled;
 	}
 

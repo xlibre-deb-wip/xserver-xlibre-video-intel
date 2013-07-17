@@ -862,6 +862,8 @@ gen6_emit_state(struct sna *sna,
 {
 	bool need_stall = wm_binding_table & 1;
 
+	assert(op->dst.bo->exec);
+
 	if (gen6_emit_cc(sna, GEN6_BLEND(op->u.gen6.flags)))
 		need_stall = false;
 	gen6_emit_sampler(sna, GEN6_SAMPLER(op->u.gen6.flags));
@@ -875,8 +877,8 @@ gen6_emit_state(struct sna *sna,
 	if (kgem_bo_is_dirty(op->src.bo) || kgem_bo_is_dirty(op->mask.bo)) {
 		gen6_emit_flush(sna);
 		kgem_clear_dirty(&sna->kgem);
-		if (op->dst.bo->exec)
-			kgem_bo_mark_dirty(op->dst.bo);
+		assert(op->dst.bo->exec);
+		kgem_bo_mark_dirty(op->dst.bo);
 		need_stall = false;
 	}
 	if (need_stall) {
@@ -1591,7 +1593,7 @@ gen6_render_video(struct sna *sna,
 	unsigned filter;
 	BoxPtr box;
 
-	DBG(("%s: src=(%d, %d), dst=(%d, %d), %dx[(%d, %d), (%d, %d)...]\n",
+	DBG(("%s: src=(%d, %d), dst=(%d, %d), %ldx[(%d, %d), (%d, %d)...]\n",
 	     __FUNCTION__,
 	     src_width, src_height, dst_width, dst_height,
 	     REGION_NUM_RECTS(dstRegion),
@@ -1690,7 +1692,6 @@ gen6_render_video(struct sna *sna,
 		}
 		box++;
 	}
-	priv->clear = false;
 
 	gen4_vertex_flush(sna);
 	return true;
@@ -1822,7 +1823,8 @@ static bool
 gen6_composite_set_target(struct sna *sna,
 			  struct sna_composite_op *op,
 			  PicturePtr dst,
-			  int x, int y, int w, int h)
+			  int x, int y, int w, int h,
+			  bool partial)
 {
 	BoxRec box;
 
@@ -1859,7 +1861,7 @@ gen6_composite_set_target(struct sna *sna,
 	assert(op->dst.bo->proxy == NULL);
 
 	if (too_large(op->dst.width, op->dst.height) &&
-	    !sna_render_composite_redirect(sna, op, x, y, w, h))
+	    !sna_render_composite_redirect(sna, op, x, y, w, h, partial))
 		return false;
 
 	return true;
@@ -1930,7 +1932,7 @@ try_blt(struct sna *sna,
 }
 
 static bool
-check_gradient(PicturePtr picture)
+check_gradient(PicturePtr picture, bool precise)
 {
 	if (picture->pDrawable)
 		return false;
@@ -1940,7 +1942,7 @@ check_gradient(PicturePtr picture)
 	case SourcePictTypeLinear:
 		return false;
 	default:
-		return true;
+		return precise;
 	}
 }
 
@@ -1973,13 +1975,13 @@ source_is_busy(PixmapPtr pixmap)
 }
 
 static bool
-source_fallback(PicturePtr p, PixmapPtr pixmap)
+source_fallback(PicturePtr p, PixmapPtr pixmap, bool precise)
 {
 	if (sna_picture_is_solid(p, NULL))
 		return false;
 
 	if (p->pSourcePict)
-		return check_gradient(p);
+		return check_gradient(p, precise);
 
 	if (!gen6_check_repeat(p) || !gen6_check_format(p->format))
 		return true;
@@ -2010,11 +2012,13 @@ gen6_composite_fallback(struct sna *sna,
 	dst_pixmap = get_drawable_pixmap(dst->pDrawable);
 
 	src_pixmap = src->pDrawable ? get_drawable_pixmap(src->pDrawable) : NULL;
-	src_fallback = source_fallback(src, src_pixmap);
+	src_fallback = source_fallback(src, src_pixmap,
+				       dst->polyMode == PolyModePrecise);
 
 	if (mask) {
 		mask_pixmap = mask->pDrawable ? get_drawable_pixmap(mask->pDrawable) : NULL;
-		mask_fallback = source_fallback(mask, mask_pixmap);
+		mask_fallback = source_fallback(mask, mask_pixmap,
+						dst->polyMode == PolyModePrecise);
 	} else {
 		mask_pixmap = NULL;
 		mask_fallback = false;
@@ -2193,7 +2197,8 @@ gen6_render_composite(struct sna *sna,
 		op = PictOpSrc;
 	tmp->op = op;
 	if (!gen6_composite_set_target(sna, tmp, dst,
-				       dst_x, dst_y, width, height))
+				       dst_x, dst_y, width, height,
+				       op > PictOpSrc || dst->pCompositeClip->data))
 		return false;
 
 	switch (gen6_composite_picture(sna, src, &tmp->src,
@@ -2487,7 +2492,7 @@ gen6_render_composite_spans(struct sna *sna,
 
 	tmp->base.op = op;
 	if (!gen6_composite_set_target(sna, &tmp->base, dst,
-				       dst_x, dst_y, width, height))
+				       dst_x, dst_y, width, height, true))
 		return false;
 
 	switch (gen6_composite_picture(sna, src, &tmp->base.src,
@@ -2742,7 +2747,8 @@ fallback_blt:
 						   extents.x1 + dst_dx,
 						   extents.y1 + dst_dy,
 						   extents.x2 - extents.x1,
-						   extents.y2 - extents.y1))
+						   extents.y2 - extents.y1,
+						   n > 1))
 			goto fallback_tiled;
 
 		dst_dx += tmp.dst.x;
@@ -2757,14 +2763,14 @@ fallback_blt:
 
 		extents = box[0];
 		for (i = 1; i < n; i++) {
-			if (extents.x1 < box[i].x1)
+			if (box[i].x1 < extents.x1)
 				extents.x1 = box[i].x1;
-			if (extents.y1 < box[i].y1)
+			if (box[i].y1 < extents.y1)
 				extents.y1 = box[i].y1;
 
-			if (extents.x2 > box[i].x2)
+			if (box[i].x2 > extents.x2)
 				extents.x2 = box[i].x2;
-			if (extents.y2 > box[i].y2)
+			if (box[i].y2 > extents.y2)
 				extents.y2 = box[i].y2;
 		}
 
@@ -3099,7 +3105,8 @@ gen6_render_fill_boxes(struct sna *sna,
 		if (!sna_render_composite_redirect(sna, &tmp,
 						   extents.x1, extents.y1,
 						   extents.x2 - extents.x1,
-						   extents.y2 - extents.y1))
+						   extents.y2 - extents.y1,
+						   n > 1))
 			return sna_tiling_fill_boxes(sna, op, format, color,
 						     dst, dst_bo, box, n);
 	}

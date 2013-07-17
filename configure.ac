@@ -23,7 +23,7 @@
 # Initialize Autoconf
 AC_PREREQ([2.60])
 AC_INIT([xf86-video-intel],
-        [2.21.9],
+        [2.21.12],
         [https://bugs.freedesktop.org/enter_bug.cgi?product=xorg],
         [xf86-video-intel])
 AC_CONFIG_SRCDIR([Makefile.am])
@@ -203,9 +203,6 @@ AC_ARG_ENABLE(sna,
 	      [SNA="$enableval"],
 	      [SNA=auto])
 
-if test "x$SNA" = "xauto" && pkg-config --exists "xorg-server >= 1.10"; then
-	SNA=yes
-fi
 if test "x$SNA" != "xno"; then
 	AC_DEFINE(USE_SNA, 1, [Enable SNA support])
 	AC_CHECK_HEADERS([sys/sysinfo.h])
@@ -331,6 +328,16 @@ if test "x$accel" = xnone -a "x$UMS_ONLY" != "xyes"; then
 	AC_MSG_ERROR([No default acceleration option])
 fi
 
+AC_ARG_ENABLE(create2,
+	      AS_HELP_STRING([--enable-create2],
+			     [Enable use of create2 ioctl (experimental) [default=no]]),
+	      [CREATE2="$enableval"],
+	      [CREATE2=no])
+AM_CONDITIONAL(USE_CREATE2, test x$CREATE2 = xyes)
+if test "x$CREATE2" = xyes; then
+	AC_DEFINE(USE_CREATE2,1,[Assume "create2" support])
+fi
+
 AC_ARG_ENABLE(userptr,
 	      AS_HELP_STRING([--enable-userptr],
 			     [Enable use of userptr (experimental) [default=no]]),
@@ -338,7 +345,7 @@ AC_ARG_ENABLE(userptr,
 	      [USERPTR=no])
 AM_CONDITIONAL(USE_USERPTR, test x$USERPTR = xyes)
 if test "x$USERPTR" = xyes; then
-	AC_DEFINE(USE_USERPTR,1,[Assume USERPTR support])
+	AC_DEFINE(USE_USERPTR,1,[Assume "userptr" support])
 fi
 
 AC_ARG_ENABLE(async-swap,
@@ -373,6 +380,10 @@ PKG_CHECK_MODULES(DRM, [libdrm >= 2.4.20]) # libdrm_intel is checked separately
 PKG_CHECK_MODULES(DRI, [xf86driproto], , DRI=no)
 PKG_CHECK_MODULES(DRI2, [dri2proto >= 2.6],, DRI2=no)
 PKG_CHECK_MODULES(PCIACCESS, [pciaccess >= 0.10])
+
+LIBS=""
+AC_SEARCH_LIBS(clock_gettime, rt, [CLOCK_GETTIME_LIBS=$LIBS])
+AC_SUBST(CLOCK_GETTIME_LIBS)
 
 sdkdir=`$PKG_CONFIG --variable=sdkdir xorg-server`
 

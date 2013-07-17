@@ -531,6 +531,9 @@ struct kgem_bo *
 sna_render_get_gradient(struct sna *sna,
 			PictGradient *pattern);
 
+bool
+sna_gradient_is_opaque(const PictGradient *gradient);
+
 uint32_t sna_rgba_for_color(uint32_t color, int depth);
 uint32_t sna_rgba_to_color(uint32_t rgba, uint32_t format);
 bool sna_get_rgba_from_pixel(uint32_t pixel,
@@ -724,7 +727,8 @@ inline static void sna_render_composite_redirect_init(struct sna_composite_op *o
 bool
 sna_render_composite_redirect(struct sna *sna,
 			      struct sna_composite_op *op,
-			      int x, int y, int width, int height);
+			      int x, int y, int width, int height,
+			      bool partial);
 
 void
 sna_render_composite_redirect_done(struct sna *sna,
