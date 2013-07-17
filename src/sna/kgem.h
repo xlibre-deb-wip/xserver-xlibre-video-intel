@@ -169,6 +169,7 @@ struct kgem {
 	uint32_t scanout_busy:1;
 	uint32_t busy:1;
 
+	uint32_t has_create2 :1;
 	uint32_t has_userptr :1;
 	uint32_t has_blt :1;
 	uint32_t has_relaxed_fencing :1;
@@ -317,6 +318,11 @@ static inline bool kgem_is_idle(struct kgem *kgem)
 		return true;
 
 	return kgem_ring_is_idle(kgem, kgem->ring);
+}
+
+static inline bool __kgem_ring_empty(struct kgem *kgem)
+{
+	return list_is_empty(&kgem->requests[kgem->ring == KGEM_BLT]);
 }
 
 void _kgem_submit(struct kgem *kgem);
@@ -518,6 +524,9 @@ static inline bool __kgem_bo_is_mappable(struct kgem *kgem,
 
 	if (kgem->gen < 040 && bo->tiling &&
 	    bo->presumed_offset & (kgem_bo_fenced_size(kgem, bo) - 1))
+		return false;
+
+	if (kgem->gen == 021 && bo->tiling == I915_TILING_Y)
 		return false;
 
 	if (kgem->has_llc && bo->tiling == I915_TILING_NONE)

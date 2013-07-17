@@ -1889,7 +1889,8 @@ gen2_render_composite(struct sna *sna,
 	if (too_large(tmp->dst.width, tmp->dst.height) ||
 	    tmp->dst.bo->pitch > MAX_3D_PITCH) {
 		if (!sna_render_composite_redirect(sna, tmp,
-						   dst_x, dst_y, width, height))
+						   dst_x, dst_y, width, height,
+						   op > PictOpSrc || dst->pCompositeClip->data != NULL))
 			return false;
 	}
 
@@ -2551,7 +2552,8 @@ gen2_render_composite_spans(struct sna *sna,
 	if (too_large(tmp->base.dst.width, tmp->base.dst.height) ||
 	    tmp->base.dst.bo->pitch > MAX_3D_PITCH) {
 		if (!sna_render_composite_redirect(sna, &tmp->base,
-						   dst_x, dst_y, width, height))
+						   dst_x, dst_y, width, height,
+						   true))
 			return false;
 	}
 
@@ -3073,6 +3075,8 @@ gen2_render_copy_setup_source(struct sna_composite_channel *channel,
 			      PixmapPtr pixmap,
 			      struct kgem_bo *bo)
 {
+	assert(pixmap->drawable.width && pixmap->drawable.height);
+
 	channel->filter = PictFilterNearest;
 	channel->repeat = RepeatNone;
 	channel->width  = pixmap->drawable.width;
@@ -3084,6 +3088,11 @@ gen2_render_copy_setup_source(struct sna_composite_channel *channel,
 	channel->pict_format = sna_format_for_depth(pixmap->drawable.depth);
 	channel->bo = bo;
 	channel->is_affine = 1;
+
+	DBG(("%s: source=%d, (%dx%d), format=%08x\n",
+	     __FUNCTION__, bo->handle,
+	     channel->width, channel->height,
+	     channel->pict_format));
 }
 
 static void
@@ -3098,7 +3107,7 @@ gen2_emit_copy_pipeline(struct sna *sna, const struct sna_composite_op *op)
 	blend = TB0C_LAST_STAGE | TB0C_RESULT_SCALE_1X | TB0C_OP_ARG1 |
 		TB0C_OUTPUT_WRITE_CURRENT;
 	if (op->dst.format == PICT_a8)
-		blend |= TB0C_ARG1_REPLICATE_ALPHA;
+		blend |= TB0C_ARG1_REPLICATE_ALPHA | TB0C_ARG1_SEL_TEXEL0;
 	else if (PICT_FORMAT_RGB(op->src.pict_format) != 0)
 		blend |= TB0C_ARG1_SEL_TEXEL0;
 	else
@@ -3209,6 +3218,8 @@ fallback:
 			goto fallback;
 	}
 
+	assert(dst_bo->pitch >= 8);
+
 	memset(&tmp, 0, sizeof(tmp));
 	tmp.op = alu;
 
@@ -3219,6 +3230,12 @@ fallback:
 	tmp.dst.bo = dst_bo;
 	tmp.dst.x = tmp.dst.y = 0;
 	tmp.damage = NULL;
+
+	DBG(("%s: target=%d, format=%08x, size=%dx%d\n",
+	     __FUNCTION__, dst_bo->handle,
+	     (unsigned)tmp.dst.format,
+	     tmp.dst.width,
+	     tmp.dst.height));
 
 	sna_render_composite_redirect_init(&tmp);
 	if (too_large(tmp.dst.width, tmp.dst.height) ||
@@ -3241,7 +3258,8 @@ fallback:
 						   extents.x1 + dst_dx,
 						   extents.y1 + dst_dy,
 						   extents.x2 - extents.x1,
-						   extents.y2 - extents.y1))
+						   extents.y2 - extents.y1,
+						   alu != GXcopy || n > 1))
 			goto fallback_tiled;
 	}
 

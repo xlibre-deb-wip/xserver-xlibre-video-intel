@@ -1541,7 +1541,8 @@ static bool
 gen5_composite_set_target(struct sna *sna,
 			  struct sna_composite_op *op,
 			  PicturePtr dst,
-			  int x, int y, int w, int h)
+			  int x, int y, int w, int h,
+			  bool partial)
 {
 	BoxRec box;
 
@@ -1577,7 +1578,7 @@ gen5_composite_set_target(struct sna *sna,
 	assert(op->dst.bo->proxy == NULL);
 
 	if (too_large(op->dst.width, op->dst.height) &&
-	    !sna_render_composite_redirect(sna, op, x, y, w, h))
+	    !sna_render_composite_redirect(sna, op, x, y, w, h, partial))
 		return false;
 
 	return true;
@@ -1862,7 +1863,8 @@ gen5_render_composite(struct sna *sna,
 					    tmp);
 
 	if (!gen5_composite_set_target(sna, tmp, dst,
-				       dst_x, dst_y, width, height)) {
+				       dst_x, dst_y, width, height,
+				       op > PictOpSrc || dst->pCompositeClip->data)) {
 		DBG(("%s: failed to set composite target\n", __FUNCTION__));
 		return false;
 	}
@@ -2149,7 +2151,8 @@ gen5_render_composite_spans(struct sna *sna,
 
 	tmp->base.op = op;
 	if (!gen5_composite_set_target(sna, &tmp->base, dst,
-				       dst_x, dst_y, width, height))
+				       dst_x, dst_y, width, height,
+				       true))
 		return false;
 
 	switch (gen5_composite_picture(sna, src, &tmp->base.src,
@@ -2247,6 +2250,13 @@ gen5_render_copy_boxes(struct sna *sna, uint8_t alu,
 {
 	struct sna_composite_op tmp;
 
+	DBG(("%s alu=%d, src=%d:handle=%d, dst=%d:handle=%d boxes=%d x [((%d, %d), (%d, %d))...], flags=%x\n",
+	     __FUNCTION__, alu,
+	     src->drawable.serialNumber, src_bo->handle,
+	     dst->drawable.serialNumber, dst_bo->handle,
+	     n, box->x1, box->y1, box->x2, box->y2,
+	     flags));
+
 	if (sna_blt_compare_depth(&src->drawable, &dst->drawable) &&
 	    sna_blt_copy_boxes(sna, alu,
 			       src_bo, src_dx, src_dy,
@@ -2313,7 +2323,8 @@ fallback_blt:
 						   extents.x1 + dst_dx,
 						   extents.y1 + dst_dy,
 						   extents.x2 - extents.x1,
-						   extents.y2 - extents.y1))
+						   extents.y2 - extents.y1,
+						   n > 1))
 			goto fallback_tiled;
 	}
 
@@ -2359,8 +2370,10 @@ fallback_blt:
 
 	if (!kgem_check_bo(&sna->kgem, dst_bo, src_bo, NULL)) {
 		kgem_submit(&sna->kgem);
-		if (!kgem_check_bo(&sna->kgem, dst_bo, src_bo, NULL))
+		if (!kgem_check_bo(&sna->kgem, dst_bo, src_bo, NULL)) {
+			DBG(("%s: aperture check failed\n", __FUNCTION__));
 			goto fallback_tiled_src;
+		}
 	}
 
 	dst_dx += tmp.dst.x;
@@ -2420,6 +2433,7 @@ fallback_tiled:
 			       box, n))
 		return true;
 
+	DBG(("%s: tiled fallback\n", __FUNCTION__));
 	return sna_tiling_copy_boxes(sna, alu,
 				     src, src_bo, src_dx, src_dy,
 				     dst, dst_bo, dst_dx, dst_dy,

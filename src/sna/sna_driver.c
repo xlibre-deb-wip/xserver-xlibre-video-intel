@@ -186,7 +186,7 @@ sna_set_fallback_mode(ScrnInfoPtr scrn)
 
 	xf86DisableUnusedFunctions(scrn);
 #ifdef RANDR_12_INTERFACE
-	if (root(scrn->pScreen))
+	if (get_root_window(scrn->pScreen))
 		xf86RandR12TellChanged(scrn->pScreen);
 #endif
 }
@@ -206,7 +206,7 @@ static Bool sna_become_master(struct sna *sna)
 		sna_set_fallback_mode(scrn);
 	}
 
-	sna_mode_disable_unused(sna);
+	sna_mode_update(sna);
 	return TRUE;
 }
 
@@ -257,7 +257,9 @@ static Bool sna_create_screen_resources(ScreenPtr screen)
 
 	screen->SetScreenPixmap(sna->front);
 
-	sna_copy_fbcon(sna);
+	/* Only preserve the fbcon, not any subsequent server regens */
+	if (serverGeneration == 1)
+		sna_copy_fbcon(sna);
 
 	if (!sna_become_master(sna)) {
 		xf86DrvMsg(screen->myNum, X_ERROR,
@@ -479,15 +481,6 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 		xf86DrvMsg(sna->scrn->scrnIndex, X_CONFIG,
 			   "Disabling hardware acceleration.\n");
 		sna->kgem.wedged = true;
-	}
-
-	if (!xf86ReturnOptValBool(sna->Options,
-				  OPTION_RELAXED_FENCING,
-				  sna->kgem.has_relaxed_fencing)) {
-		xf86DrvMsg(scrn->scrnIndex,
-			   sna->kgem.has_relaxed_fencing ? X_CONFIG : X_PROBED,
-			   "Disabling use of relaxed fencing\n");
-		sna->kgem.has_relaxed_fencing = 0;
 	}
 
 	/* Enable tiling by default */
@@ -781,14 +774,6 @@ static Bool sna_late_close_screen(CLOSE_SCREEN_ARGS_DECL)
 	return TRUE;
 }
 
-static void sna_mode_set(ScrnInfoPtr scrn)
-{
-	struct sna *sna = to_sna(scrn);
-
-	DBG(("%s\n", __FUNCTION__));
-	sna_mode_update(sna);
-}
-
 static Bool
 sna_register_all_privates(void)
 {
@@ -1006,7 +991,6 @@ static Bool sna_enter_vt(VT_FUNC_ARGS_DECL)
 		return FALSE;
 
 	if (sna->flags & SNA_REPROBE) {
-		sna_mode_update(sna);
 		RRGetInfo(xf86ScrnToScreen(scrn), TRUE);
 		sna->flags &= ~SNA_REPROBE;
 	}
@@ -1128,10 +1112,6 @@ Bool sna_init_scrn(ScrnInfoPtr scrn, int entity_num)
 	scrn->FreeScreen = sna_free_screen;
 	scrn->ValidMode = sna_valid_mode;
 	scrn->PMEvent = sna_pm_event;
-
-#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,9,99,901,0)
-	scrn->ModeSet = sna_mode_set;
-#endif
 
 	xf86SetEntitySharable(entity_num);
 	xf86SetEntityInstanceForScreen(scrn, entity_num,

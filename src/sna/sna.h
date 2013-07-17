@@ -149,7 +149,7 @@ struct sna_glyph {
 	uint16_t size, pos;
 };
 
-static inline WindowPtr root(ScreenPtr screen)
+static inline WindowPtr get_root_window(ScreenPtr screen)
 {
 #if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,10,0,0,0)
 	return screen->root;
@@ -321,7 +321,6 @@ bool sna_mode_pre_init(ScrnInfoPtr scrn, struct sna *sna);
 bool sna_mode_fake_init(struct sna *sna);
 void sna_mode_adjust_frame(struct sna *sna, int x, int y);
 extern void sna_mode_update(struct sna *sna);
-extern void sna_mode_disable_unused(struct sna *sna);
 extern void sna_mode_wakeup(struct sna *sna);
 extern void sna_mode_redisplay(struct sna *sna);
 extern void sna_mode_close(struct sna *sna);
@@ -802,9 +801,7 @@ void sna_glyphs__shared(CARD8 op,
 void sna_glyph_unrealize(ScreenPtr screen, GlyphPtr glyph);
 void sna_glyphs_close(struct sna *sna);
 
-void sna_read_boxes(struct sna *sna,
-		    struct kgem_bo *src_bo, int16_t src_dx, int16_t src_dy,
-		    PixmapPtr dst, int16_t dst_dx, int16_t dst_dy,
+void sna_read_boxes(struct sna *sna, PixmapPtr dst, struct kgem_bo *src_bo,
 		    const BoxRec *box, int n);
 bool sna_write_boxes(struct sna *sna, PixmapPtr dst,
 		     struct kgem_bo *dst_bo, int16_t dst_dx, int16_t dst_dy,

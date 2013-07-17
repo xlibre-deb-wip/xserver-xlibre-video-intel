@@ -85,13 +85,20 @@ static const uint8_t fill_ROP[] = {
 static void nop_done(struct sna *sna, const struct sna_composite_op *op)
 {
 	assert(sna->kgem.nbatch <= KGEM_BATCH_SIZE(&sna->kgem));
-	(void)sna;
+	if (sna->kgem.nexec > 1 && __kgem_ring_empty(&sna->kgem))
+		_kgem_submit(&sna->kgem);
 	(void)op;
 }
 
 static void gen6_blt_copy_done(struct sna *sna, const struct sna_composite_op *op)
 {
 	struct kgem *kgem = &sna->kgem;
+
+	assert(kgem->nbatch <= KGEM_BATCH_SIZE(kgem));
+	if (kgem->nexec > 1 && __kgem_ring_empty(kgem)) {
+		_kgem_submit(kgem);
+		return;
+	}
 
 	if (kgem_check_batch(kgem, 3)) {
 		uint32_t *b = kgem->batch + kgem->nbatch;
@@ -2213,7 +2220,8 @@ fill:
 
 		if (src_pixmap->drawable.width  <= sna->render.max_3d_size &&
 		    src_pixmap->drawable.height <= sna->render.max_3d_size &&
-		    bo->pitch <= sna->render.max_3d_pitch)
+		    bo->pitch <= sna->render.max_3d_pitch &&
+		    !fallback)
 		{
 			return false;
 		}
@@ -2237,7 +2245,7 @@ fill:
 		if (!tmp->dst.bo) {
 			DBG(("%s: fallback -- unaccelerated read back\n",
 			     __FUNCTION__));
-			if (!kgem_bo_is_busy(bo))
+			if (fallback || !kgem_bo_is_busy(bo))
 				goto put;
 		} else if (bo->snoop && tmp->dst.bo->snoop) {
 			DBG(("%s: fallback -- can not copy between snooped bo\n",
@@ -2246,8 +2254,7 @@ fill:
 		} else if (!kgem_bo_can_blt(&sna->kgem, tmp->dst.bo)) {
 			DBG(("%s: fallback -- unaccelerated upload\n",
 			     __FUNCTION__));
-			if (!kgem_bo_is_busy(tmp->dst.bo) &&
-			    !kgem_bo_is_busy(bo))
+			if (fallback || !kgem_bo_is_busy(bo))
 				goto put;
 		} else {
 			ret = prepare_blt_copy(sna, tmp, bo, alpha_fixup);
@@ -2273,6 +2280,8 @@ put:
 			if (!sna_drawable_move_region_to_cpu(dst->pDrawable,
 							     &region, hint))
 				return false;
+
+			assert(tmp->damage == NULL);
 		}
 
 		region.extents = src_box;
@@ -2291,7 +2300,19 @@ static void convert_done(struct sna *sna, const struct sna_composite_op *op)
 {
 	struct kgem *kgem = &sna->kgem;
 
-	if (kgem->gen >= 060 && op->src.bo == op->dst.bo && kgem_check_batch(kgem, 3)) {
+	assert(kgem->nbatch <= KGEM_BATCH_SIZE(kgem));
+	if (kgem->nexec > 1 && __kgem_ring_empty(kgem))
+		_kgem_submit(kgem);
+
+	kgem_bo_destroy(kgem, op->src.bo);
+	sna_render_composite_redirect_done(sna, op);
+}
+
+static void gen6_convert_done(struct sna *sna, const struct sna_composite_op *op)
+{
+	struct kgem *kgem = &sna->kgem;
+
+	if (kgem_check_batch(kgem, 3)) {
 		uint32_t *b = kgem->batch + kgem->nbatch;
 		b[0] = XY_SETUP_CLIP;
 		b[1] = b[2] = 0;
@@ -2299,8 +2320,7 @@ static void convert_done(struct sna *sna, const struct sna_composite_op *op)
 		assert(kgem->nbatch < kgem->surface);
 	}
 
-	kgem_bo_destroy(kgem, op->src.bo);
-	sna_render_composite_redirect_done(sna, op);
+	convert_done(sna, op);
 }
 
 bool
@@ -2431,6 +2451,9 @@ sna_blt_composite__convert(struct sna *sna,
 	}
 
 	tmp->done = convert_done;
+	if (sna->kgem.gen >= 060 && tmp->src.bo == tmp->dst.bo)
+		tmp->done = gen6_convert_done;
+
 	return true;
 }
 
@@ -2457,11 +2480,6 @@ fastcall static void sna_blt_fill_op_boxes(struct sna *sna,
 	_sna_blt_fill_boxes(sna, &op->base.u.blt, box, nbox);
 }
 
-static void sna_blt_fill_op_done(struct sna *sna,
-				 const struct sna_fill_op *fill)
-{
-}
-
 bool sna_blt_fill(struct sna *sna, uint8_t alu,
 		  struct kgem_bo *bo, int bpp,
 		  uint32_t pixel,
@@ -2486,7 +2504,8 @@ bool sna_blt_fill(struct sna *sna, uint8_t alu,
 	fill->blt   = sna_blt_fill_op_blt;
 	fill->box   = sna_blt_fill_op_box;
 	fill->boxes = sna_blt_fill_op_boxes;
-	fill->done  = sna_blt_fill_op_done;
+	fill->done  =
+		(void (*)(struct sna *, const struct sna_fill_op *))nop_done;
 	return true;
 }
 
@@ -2500,17 +2519,6 @@ static void sna_blt_copy_op_blt(struct sna *sna,
 			 src_x, src_y,
 			 width, height,
 			 dst_x, dst_y);
-}
-
-static void sna_blt_copy_op_done(struct sna *sna,
-				 const struct sna_copy_op *op)
-{
-}
-
-static void gen6_blt_copy_op_done(struct sna *sna,
-				  const struct sna_copy_op *op)
-{
-	gen6_blt_copy_done(sna, &op->base);
 }
 
 bool sna_blt_copy(struct sna *sna, uint8_t alu,
@@ -2536,9 +2544,11 @@ bool sna_blt_copy(struct sna *sna, uint8_t alu,
 
 	op->blt  = sna_blt_copy_op_blt;
 	if (sna->kgem.gen >= 060 && src == dst)
-		op->done = gen6_blt_copy_op_done;
+		op->done = (void (*)(struct sna *, const struct sna_copy_op *))
+			    gen6_blt_copy_done;
 	else
-		op->done = sna_blt_copy_op_done;
+		op->done = (void (*)(struct sna *, const struct sna_copy_op *))
+			    nop_done;
 	return true;
 }
 
@@ -2657,7 +2667,7 @@ bool sna_blt_fill_boxes(struct sna *sna, uint8_t alu,
 	     __FUNCTION__, bpp, pixel, alu, nbox));
 
 	if (!kgem_bo_can_blt(kgem, bo)) {
-		DBG(("%s: fallback -- dst uses Y-tiling\n", __FUNCTION__));
+		DBG(("%s: fallback -- cannot blt to dst\n", __FUNCTION__));
 		return false;
 	}
 
@@ -2789,6 +2799,9 @@ bool sna_blt_fill_boxes(struct sna *sna, uint8_t alu,
 			assert(kgem->nbatch < kgem->surface);
 		}
 	} while (nbox);
+
+	if (kgem->nexec > 1 && __kgem_ring_empty(kgem))
+		_kgem_submit(kgem);
 
 	return true;
 }
@@ -2976,7 +2989,9 @@ bool sna_blt_copy_boxes(struct sna *sna, uint8_t alu,
 		} while (1);
 	}
 
-	if (kgem->gen >= 060 && kgem_check_batch(kgem, 3)) {
+	if (kgem->nexec > 1 && __kgem_ring_empty(kgem)) {
+		_kgem_submit(kgem);
+	} else if (kgem->gen >= 060 && kgem_check_batch(kgem, 3)) {
 		uint32_t *b = kgem->batch + kgem->nbatch;
 		b[0] = XY_SETUP_CLIP;
 		b[1] = b[2] = 0;

@@ -51,6 +51,7 @@
  */
 #define FORCE_SPANS 0
 #define FORCE_NONRECTILINEAR_SPANS -1
+#define FORCE_FLUSH 1 /* https://bugs.freedesktop.org/show_bug.cgi?id=55500 */
 
 #define NO_COMPOSITE 0
 #define NO_COMPOSITE_SPANS 0
@@ -60,6 +61,8 @@
 #define NO_FILL_ONE 0
 #define NO_FILL_BOXES 0
 #define NO_VIDEO 0
+
+#define MAX_FLUSH_VERTICES 6
 
 #define GEN4_GRF_BLOCKS(nreg)    ((nreg + 15) / 16 - 1)
 
@@ -596,6 +599,7 @@ static bool gen4_rectangle_begin(struct sna *sna,
 	ndwords = op->need_magic_ca_pass? 20 : 6;
 	if ((sna->render.vb_id & id) == 0)
 		ndwords += 5;
+	ndwords += 2*FORCE_FLUSH;
 
 	if (!kgem_check_batch(&sna->kgem, ndwords))
 		return false;
@@ -618,7 +622,8 @@ static int gen4_get_rectangles__flush(struct sna *sna,
 			return rem;
 	}
 
-	if (!kgem_check_batch(&sna->kgem, op->need_magic_ca_pass ? 25 : 6))
+	if (!kgem_check_batch(&sna->kgem,
+			      2*FORCE_FLUSH + (op->need_magic_ca_pass ? 25 : 6)))
 		return 0;
 	if (!kgem_check_reloc_and_exec(&sna->kgem, 2))
 		return 0;
@@ -644,6 +649,27 @@ inline static int gen4_get_rectangles(struct sna *sna,
 	int rem;
 
 	assert(want);
+#if FORCE_FLUSH
+	rem = sna->render.vertex_offset;
+	if (sna->kgem.nbatch == sna->render_state.gen4.last_primitive)
+		rem = sna->kgem.nbatch - 5;
+	if (rem) {
+		rem = MAX_FLUSH_VERTICES - (sna->render.vertex_index - sna->render.vertex_start) / 3;
+		if (rem <= 0) {
+			if (sna->render.vertex_offset) {
+				gen4_vertex_flush(sna);
+				if (gen4_magic_ca_pass(sna, op))
+					gen4_emit_pipelined_pointers(sna, op, op->op,
+								     op->u.gen4.wm_kernel);
+			}
+			OUT_BATCH(MI_FLUSH | MI_INHIBIT_RENDER_CACHE_FLUSH);
+			rem = MAX_FLUSH_VERTICES;
+		}
+	} else
+		rem = MAX_FLUSH_VERTICES;
+	if (want > rem)
+		want = rem;
+#endif
 
 start:
 	rem = vertex_space(sna);
@@ -783,7 +809,7 @@ gen4_get_batch(struct sna *sna, const struct sna_composite_op *op)
 {
 	kgem_set_mode(&sna->kgem, KGEM_RENDER, op->dst.bo);
 
-	if (!kgem_check_batch_with_surfaces(&sna->kgem, 150, 4)) {
+	if (!kgem_check_batch_with_surfaces(&sna->kgem, 150 + 50*FORCE_FLUSH, 4)) {
 		DBG(("%s: flushing batch: %d < %d+%d\n",
 		     __FUNCTION__, sna->kgem.surface - sna->kgem.nbatch,
 		     150, 4*8));
@@ -1392,7 +1418,7 @@ gen4_render_video(struct sna *sna,
 	do {
 		int n;
 
-		n = gen4_get_rectangles(sna, &tmp, min(nbox, 16),
+		n = gen4_get_rectangles(sna, &tmp, nbox,
 					gen4_video_bind_surfaces);
 		assert(n);
 		nbox -= n;
@@ -1423,14 +1449,8 @@ gen4_render_video(struct sna *sna,
 			}
 			box++;
 		} while (--n);
-
-		gen4_vertex_flush(sna);
-		if (!nbox)
-			break;
-
-		/* VUE corruption strikes again */
-		OUT_BATCH(MI_FLUSH | MI_INHIBIT_RENDER_CACHE_FLUSH);
-	} while (1);
+	} while (nbox);
+	gen4_vertex_flush(sna);
 
 	return true;
 }
@@ -1565,7 +1585,8 @@ static bool
 gen4_composite_set_target(struct sna *sna,
 			  struct sna_composite_op *op,
 			  PicturePtr dst,
-			  int x, int y, int w, int h)
+			  int x, int y, int w, int h,
+			  bool partial)
 {
 	BoxRec box;
 
@@ -1601,7 +1622,7 @@ gen4_composite_set_target(struct sna *sna,
 	assert(op->dst.bo->proxy == NULL);
 
 	if (too_large(op->dst.width, op->dst.height) &&
-	    !sna_render_composite_redirect(sna, op, x, y, w, h))
+	    !sna_render_composite_redirect(sna, op, x, y, w, h, partial))
 		return false;
 
 	return true;
@@ -1883,7 +1904,8 @@ gen4_render_composite(struct sna *sna,
 					    tmp);
 
 	if (!gen4_composite_set_target(sna, tmp, dst,
-				       dst_x, dst_y, width, height)) {
+				       dst_x, dst_y, width, height,
+				       op > PictOpSrc || dst->pCompositeClip->data)) {
 		DBG(("%s: failed to set composite target\n", __FUNCTION__));
 		return false;
 	}
@@ -1974,7 +1996,9 @@ gen4_render_composite(struct sna *sna,
 	tmp->boxes = gen4_render_composite_boxes__blt;
 	if (tmp->emit_boxes) {
 		tmp->boxes = gen4_render_composite_boxes;
+#if !FORCE_FLUSH
 		tmp->thread_boxes = gen4_render_composite_boxes__thread;
+#endif
 	}
 	tmp->done  = gen4_render_composite_done;
 
@@ -2181,7 +2205,7 @@ gen4_render_composite_spans(struct sna *sna,
 
 	tmp->base.op = op;
 	if (!gen4_composite_set_target(sna, &tmp->base, dst,
-				       dst_x, dst_y, width, height))
+				       dst_x, dst_y, width, height, true))
 		return false;
 
 	switch (gen4_composite_picture(sna, src, &tmp->base.src,
@@ -2367,7 +2391,8 @@ fallback_blt:
 						   extents.x1 + dst_dx,
 						   extents.y1 + dst_dy,
 						   extents.x2 - extents.x1,
-						   extents.y2 - extents.y1))
+						   extents.y2 - extents.y1,
+						   n > 1))
 			goto fallback_tiled;
 	}
 
