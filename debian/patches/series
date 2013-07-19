@@ -1,1 +1,4 @@
 # empty for now
+sna-note-that-borderClip-region.patch
+sna-fix-typo-in-computing-box.patch
+sna-fall-back-to-proc-cpuinfo.patch

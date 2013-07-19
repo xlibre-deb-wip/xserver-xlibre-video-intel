@@ -1,8 +1,13 @@
 xserver-xorg-video-intel (2:2.21.12-1ubuntu1) UNRELEASED; urgency=low
 
+  [ Maarten Lankhorst ]
   * Merge from unreleased debian git (LP: #1198409, #1173557, #1199746, #1200766)
     Remaining changes:
     - Use SNA by default.
+
+  [ Robert Hooker ]
+  * Cherry-pick 3 commits from upstream git to fix SNA regressions in 2.21.12
+    (34c9b759f, 7f76a2bf3, a764a6e69b)
 
  -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Thu, 18 Jul 2013 13:51:58 +0200
 
