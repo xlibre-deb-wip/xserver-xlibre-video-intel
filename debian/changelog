@@ -9,7 +9,10 @@ xserver-xorg-video-intel (2:2.21.12-1ubuntu1) UNRELEASED; urgency=low
   * Cherry-pick 3 commits from upstream git to fix SNA regressions in 2.21.12
     (34c9b759f, 7f76a2bf3, a764a6e69b)
 
- -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Thu, 18 Jul 2013 13:51:58 +0200
+  [ Christopher James Halse Rogers ]
+  * Add initial XMir support patch
+
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Thu, 01 Aug 2013 16:06:42 +1000
 
 xserver-xorg-video-intel (2:2.21.12-1) UNRELEASED; urgency=low
 
