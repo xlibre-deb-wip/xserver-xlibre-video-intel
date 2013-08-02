@@ -1,4 +1,4 @@
-xserver-xorg-video-intel (2:2.21.12-1ubuntu1) UNRELEASED; urgency=low
+xserver-xorg-video-intel (2:2.21.12-1ubuntu1) saucy; urgency=low
 
   [ Maarten Lankhorst ]
   * Merge from unreleased debian git (LP: #1198409, #1173557, #1199746, #1200766)
