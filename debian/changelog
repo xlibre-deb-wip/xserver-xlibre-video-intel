@@ -1,6 +1,6 @@
 xserver-xorg-video-intel (2:2.21.14-1) UNRELEASED; urgency=low
 
-  * New upstream release.
+  * New upstream release (closes: #697336).
 
   [ Maarten Lankhorst ]
   * Add valgrind to build-depends.
