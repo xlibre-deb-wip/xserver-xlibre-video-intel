@@ -844,11 +844,14 @@ gen5_emit_pipelined_pointers(struct sna *sna,
 			    kernel);
 	bp = gen5_get_blend(blend, op->has_component_alpha, op->dst.format);
 
-	DBG(("%s: sp=%d, bp=%d\n", __FUNCTION__, sp, bp));
 	key = sp | (uint32_t)bp << 16 | (op->mask.bo != NULL) << 31;
+	DBG(("%s: sp=%d, bp=%d, key=%08x (current sp=%d, bp=%d, key=%08x)\n",
+	     __FUNCTION__, sp, bp, key,
+	     sna->render_state.gen5.last_pipelined_pointers & 0xffff,
+	     (sna->render_state.gen5.last_pipelined_pointers >> 16) & 0x7fff,
+	     sna->render_state.gen5.last_pipelined_pointers));
 	if (key == sna->render_state.gen5.last_pipelined_pointers)
 		return false;
-
 
 	OUT_BATCH(GEN5_3DSTATE_PIPELINED_POINTERS | 5);
 	OUT_BATCH(sna->render_state.gen5.vs);
@@ -858,8 +861,12 @@ gen5_emit_pipelined_pointers(struct sna *sna,
 	OUT_BATCH(sna->render_state.gen5.wm + sp);
 	OUT_BATCH(sna->render_state.gen5.cc + bp);
 
+	bp = (sna->render_state.gen5.last_pipelined_pointers & 0x7fff0000) != ((uint32_t)bp << 16);
 	sna->render_state.gen5.last_pipelined_pointers = key;
-	return true;
+
+	gen5_emit_urb(sna);
+
+	return bp;
 }
 
 static bool
@@ -1005,6 +1012,15 @@ gen5_emit_vertex_elements(struct sna *sna,
 	}
 }
 
+inline static void
+gen5_emit_pipe_flush(struct sna *sna)
+{
+	OUT_BATCH(GEN5_PIPE_CONTROL | (4 - 2));
+	OUT_BATCH(GEN5_PIPE_CONTROL_WC_FLUSH);
+	OUT_BATCH(0);
+	OUT_BATCH(0);
+}
+
 static void
 gen5_emit_state(struct sna *sna,
 		const struct sna_composite_op *op,
@@ -1019,18 +1035,24 @@ gen5_emit_state(struct sna *sna,
 		offset &= ~1;
 	gen5_emit_binding_table(sna, offset & ~1);
 	if (gen5_emit_pipelined_pointers(sna, op, op->op, op->u.gen5.wm_kernel)){
-		gen5_emit_urb(sna);
+		DBG(("%s: changed blend state, flush required? %d\n",
+		     __FUNCTION__, (offset & 1) && op->op > PictOpSrc));
 		flush = (offset & 1) && op->op > PictOpSrc;
 	}
 	gen5_emit_vertex_elements(sna, op);
 
-	if (flush || kgem_bo_is_dirty(op->src.bo) || kgem_bo_is_dirty(op->mask.bo)) {
+	if (kgem_bo_is_dirty(op->src.bo) || kgem_bo_is_dirty(op->mask.bo)) {
 		DBG(("%s: flushing dirty (%d, %d)\n", __FUNCTION__,
 		     kgem_bo_is_dirty(op->src.bo),
 		     kgem_bo_is_dirty(op->mask.bo)));
 		OUT_BATCH(MI_FLUSH);
 		kgem_clear_dirty(&sna->kgem);
 		kgem_bo_mark_dirty(op->dst.bo);
+		flush = false;
+	}
+	if (flush) {
+		DBG(("%s: forcing flush\n", __FUNCTION__));
+		gen5_emit_pipe_flush(sna);
 	}
 }
 
@@ -2250,7 +2272,7 @@ gen5_render_copy_boxes(struct sna *sna, uint8_t alu,
 {
 	struct sna_composite_op tmp;
 
-	DBG(("%s alu=%d, src=%d:handle=%d, dst=%d:handle=%d boxes=%d x [((%d, %d), (%d, %d))...], flags=%x\n",
+	DBG(("%s alu=%d, src=%ld:handle=%d, dst=%ld:handle=%d boxes=%d x [((%d, %d), (%d, %d))...], flags=%x\n",
 	     __FUNCTION__, alu,
 	     src->drawable.serialNumber, src_bo->handle,
 	     dst->drawable.serialNumber, dst_bo->handle,
@@ -3316,7 +3338,7 @@ const char *gen5_render_init(struct sna *sna, const char *backend)
 #if !NO_COMPOSITE_SPANS
 	sna->render.check_composite_spans = gen5_check_composite_spans;
 	sna->render.composite_spans = gen5_render_composite_spans;
-	if (DEVICE_ID(sna->PciInfo) == 0x0044)
+	if (sna->PciInfo->device_id == 0x0044)
 		sna->render.prefer_gpu |= PREFER_GPU_SPANS;
 #endif
 	sna->render.video = gen5_render_video;

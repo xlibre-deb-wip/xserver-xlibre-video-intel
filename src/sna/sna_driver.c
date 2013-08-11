@@ -77,6 +77,7 @@ DevPrivateKeyRec sna_pixmap_key;
 DevPrivateKeyRec sna_gc_key;
 DevPrivateKeyRec sna_window_key;
 DevPrivateKeyRec sna_glyph_key;
+DevPrivateKeyRec sna_client_key;
 
 static void
 sna_load_palette(ScrnInfoPtr scrn, int numColors, int *indices,
@@ -276,15 +277,6 @@ cleanup_front:
 	return FALSE;
 }
 
-static void PreInitCleanup(ScrnInfoPtr scrn)
-{
-	if (!scrn || !scrn->driverPrivate)
-		return;
-
-	free(scrn->driverPrivate);
-	scrn->driverPrivate = NULL;
-}
-
 static void sna_selftest(void)
 {
 	sna_damage_selftest();
@@ -434,7 +426,7 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 	if (fd == -1) {
 		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
 			   "Failed to become DRM master.\n");
-		return FALSE;
+		goto cleanup;
 	}
 
 	preferred_depth = sna->info->gen < 030 ? 15 : 24;
@@ -444,7 +436,7 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 	if (!xf86SetDepthBpp(scrn, preferred_depth, 0, 0,
 			     Support32bppFb |
 			     SupportConvert24to32 | PreferConvert24to32))
-		return FALSE;
+		goto cleanup;
 
 	switch (scrn->depth) {
 	case 8:
@@ -458,18 +450,18 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
 			   "Given depth (%d) is not supported by the Intel driver and this chipset.\n",
 			   scrn->depth);
-		return FALSE;
+		goto cleanup;
 	}
 	xf86PrintDepthBpp(scrn);
 
 	if (!xf86SetWeight(scrn, defaultWeight, defaultWeight))
-		return FALSE;
+		goto cleanup;
 	if (!xf86SetDefaultVisual(scrn, -1))
-		return FALSE;
+		goto cleanup;
 
 	sna->Options = intel_options_get(scrn);
 	if (sna->Options == NULL)
-		return FALSE;
+		goto cleanup;
 
 	sna_setup_capabilities(scrn, fd);
 
@@ -523,8 +515,7 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 	if (!sna_mode_pre_init(scrn, sna)) {
 		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
 			   "No outputs and no modes.\n");
-		PreInitCleanup(scrn);
-		return FALSE;
+		goto cleanup;
 	}
 	scrn->currentMode = scrn->modes;
 
@@ -536,6 +527,11 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 		sna->dri_available = !!xf86LoadSubModule(scrn, "dri2");
 
 	return TRUE;
+
+cleanup:
+	scrn->driverPrivate = (void *)((uintptr_t)sna->info | 1);
+	free(sna);
+	return FALSE;
 }
 
 static void
@@ -793,6 +789,10 @@ sna_register_all_privates(void)
 	if (!dixRegisterPrivateKey(&sna_window_key, PRIVATE_WINDOW,
 				   3*sizeof(void *)))
 		return FALSE;
+
+	if (!dixRegisterPrivateKey(&sna_client_key, PRIVATE_CLIENT,
+				   sizeof(struct sna_client)))
+		return FALSE;
 #else
 	if (!dixRequestPrivate(&sna_pixmap_key, 3*sizeof(void *)))
 		return FALSE;
@@ -804,6 +804,9 @@ sna_register_all_privates(void)
 		return FALSE;
 
 	if (!dixRequestPrivate(&sna_window_key, 3*sizeof(void *)))
+		return FALSE;
+
+	if (!dixRequestPrivate(&sna_client_key, sizeof(struct sna_client)))
 		return FALSE;
 #endif
 
@@ -968,19 +971,17 @@ static void sna_free_screen(FREE_SCREEN_ARGS_DECL)
 	struct sna *sna = to_sna(scrn);
 
 	DBG(("%s\n", __FUNCTION__));
+	if ((uintptr_t)sna & 1)
+		return;
 
-	if (sna && ((intptr_t)sna & 1) == 0) {
-		sna_mode_fini(sna);
-		free(sna);
-	}
-	scrn->driverPrivate = NULL;
+	scrn->driverPrivate = (void *)((uintptr_t)sna->info | 1);
+
+	sna_mode_fini(sna);
+	free(sna);
 
 	intel_put_device(scrn);
 }
 
-/*
- * This gets called when gaining control of the VT, and from ScreenInit().
- */
 static Bool sna_enter_vt(VT_FUNC_ARGS_DECL)
 {
 	SCRN_INFO_PTR(arg);

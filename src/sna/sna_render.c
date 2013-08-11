@@ -553,8 +553,11 @@ static struct kgem_bo *upload(struct sna *sna,
 		    pixmap->usage_hint == 0 &&
 		    channel->width  == pixmap->drawable.width &&
 		    channel->height == pixmap->drawable.height) {
+			DBG(("%s: adding upload cache to pixmap=%ld\n",
+			     __FUNCTION__, pixmap->drawable.serialNumber));
 			assert(priv->gpu_damage == NULL);
 			assert(priv->gpu_bo == NULL);
+			assert(bo->proxy != NULL);
 			kgem_proxy_bo_attach(bo, &priv->gpu_bo);
 		}
 	}
@@ -1210,8 +1213,11 @@ sna_render_picture_extract(struct sna *sna,
 			if (priv != NULL && bo != NULL &&
 			    box.x2 - box.x1 == pixmap->drawable.width &&
 			    box.y2 - box.y1 == pixmap->drawable.height) {
+				DBG(("%s: adding upload cache to pixmap=%ld\n",
+				     __FUNCTION__, pixmap->drawable.serialNumber));
 				assert(priv->gpu_damage == NULL);
 				assert(priv->gpu_bo == NULL);
+				assert(bo->proxy != NULL);
 				kgem_proxy_bo_attach(bo, &priv->gpu_bo);
 			}
 		}
@@ -1480,7 +1486,7 @@ sna_render_picture_approximate_gradient(struct sna *sna,
 		return -1;
 	}
 
-	channel->is_opaque = sna_gradient_is_opaque(picture->pSourcePict);
+	channel->is_opaque = sna_gradient_is_opaque((PictGradient*)picture->pSourcePict);
 	channel->pict_format =
 		channel->is_opaque ? PIXMAN_x8r8g8b8 : PIXMAN_a8r8g8b8;
 	DBG(("%s: gradient is opaque? %d, selecting format %08x\n",
@@ -2071,6 +2077,7 @@ sna_render_composite_redirect_done(struct sna *sna,
 						op->dst.pixmap->drawable.bitsPerPixel,
 						&t->box, 1);
 			assert(ok);
+			(void)ok;
 		}
 		if (t->damage) {
 			DBG(("%s: combining damage (all? %d), offset=(%d, %d)\n",

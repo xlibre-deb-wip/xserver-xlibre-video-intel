@@ -86,7 +86,7 @@ static int create_context(XvPortPtr port, XvMCContextPtr ctx,
 		else
 			priv->type = XVMC_I965_MPEG2_MC;
 		priv->i965.is_g4x = sna->kgem.gen == 045;
-		priv->i965.is_965_q = IS_965_Q(sna);
+		priv->i965.is_965_q = sna->PciInfo->device_id == PCI_CHIP_I965_Q;
 		priv->i965.is_igdng = sna->kgem.gen == 050;
 	} else
 		priv->type = XVMC_I915_MPEG2_MC;
@@ -256,7 +256,7 @@ void sna_video_xvmc_setup(struct sna *sna, ScreenPtr screen)
 		sna->PciInfo->domain,
 		sna->PciInfo->bus, sna->PciInfo->dev, sna->PciInfo->func);
 
-	xf86XvMCRegisterDRInfo(screen, SNA_XVMC_LIBNAME, bus,
+	xf86XvMCRegisterDRInfo(screen, (char *)SNA_XVMC_LIBNAME, bus,
 			       SNA_XVMC_MAJOR, SNA_XVMC_MINOR,
 			       SNA_XVMC_PATCHLEVEL);
 

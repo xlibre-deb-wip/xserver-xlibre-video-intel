@@ -307,6 +307,7 @@ fallback:
 
 			DBG(("%s: tiling download, using %dx%d tiles\n",
 			     __FUNCTION__, step, step));
+			assert(step);
 
 			for (tile.y1 = extents.y1; tile.y1 < extents.y2; tile.y1 = tile.y2) {
 				int y2 = tile.y1 + step;
@@ -699,13 +700,12 @@ bool sna_write_boxes(struct sna *sna, PixmapPtr dst,
 
 	DBG(("%s x %d, src stride=%d,  src dx=(%d, %d)\n", __FUNCTION__, nbox, stride, src_dx, src_dy));
 
-	if (upload_inplace(kgem, dst_bo, box, nbox, dst->drawable.bitsPerPixel)) {
-fallback:
-		return write_boxes_inplace(kgem,
-					   src, stride, dst->drawable.bitsPerPixel, src_dx, src_dy,
-					   dst_bo, dst_dx, dst_dy,
-					   box, nbox);
-	}
+	if (upload_inplace(kgem, dst_bo, box, nbox, dst->drawable.bitsPerPixel)&&
+	    write_boxes_inplace(kgem,
+				src, stride, dst->drawable.bitsPerPixel, src_dx, src_dy,
+				dst_bo, dst_dx, dst_dy,
+				box, nbox))
+		return true;
 
 	can_blt = kgem_bo_can_blt(kgem, dst_bo) &&
 		(box[0].x2 - box[0].x1) * dst->drawable.bitsPerPixel < 8 * (MAXSHORT - 4);
@@ -757,6 +757,7 @@ tile:
 
 			if (step * cpp > 4096)
 				step = 4096 / cpp;
+			assert(step);
 
 			DBG(("%s: tiling upload, using %dx%d tiles\n",
 			     __FUNCTION__, step, step));
@@ -994,6 +995,12 @@ tile:
 
 	sna->blt_state.fill_bo = 0;
 	return true;
+
+fallback:
+	return write_boxes_inplace(kgem,
+				   src, stride, dst->drawable.bitsPerPixel, src_dx, src_dy,
+				   dst_bo, dst_dx, dst_dy,
+				   box, nbox);
 }
 
 static void
@@ -1131,6 +1138,7 @@ tile:
 
 			DBG(("%s: tiling upload, using %dx%d tiles\n",
 			     __FUNCTION__, step, step));
+			assert(step);
 
 			if (n > ARRAY_SIZE(stack)) {
 				clipped = malloc(sizeof(BoxRec) * n);

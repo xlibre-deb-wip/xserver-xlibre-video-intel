@@ -1596,7 +1596,7 @@ gen6_render_video(struct sna *sna,
 	DBG(("%s: src=(%d, %d), dst=(%d, %d), %ldx[(%d, %d), (%d, %d)...]\n",
 	     __FUNCTION__,
 	     src_width, src_height, dst_width, dst_height,
-	     REGION_NUM_RECTS(dstRegion),
+	     (long)REGION_NUM_RECTS(dstRegion),
 	     REGION_EXTENTS(NULL, dstRegion)->x1,
 	     REGION_EXTENTS(NULL, dstRegion)->y1,
 	     REGION_EXTENTS(NULL, dstRegion)->x2,
@@ -3580,12 +3580,12 @@ static void gen6_render_fini(struct sna *sna)
 
 static bool is_gt2(struct sna *sna)
 {
-	return DEVICE_ID(sna->PciInfo) & 0x30;
+	return sna->PciInfo->device_id & 0x30;
 }
 
 static bool is_mobile(struct sna *sna)
 {
-	return (DEVICE_ID(sna->PciInfo) & 0xf) == 0x6;
+	return (sna->PciInfo->device_id & 0xf) == 0x6;
 }
 
 static bool gen6_render_setup(struct sna *sna)

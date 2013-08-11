@@ -1721,6 +1721,7 @@ blt_put_composite(struct sna *sna,
 				     data, pitch, src_x, src_y,
 				     &box, 1);
 		assert(ok);
+		(void)ok;
 	}
 }
 
@@ -1757,6 +1758,7 @@ fastcall static void blt_put_composite_box(struct sna *sna,
 				     op->u.blt.sx, op->u.blt.sy,
 				     box, 1);
 		assert(ok);
+		(void)ok;
 	}
 }
 
@@ -1794,6 +1796,7 @@ static void blt_put_composite_boxes(struct sna *sna,
 				     op->u.blt.sx, op->u.blt.sy,
 				     box, n);
 		assert(ok);
+		(void)ok;
 	}
 }
 
@@ -1953,13 +1956,6 @@ prepare_blt_put(struct sna *sna,
 	return true;
 }
 
-#define alphaless(format) PICT_FORMAT(PICT_FORMAT_BPP(format),		\
-				      PICT_FORMAT_TYPE(format),		\
-				      0,				\
-				      PICT_FORMAT_R(format),		\
-				      PICT_FORMAT_G(format),		\
-				      PICT_FORMAT_B(format))
-
 static bool
 is_clear(PixmapPtr pixmap)
 {
@@ -2031,10 +2027,12 @@ clear:
 		hint = 0;
 		if (can_render(sna)) {
 			hint |= PREFER_GPU;
-			if (sna_pixmap(tmp->dst.pixmap)->gpu_bo)
-				hint |= FORCE_GPU;
-			if (dst->pCompositeClip->data == NULL)
+			if (dst->pCompositeClip->data == NULL && (width | height)) {
 				hint |= IGNORE_CPU;
+				if (width == tmp->dst.pixmap->drawable.width &&
+				    height == tmp->dst.pixmap->drawable.height)
+					hint |= REPLACES;
+			}
 		}
 		tmp->dst.bo = sna_drawable_use_bo(dst->pDrawable, hint,
 						  &dst_box, &tmp->damage);
@@ -2053,7 +2051,9 @@ clear:
 			if (!sna_drawable_move_region_to_cpu(dst->pDrawable, &region,
 							     MOVE_INPLACE_HINT | MOVE_WRITE))
 				return false;
-		}
+		} else if (hint & REPLACES)
+			kgem_bo_undo(&sna->kgem, tmp->dst.bo);
+
 		return prepare_blt_clear(sna, tmp);
 	}
 
@@ -2081,10 +2081,11 @@ fill:
 		hint = 0;
 		if (can_render(sna)) {
 			hint |= PREFER_GPU;
-			if (sna_pixmap(tmp->dst.pixmap)->gpu_bo)
-				hint |= FORCE_GPU;
-			if (dst->pCompositeClip->data == NULL)
+			if (dst->pCompositeClip->data == NULL && (width | height))
 				hint |= IGNORE_CPU;
+				if (width == tmp->dst.pixmap->drawable.width &&
+				    height == tmp->dst.pixmap->drawable.height)
+					hint |= REPLACES;
 		}
 		tmp->dst.bo = sna_drawable_use_bo(dst->pDrawable, hint,
 						  &dst_box, &tmp->damage);
@@ -2103,7 +2104,8 @@ fill:
 			if (!sna_drawable_move_region_to_cpu(dst->pDrawable, &region,
 							MOVE_INPLACE_HINT | MOVE_WRITE))
 				return false;
-		}
+		} else if (hint & REPLACES)
+			kgem_bo_undo(&sna->kgem, tmp->dst.bo);
 
 		return prepare_blt_fill(sna, tmp, color);
 	}
@@ -2232,13 +2234,20 @@ fill:
 	hint = 0;
 	if (bo || can_render(sna)) {
 		hint |= PREFER_GPU;
-		if (dst->pCompositeClip->data == NULL)
+		if (dst->pCompositeClip->data == NULL && (width | height)) {
 			hint |= IGNORE_CPU;
+			if (width == tmp->dst.pixmap->drawable.width &&
+			    height == tmp->dst.pixmap->drawable.height)
+				hint |= REPLACES;
+		}
 		if (bo)
 			hint |= FORCE_GPU;
 	}
 	tmp->dst.bo = sna_drawable_use_bo(dst->pDrawable, hint,
 					  &dst_box, &tmp->damage);
+
+	if (hint & REPLACES)
+		kgem_bo_undo(&sna->kgem, tmp->dst.bo);
 
 	ret = false;
 	if (bo) {

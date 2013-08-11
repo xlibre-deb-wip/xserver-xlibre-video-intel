@@ -27,6 +27,7 @@ AM_CFLAGS = \
 	@XORG_CFLAGS@ \
 	@UDEV_CFLAGS@ \
 	@DRM_CFLAGS@ \
+	@NOWARNFLAGS@
 	$(NULL)
 
 if VALGRIND
@@ -49,6 +50,7 @@ libsna_la_SOURCES = \
 	sna_blt.c \
 	sna_composite.c \
 	sna_cpu.c \
+	sna_cpuid.h \
 	sna_damage.c \
 	sna_damage.h \
 	sna_display.c \
@@ -92,9 +94,9 @@ libsna_la_SOURCES = \
 	$(NULL)
 
 if DRI2
-AM_CFLAGS += @DRI_CFLAGS@
+AM_CFLAGS += @DRI2_CFLAGS@
 libsna_la_SOURCES += sna_dri.c
-libsna_la_LIBADD += $(DRI_LIBS) @CLOCK_GETTIME_LIBS@
+libsna_la_LIBADD += $(DRI2_LIBS) @CLOCK_GETTIME_LIBS@
 endif
 
 if XVMC

@@ -38,7 +38,6 @@
 #include <time.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <cpuid.h>
 
 #include <xf86drm.h>
 
@@ -50,6 +49,8 @@
 #if HAVE_SYS_SYSINFO_H
 #include <sys/sysinfo.h>
 #endif
+
+#include "sna_cpuid.h"
 
 static struct kgem_bo *
 search_linear_cache(struct kgem *kgem, unsigned int num_pages, unsigned flags);
@@ -76,6 +77,7 @@ search_snoop_cache(struct kgem *kgem, unsigned int num_pages, unsigned flags);
 #define DBG_NO_PINNED_BATCHES 0
 #define DBG_NO_FAST_RELOC 0
 #define DBG_NO_HANDLE_LUT 0
+#define DBG_NO_WT 0
 #define DBG_DUMP 0
 
 #define FORCE_MMAP_SYNC 0 /* ((1 << DOMAIN_CPU) | (1 << DOMAIN_GTT)) */
@@ -123,6 +125,7 @@ search_snoop_cache(struct kgem *kgem, unsigned int num_pages, unsigned flags);
 #define LOCAL_I915_PARAM_HAS_PINNED_BATCHES	24
 #define LOCAL_I915_PARAM_HAS_NO_RELOC		25
 #define LOCAL_I915_PARAM_HAS_HANDLE_LUT		26
+#define LOCAL_I915_PARAM_HAS_WT			27
 
 #define LOCAL_I915_EXEC_IS_PINNED		(1<<10)
 #define LOCAL_I915_EXEC_NO_RELOC		(1<<11)
@@ -698,7 +701,7 @@ total_ram_size(void)
 }
 
 static unsigned
-cpu_cache_size(void)
+cpu_cache_size__cpuid4(void)
 {
 	/* Deterministic Cache Parmaeters (Function 04h)":
 	 *    When EAX is initialized to a value of 4, the CPUID instruction
@@ -718,7 +721,7 @@ cpu_cache_size(void)
 	 unsigned int llc_size = 0;
 	 int cnt = 0;
 
-	 if (__get_cpuid_max(false, 0) < 4)
+	 if (__get_cpuid_max(BASIC_CPUID, NULL) < 4)
 		 return 0;
 
 	 do {
@@ -738,6 +741,39 @@ cpu_cache_size(void)
 	 } while (1);
 
 	 return llc_size;
+}
+
+static unsigned
+cpu_cache_size(void)
+{
+	unsigned size;
+	FILE *file;
+
+	size = cpu_cache_size__cpuid4();
+	if (size)
+		return size;
+
+	file = fopen("/proc/cpuinfo", "r");
+	if (file) {
+		size_t len = 0;
+		char *line = NULL;
+		while (getline(&line, &len, file) != -1) {
+			int kb;
+			if (sscanf(line, "cache size : %d KB", &kb) == 1) {
+				/* Paranoid check against gargantuan caches */
+				if (kb <= 1<<20)
+					size = kb * 1024;
+				break;
+			}
+		}
+		free(line);
+		fclose(file);
+	}
+
+	if (size == 0)
+		size = 64 * 1024;
+
+	return size;
 }
 
 static int gem_param(struct kgem *kgem, int name)
@@ -782,6 +818,18 @@ static bool test_has_handle_lut(struct kgem *kgem)
 		return false;
 
 	return gem_param(kgem, LOCAL_I915_PARAM_HAS_HANDLE_LUT) > 0;
+}
+
+static bool test_has_wt(struct kgem *kgem)
+{
+#if defined(USE_WT)
+	if (DBG_NO_WT)
+		return false;
+
+	return gem_param(kgem, LOCAL_I915_PARAM_HAS_WT) > 0;
+#else
+	return false;
+#endif
 }
 
 static bool test_has_semaphores_enabled(struct kgem *kgem)
@@ -1122,6 +1170,10 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 	DBG(("%s: has shared last-level-cache? %d\n", __FUNCTION__,
 	     kgem->has_llc));
 
+	kgem->has_wt = test_has_wt(kgem);
+	DBG(("%s: has write-through cacheing for scanouts? %d\n", __FUNCTION__,
+	     kgem->has_wt));
+
 	kgem->has_cacheing = test_has_cacheing(kgem);
 	DBG(("%s: has set-cache-level? %d\n", __FUNCTION__,
 	     kgem->has_cacheing));
@@ -1240,8 +1292,10 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 		kgem->buffer_size *= 2;
 	if (kgem->buffer_size >> 12 > kgem->half_cpu_cache_pages)
 		kgem->buffer_size = kgem->half_cpu_cache_pages << 12;
+	kgem->buffer_size = 1 << __fls(kgem->buffer_size);
 	DBG(("%s: buffer size=%d [%d KiB]\n", __FUNCTION__,
 	     kgem->buffer_size, kgem->buffer_size / 1024));
+	assert(kgem->buffer_size);
 
 	kgem->max_object_size = 3 * (kgem->aperture_high >> 12) << 10;
 	kgem->max_gpu_size = kgem->max_object_size;
@@ -1277,6 +1331,8 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 		kgem->max_upload_tile_size = kgem->aperture_high/2;
 	if (kgem->max_upload_tile_size > kgem->aperture_low)
 		kgem->max_upload_tile_size = kgem->aperture_low;
+	if (kgem->max_upload_tile_size < 16*PAGE_SIZE)
+		kgem->max_upload_tile_size = 16*PAGE_SIZE;
 
 	kgem->large_object_size = MAX_CACHE_SIZE;
 	if (kgem->large_object_size > half_gpu_max)
@@ -1285,6 +1341,8 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 		kgem->max_copy_tile_size = kgem->aperture_high/2;
 	if (kgem->max_copy_tile_size > kgem->aperture_low)
 		kgem->max_copy_tile_size = kgem->aperture_low;
+	if (kgem->max_copy_tile_size < 16*PAGE_SIZE)
+		kgem->max_copy_tile_size = 16*PAGE_SIZE;
 
 	if (kgem->has_llc | kgem->has_cacheing | kgem->has_userptr) {
 		if (kgem->large_object_size > kgem->max_cpu_size)
@@ -1395,6 +1453,7 @@ static uint32_t kgem_surface_size(struct kgem *kgem,
 
 	assert(width <= MAXSHORT);
 	assert(height <= MAXSHORT);
+	assert(bpp >= 8);
 
 	if (kgem->gen <= 030) {
 		if (tiling) {
@@ -1850,6 +1909,7 @@ search_snoop_cache(struct kgem *kgem, unsigned int num_pages, unsigned flags)
 		assert(bo->refcnt == 0);
 		assert(bo->snoop);
 		assert(!bo->scanout);
+		assert(!bo->purged);
 		assert(bo->proxy == NULL);
 		assert(bo->tiling == I915_TILING_NONE);
 		assert(bo->rq == NULL);
@@ -2590,6 +2650,7 @@ void kgem_reset(struct kgem *kgem)
 			bo->gpu_dirty = false;
 
 			if (bo->needs_flush && __kgem_busy(kgem, bo->handle)) {
+				assert(bo->domain == DOMAIN_GPU || bo->domain == DOMAIN_NONE);
 				list_add(&bo->request, &kgem->flushing);
 				bo->rq = (void *)kgem;
 			} else
@@ -3200,6 +3261,8 @@ search_linear_cache(struct kgem *kgem, unsigned int num_pages, unsigned flags)
 	     num_pages >= MAX_CACHE_SIZE / PAGE_SIZE,
 	     MAX_CACHE_SIZE / PAGE_SIZE));
 
+	assert(num_pages);
+
 	if (num_pages >= MAX_CACHE_SIZE / PAGE_SIZE) {
 		DBG(("%s: searching large buffers\n", __FUNCTION__));
 retry_large:
@@ -3523,13 +3586,14 @@ struct kgem_bo *kgem_create_linear(struct kgem *kgem, int size, unsigned flags)
 	uint32_t handle;
 
 	DBG(("%s(%d)\n", __FUNCTION__, size));
+	assert(size);
 
 	if (flags & CREATE_GTT_MAP && kgem->has_llc) {
 		flags &= ~CREATE_GTT_MAP;
 		flags |= CREATE_CPU_MAP;
 	}
 
-	size = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+	size = NUM_PAGES(size);
 	bo = search_linear_cache(kgem, size, CREATE_INACTIVE | flags);
 	if (bo) {
 		assert(bo->domain != DOMAIN_GPU);
@@ -3569,10 +3633,6 @@ int kgem_choose_tiling(struct kgem *kgem, int tiling, int width, int height, int
 			goto done;
 		}
 	} else {
-		/* XXX rendering to I915_TILING_Y seems broken? */
-		if (kgem->gen < 050 && tiling == I915_TILING_Y)
-			tiling = I915_TILING_X;
-
 		if (width*bpp > (MAXSHORT-512) * 8) {
 			if (tiling > 0)
 				tiling = -tiling;
@@ -4957,7 +5017,6 @@ void *kgem_bo_map__cpu(struct kgem *kgem, struct kgem_bo *bo)
 	     __FUNCTION__, bo->handle, bytes(bo), (int)__MAP_TYPE(bo->map)));
 	assert(!bo->purged);
 	assert(list_is_empty(&bo->list));
-	assert(!bo->scanout);
 	assert(bo->proxy == NULL);
 
 	if (IS_CPU_MAP(bo->map))
@@ -5145,14 +5204,13 @@ struct kgem_bo *kgem_create_map(struct kgem *kgem,
 void kgem_bo_sync__cpu(struct kgem *kgem, struct kgem_bo *bo)
 {
 	DBG(("%s: handle=%d\n", __FUNCTION__, bo->handle));
+	assert(!bo->scanout);
 	kgem_bo_submit(kgem, bo);
 
 	/* SHM pixmaps use proxies for subpage offsets */
 	assert(!bo->purged);
-	assert(bo->refcnt);
 	while (bo->proxy)
 		bo = bo->proxy;
-	assert(bo->refcnt);
 	assert(!bo->purged);
 
 	if (bo->domain != DOMAIN_CPU || FORCE_MMAP_SYNC & (1 << DOMAIN_CPU)) {
@@ -5178,6 +5236,7 @@ void kgem_bo_sync__cpu(struct kgem *kgem, struct kgem_bo *bo)
 void kgem_bo_sync__cpu_full(struct kgem *kgem, struct kgem_bo *bo, bool write)
 {
 	DBG(("%s: handle=%d\n", __FUNCTION__, bo->handle));
+	assert(!bo->scanout || !write);
 
 	if (write || bo->needs_flush)
 		kgem_bo_submit(kgem, bo);
@@ -5612,6 +5671,7 @@ struct kgem_bo *kgem_create_buffer(struct kgem *kgem,
 		alloc = ALIGN(size, kgem->buffer_size);
 	if (alloc > MAX_CACHE_SIZE)
 		alloc = PAGE_ALIGN(size);
+	assert(alloc);
 
 	if (alloc > kgem->aperture_mappable / 4)
 		flags &= ~KGEM_BUFFER_INPLACE;

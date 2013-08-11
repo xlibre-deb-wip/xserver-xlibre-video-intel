@@ -536,6 +536,7 @@ static char *
 has_backlight(xf86OutputPtr output, int *best_type)
 {
 	static const char *known_interfaces[] = {
+		"dell_backlight",
 		"gmux_backlight",
 		"asus-laptop",
 		"asus-nb-wmi",
@@ -654,11 +655,11 @@ done:
 	sna_output->backlight_max = sna_output_backlight_get_max(output);
 	sna_output->backlight_active_level = sna_output_backlight_get(output);
 	switch (best_type) {
-	case INT_MAX: best_iface = "user"; from = X_CONFIG; break;
-	case FIRMWARE: best_iface = "firmware"; break;
-	case PLATFORM: best_iface = "platform"; break;
-	case RAW: best_iface = "raw"; break;
-	default: best_iface = "unknown"; break;
+	case INT_MAX: best_iface = (char *)"user"; from = X_CONFIG; break;
+	case FIRMWARE: best_iface = (char *)"firmware"; break;
+	case PLATFORM: best_iface = (char *)"platform"; break;
+	case RAW: best_iface = (char *)"raw"; break;
+	default: best_iface = (char *)"unknown"; break;
 	}
 	xf86DrvMsg(output->scrn->scrnIndex, from,
 		   "found backlight control interface %s (type '%s')\n",
@@ -749,6 +750,9 @@ sna_crtc_force_outputs_on(xf86CrtcPtr crtc)
 	}
 
 	to_sna_crtc(crtc)->dpms_mode = DPMSModeOn;
+#if XF86_CRTC_VERSION >= 3
+	crtc->active = TRUE;
+#endif
 }
 
 static bool
@@ -1382,6 +1386,17 @@ static char *outputs_for_crtc(xf86CrtcPtr crtc, char *outputs, int max)
 	return outputs;
 }
 
+static const char *rotation_to_str(Rotation rotation)
+{
+	switch (rotation) {
+	case RR_Rotate_0: return "normal";
+	case RR_Rotate_90: return "right";
+	case RR_Rotate_180: return "inverted";
+	case RR_Rotate_270: return "left";
+	default: return "unknown";
+	}
+}
+
 static Bool
 sna_crtc_set_mode_major(xf86CrtcPtr crtc, DisplayModePtr mode,
 			Rotation rotation, int x, int y)
@@ -1398,13 +1413,11 @@ sna_crtc_set_mode_major(xf86CrtcPtr crtc, DisplayModePtr mode,
 		return FALSE;
 
 	xf86DrvMsg(crtc->scrn->scrnIndex, X_INFO,
-		   "switch to mode %dx%d on pipe %d using %s\n",
-		   mode->HDisplay, mode->VDisplay, sna_crtc->pipe,
-		   outputs_for_crtc(crtc, outputs, sizeof(outputs)));
-
-	DBG(("%s(crtc=%d [pipe=%d] rotation=%d, x=%d, y=%d, mode=%dx%d@%d)\n",
-	     __FUNCTION__, sna_crtc->id, sna_crtc->pipe, rotation, x, y,
-	     mode->HDisplay, mode->VDisplay, mode->Clock));
+		   "switch to mode %dx%d@%.1f on pipe %d using %s, position (%d, %d), rotation %s\n",
+		   mode->HDisplay, mode->VDisplay, xf86ModeVRefresh(mode),
+		   sna_crtc->pipe,
+		   outputs_for_crtc(crtc, outputs, sizeof(outputs)),
+		   x, y, rotation_to_str(rotation));
 
 	assert(mode->HDisplay <= sna->mode.kmode->max_width &&
 	       mode->VDisplay <= sna->mode.kmode->max_height);
@@ -3019,6 +3032,8 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 		if (drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_GETCRTC, &mode))
 			continue;
 
+		DBG(("%s: CRTC:%d, pipe=%d: has mode?=%d\n", __FUNCTION__,
+		     sna_crtc->id, sna_crtc->pipe, mode.mode_valid));
 		if (!mode.mode_valid)
 			continue;
 
@@ -3049,6 +3064,9 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 		crtc_id = (uintptr_t)output->crtc;
 		output->crtc = NULL;
 
+		if (crtc_id == 0)
+			continue;
+
 		if (xf86ReturnOptValBool(output->options, OPTION_DISABLE, 0))
 			continue;
 
@@ -3058,7 +3076,7 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 				if (crtc->desiredMode.status == MODE_OK) {
 					DisplayModePtr M;
 
-					xf86DrvMsg(scrn->scrnIndex, X_INFO,
+					xf86DrvMsg(scrn->scrnIndex, X_PROBED,
 						   "Output %s using initial mode %s on pipe %d\n",
 						   output->name,
 						   crtc->desiredMode.name,
@@ -3085,6 +3103,11 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 				}
 				break;
 			}
+		}
+
+		if (output->crtc == NULL) {
+			/* Can not find the earlier associated CRTC, bail */
+			return false;
 		}
 	}
 
@@ -3570,7 +3593,7 @@ void sna_mode_update(struct sna *sna)
 		DBG(("%s: crtc=%d, valid?=%d, fb attached?=%d, expected=%d\n",
 		     __FUNCTION__,
 		     mode.crtc_id, mode.mode_valid,
-		     mode.fb_id, fb_id, expected));
+		     mode.fb_id, expected));
 
 		if (mode.fb_id != expected)
 			sna_crtc_disable(crtc);
@@ -3779,7 +3802,7 @@ sna_crtc_redisplay(xf86CrtcPtr crtc, RegionPtr region)
 	     __FUNCTION__, sna_crtc->id, sna_crtc->pipe,
 	     region->extents.x1, region->extents.y1,
 	     region->extents.x2, region->extents.y2,
-	     REGION_NUM_RECTS(region)));
+	     (long)RegionNumRects(region)));
 
 	assert(!wedged(sna));
 
@@ -3814,6 +3837,10 @@ static void set_bo(PixmapPtr pixmap, struct kgem_bo *bo)
 	struct sna_pixmap *priv = sna_pixmap(pixmap);
 
 	assert((priv->pinned & PIN_PRIME) == 0);
+	assert(bo != priv->gpu_bo);
+
+	if (priv->cow)
+		sna_pixmap_undo_cow(to_sna_from_pixmap(pixmap), priv, 0);
 
 	if (priv->mapped) {
 		assert(!priv->shm && priv->stride);
