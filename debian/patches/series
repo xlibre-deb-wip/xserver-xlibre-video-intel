@@ -1,1 +1,2 @@
 Check-for-struct-sysinfo-as-well-as-sys-sysinfo.h.patch
+Link-the-driver-against-pixman.patch
