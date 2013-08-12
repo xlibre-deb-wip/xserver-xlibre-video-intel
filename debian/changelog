@@ -1,9 +1,9 @@
-xserver-xorg-video-intel (2:2.21.14-4) UNRELEASED; urgency=low
+xserver-xorg-video-intel (2:2.21.14-4) unstable; urgency=low
 
   * Link the driver against pixman to get correct dependency (closes: #719518).
     Thanks to Martin Perazzo for the report!
 
- -- Julien Cristau <jcristau@debian.org>  Mon, 12 Aug 2013 19:36:46 +0200
+ -- Julien Cristau <jcristau@debian.org>  Mon, 12 Aug 2013 19:48:43 +0200
 
 xserver-xorg-video-intel (2:2.21.14-3) unstable; urgency=low
 
