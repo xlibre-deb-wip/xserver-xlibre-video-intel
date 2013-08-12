@@ -1,3 +1,10 @@
+xserver-xorg-video-intel (2:2.21.14-3) UNRELEASED; urgency=low
+
+  * Add patch to deal with missing 'struct sysinfo' in kfreebsd's
+    <sys/sysinfo.h>.
+
+ -- Julien Cristau <jcristau@debian.org>  Mon, 12 Aug 2013 15:30:20 +0200
+
 xserver-xorg-video-intel (2:2.21.14-2) unstable; urgency=low
 
   * Don't enable valgrind on kfreebsd.
