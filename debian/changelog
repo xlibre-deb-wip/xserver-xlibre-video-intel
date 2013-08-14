@@ -1,3 +1,9 @@
+xserver-xorg-video-intel (2:2.21.12-1ubuntu2) saucy; urgency=low
+
+  * Fix crash in sna_adjust_frame under XMir (LP: #1212065)
+
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Wed, 14 Aug 2013 14:06:13 +1000
+
 xserver-xorg-video-intel (2:2.21.12-1ubuntu1) saucy; urgency=low
 
   [ Maarten Lankhorst ]

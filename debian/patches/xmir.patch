@@ -11,8 +11,8 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
 
 Index: xf86-video-intel/src/Makefile.am
 ===================================================================
---- xf86-video-intel.orig/src/Makefile.am	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/Makefile.am	2013-08-01 16:06:54.212945668 +1000
+--- xf86-video-intel.orig/src/Makefile.am	2013-08-14 14:01:04.235601828 +1000
++++ xf86-video-intel/src/Makefile.am	2013-08-14 14:01:04.231601828 +1000
 @@ -46,6 +46,7 @@
  	intel_device.c \
  	intel_options.c \
@@ -23,8 +23,8 @@ Index: xf86-video-intel/src/Makefile.am
  
 Index: xf86-video-intel/src/intel_device.c
 ===================================================================
---- xf86-video-intel.orig/src/intel_device.c	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/intel_device.c	2013-08-01 16:06:54.212945668 +1000
+--- xf86-video-intel.orig/src/intel_device.c	2013-08-14 14:01:04.235601828 +1000
++++ xf86-video-intel/src/intel_device.c	2013-08-14 14:01:04.231601828 +1000
 @@ -92,7 +92,7 @@
  		if (drmIoctl(fd, DRM_IOCTL_I915_GETPARAM, &gp))
  			ret = FALSE;
@@ -117,8 +117,8 @@ Index: xf86-video-intel/src/intel_device.c
  	drmClose(dev->fd);
 Index: xf86-video-intel/src/intel_driver.h
 ===================================================================
---- xf86-video-intel.orig/src/intel_driver.h	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/intel_driver.h	2013-08-01 16:06:54.212945668 +1000
+--- xf86-video-intel.orig/src/intel_driver.h	2013-08-14 14:01:04.235601828 +1000
++++ xf86-video-intel/src/intel_driver.h	2013-08-14 14:01:04.231601828 +1000
 @@ -1,6 +1,8 @@
  #ifndef INTEL_DRIVER_H
  #define INTEL_DRIVER_H
@@ -130,8 +130,8 @@ Index: xf86-video-intel/src/intel_driver.h
  #define INTEL_DRIVER_NAME "intel"
 Index: xf86-video-intel/src/intel_module.c
 ===================================================================
---- xf86-video-intel.orig/src/intel_module.c	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/intel_module.c	2013-08-01 16:06:54.212945668 +1000
+--- xf86-video-intel.orig/src/intel_module.c	2013-08-14 14:01:04.235601828 +1000
++++ xf86-video-intel/src/intel_module.c	2013-08-14 14:01:04.231601828 +1000
 @@ -422,6 +422,9 @@
  #else
  		(*flag) = HW_IO | HW_MMIO;
@@ -155,7 +155,7 @@ Index: xf86-video-intel/src/intel_module.c
 Index: xf86-video-intel/src/intel_xmir.h
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ xf86-video-intel/src/intel_xmir.h	2013-08-01 16:06:54.212945668 +1000
++++ xf86-video-intel/src/intel_xmir.h	2013-08-14 14:01:04.231601828 +1000
 @@ -0,0 +1,15 @@
 +#ifndef INTEL_XMIR_H
 +#define INTEL_XMIR_H
@@ -174,8 +174,8 @@ Index: xf86-video-intel/src/intel_xmir.h
 +#endif /* INTEL_XMIR_H */
 Index: xf86-video-intel/src/sna/Makefile.am
 ===================================================================
---- xf86-video-intel.orig/src/sna/Makefile.am	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/sna/Makefile.am	2013-08-01 16:06:54.212945668 +1000
+--- xf86-video-intel.orig/src/sna/Makefile.am	2013-08-14 14:01:04.235601828 +1000
++++ xf86-video-intel/src/sna/Makefile.am	2013-08-14 14:01:04.231601828 +1000
 @@ -73,6 +73,7 @@
  	sna_video_overlay.c \
  	sna_video_sprite.c \
@@ -186,8 +186,8 @@ Index: xf86-video-intel/src/sna/Makefile.am
  	gen3_render.c \
 Index: xf86-video-intel/src/sna/sna.h
 ===================================================================
---- xf86-video-intel.orig/src/sna/sna.h	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/sna/sna.h	2013-08-01 16:06:54.212945668 +1000
+--- xf86-video-intel.orig/src/sna/sna.h	2013-08-14 14:01:04.235601828 +1000
++++ xf86-video-intel/src/sna/sna.h	2013-08-14 14:01:04.231601828 +1000
 @@ -218,6 +218,7 @@
  #define SNA_TEAR_FREE		0x10
  #define SNA_FORCE_SHADOW	0x20
@@ -225,9 +225,19 @@ Index: xf86-video-intel/src/sna/sna.h
  #endif /* _SNA_H */
 Index: xf86-video-intel/src/sna/sna_display.c
 ===================================================================
---- xf86-video-intel.orig/src/sna/sna_display.c	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/sna/sna_display.c	2013-08-01 16:06:54.212945668 +1000
-@@ -3128,11 +3128,22 @@
+--- xf86-video-intel.orig/src/sna/sna_display.c	2013-08-14 14:01:04.235601828 +1000
++++ xf86-video-intel/src/sna/sna_display.c	2013-08-14 14:01:13.183602136 +1000
+@@ -1488,6 +1488,9 @@
+ 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(sna->scrn);
+ 	xf86CrtcPtr crtc;
+ 
++	if (sna->flags & SNA_IS_HOSTED)
++		return;
++
+ 	if ((unsigned)config->compat_output >= config->num_output)
+ 		return;
+ 
+@@ -3128,11 +3131,22 @@
  	sna_mode_update(to_sna_from_screen(screen));
  }
  
@@ -250,7 +260,7 @@ Index: xf86-video-intel/src/sna/sna_display.c
  	mode->kmode = drmModeGetResources(sna->kgem.fd);
  	if (mode->kmode) {
  		xf86CrtcConfigInit(scrn, &sna_mode_funcs);
-@@ -3149,9 +3160,7 @@
+@@ -3149,9 +3163,7 @@
  		if (!xf86IsEntityShared(scrn->entityList[0]))
  			sna_mode_compute_possible_clones(scrn);
  
@@ -263,8 +273,8 @@ Index: xf86-video-intel/src/sna/sna_display.c
  			return false;
 Index: xf86-video-intel/src/sna/sna_dri.c
 ===================================================================
---- xf86-video-intel.orig/src/sna/sna_dri.c	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/sna/sna_dri.c	2013-08-01 16:06:54.216945668 +1000
+--- xf86-video-intel.orig/src/sna/sna_dri.c	2013-08-14 14:01:04.235601828 +1000
++++ xf86-video-intel/src/sna/sna_dri.c	2013-08-14 14:01:04.231601828 +1000
 @@ -2399,6 +2399,13 @@
  }
  #endif
@@ -295,8 +305,8 @@ Index: xf86-video-intel/src/sna/sna_dri.c
  	info.AsyncSwap = sna_dri_async_swap;
 Index: xf86-video-intel/src/sna/sna_driver.c
 ===================================================================
---- xf86-video-intel.orig/src/sna/sna_driver.c	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/sna/sna_driver.c	2013-08-01 16:06:54.216945668 +1000
+--- xf86-video-intel.orig/src/sna/sna_driver.c	2013-08-14 14:01:04.235601828 +1000
++++ xf86-video-intel/src/sna/sna_driver.c	2013-08-14 14:01:04.231601828 +1000
 @@ -295,7 +295,7 @@
  	drm_i915_getparam_t gp;
  	int v;
@@ -397,8 +407,8 @@ Index: xf86-video-intel/src/sna/sna_driver.c
  			       HARDWARE_CURSOR_INVERT_MASK |
 Index: xf86-video-intel/src/sna/sna_video_overlay.c
 ===================================================================
---- xf86-video-intel.orig/src/sna/sna_video_overlay.c	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/sna/sna_video_overlay.c	2013-08-01 16:06:54.216945668 +1000
+--- xf86-video-intel.orig/src/sna/sna_video_overlay.c	2013-08-14 14:01:04.235601828 +1000
++++ xf86-video-intel/src/sna/sna_video_overlay.c	2013-08-14 14:01:04.231601828 +1000
 @@ -683,6 +683,9 @@
  	struct sna_video *video;
  	XvPortPtr port;
@@ -411,8 +421,8 @@ Index: xf86-video-intel/src/sna/sna_video_overlay.c
  
 Index: xf86-video-intel/src/sna/sna_video_sprite.c
 ===================================================================
---- xf86-video-intel.orig/src/sna/sna_video_sprite.c	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/sna/sna_video_sprite.c	2013-08-01 16:06:54.216945668 +1000
+--- xf86-video-intel.orig/src/sna/sna_video_sprite.c	2013-08-14 14:01:04.235601828 +1000
++++ xf86-video-intel/src/sna/sna_video_sprite.c	2013-08-14 14:01:04.231601828 +1000
 @@ -456,6 +456,9 @@
  	struct sna_video *video;
  	XvPortPtr port;
@@ -426,7 +436,7 @@ Index: xf86-video-intel/src/sna/sna_video_sprite.c
 Index: xf86-video-intel/src/sna/sna_xmir.c
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ xf86-video-intel/src/sna/sna_xmir.c	2013-08-01 16:07:47.936945593 +1000
++++ xf86-video-intel/src/sna/sna_xmir.c	2013-08-14 14:01:04.231601828 +1000
 @@ -0,0 +1,165 @@
 +/***************************************************************************
 +
