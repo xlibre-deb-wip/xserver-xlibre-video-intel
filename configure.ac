@@ -23,7 +23,7 @@
 # Initialize Autoconf
 AC_PREREQ([2.60])
 AC_INIT([xf86-video-intel],
-        [2.21.12],
+        [2.21.14],
         [https://bugs.freedesktop.org/enter_bug.cgi?product=xorg],
         [xf86-video-intel])
 AC_CONFIG_SRCDIR([Makefile.am])
@@ -42,6 +42,12 @@ m4_ifndef([XORG_MACROS_VERSION],
 
 XORG_MACROS_VERSION(1.8)
 XORG_DEFAULT_OPTIONS
+
+# And disable a few very noisy warnings
+XORG_TESTSET_CFLAG([NOWARNFLAGS], [-Wno-cast-qual])
+XORG_TESTSET_CFLAG([NOWARNFLAGS], [-Wno-redundant-decls])
+XORG_TESTSET_CFLAG([NOWARNFLAGS], [-Wno-maybe-uninitialized])
+AC_SUBST(NOWARNFLAGS)
 
 # Require X.Org server macros (i.e. XORG_DRIVER_CHECK_EXT) to check for required modules 
 m4_ifndef([XORG_DRIVER_CHECK_EXT],
@@ -169,8 +175,6 @@ AC_ARG_WITH(xorg-module-dir,
 
 AC_ARG_ENABLE(dri, AS_HELP_STRING([--disable-dri],
                                   [Disable DRI support [[default=auto]]]))
-dridriverdir=`$PKG_CONFIG --variable=dridriverdir dri`
-AC_DEFINE_DIR(DRI_DRIVER_PATH, dridriverdir, [Default DRI driver path])
 
 AC_ARG_ENABLE(xvmc, AS_HELP_STRING([--disable-xvmc],
                                   [Disable XvMC support [[default=yes]]]),
@@ -253,7 +257,7 @@ PKG_CHECK_MODULES(XORG, [xorg-server >= $required_xorg_server_version xproto fon
 
 AC_ARG_ENABLE(xaa,
 	      AS_HELP_STRING([--enable-xaa],
-			     [Enable legacy X Acceleration Architecture (XAA) [default=auto]]),
+			     [Enable legacy X Acceleration Architecture (XAA) for i810 chipsets [default=auto]]),
 	      [XAA="$enableval"],
 	      [XAA=auto])
 if test "x$XAA" != xno; then
@@ -268,7 +272,7 @@ AC_MSG_RESULT([$XAA])
 
 AC_ARG_ENABLE(dga,
 	      AS_HELP_STRING([--enable-dga],
-			     [Enable legacy Direct Graphics Access (DGA) [default=auto]]),
+			     [Enable legacy Direct Graphics Access (DGA) for i810 chipsets [default=auto]]),
 	      [DGA="$enableval"],
 	      [DGA=auto])
 if test "x$DGA" != xno; then
@@ -358,6 +362,16 @@ if test "x$ASYNC_SWAP" = xyes; then
 	AC_DEFINE(USE_ASYNC_SWAP,1,[Assume asynchronous swap support])
 fi
 
+AC_ARG_ENABLE(wt,
+	      AS_HELP_STRING([--enable-wt],
+			     [Enable use of WT cacheing (experimental) [default=no]]),
+	      [WT="$enableval"],
+	      [WT=no])
+AM_CONDITIONAL(USE_WT, test x$WT = xyes)
+if test "x$WT" = xyes; then
+	AC_DEFINE(USE_WT,1,[Assume WriteThrough cacheing support])
+fi
+
 AC_ARG_ENABLE(debug,
 	      AS_HELP_STRING([--enable-debug],
 			     [Enables internal debugging [default=no]]),
@@ -377,8 +391,6 @@ XORG_DRIVER_CHECK_EXT(DPMSExtension, xextproto)
 
 # Obtain compiler/linker options for the driver dependencies
 PKG_CHECK_MODULES(DRM, [libdrm >= 2.4.20]) # libdrm_intel is checked separately
-PKG_CHECK_MODULES(DRI, [xf86driproto], , DRI=no)
-PKG_CHECK_MODULES(DRI2, [dri2proto >= 2.6],, DRI2=no)
 PKG_CHECK_MODULES(PCIACCESS, [pciaccess >= 0.10])
 
 LIBS=""
@@ -387,12 +399,14 @@ AC_SUBST(CLOCK_GETTIME_LIBS)
 
 sdkdir=`$PKG_CONFIG --variable=sdkdir xorg-server`
 
-if test "x$enable_dri" != "xno"; then
+DRI1=no
+if test "x$enable_dri" != "xno" -a "x$KMS_ONLY" != "xyes"; then
+	PKG_CHECK_MODULES(DRI1, [xf86driproto], [DRI1=yes], [DRI1=no])
         save_CFLAGS="$CFLAGS"
         save_CPPFLAGS="$CPPFLAGS"
         CFLAGS="$CFLAGS $XORG_CFLAGS $DRI_CFLAGS $DRM_CFLAGS"
         CPPFLAGS="$CPPFLAGS $XORG_CFLAGS $DRI_CFLAGS $DRM_CFLAGS"
-        AC_CHECK_HEADERS([dri.h sarea.h dristruct.h],, [DRI=no],
+        AC_CHECK_HEADERS([dri.h sarea.h dristruct.h], [DRI1=yes], [DRI1=no],
                 [/* for dri.h */
                  #include <xf86str.h>
                  /* for dristruct.h */
@@ -406,34 +420,46 @@ if test "x$enable_dri" != "xno"; then
                 ])
         CFLAGS="$save_CFLAGS $DEBUGFLAGS"
         CPPFLAGS="$save_CPPFLAGS"
-else
-        DRI=no
 fi
 
-AC_MSG_CHECKING([whether to include DRI support])
-AC_MSG_RESULT([${DRI-yes}])
+AC_MSG_CHECKING([whether to include DRI1 support])
+AC_MSG_RESULT([$DRI1])
 
-AM_CONDITIONAL(DRI, test x$DRI != xno)
-if test "x$DRI" != "xno"; then
-        AC_DEFINE(HAVE_DRI1,1,[Enable DRI driver support])
+AM_CONDITIONAL(DRI1, test x$DRI1 != xno)
+if test "x$DRI1" != "xno"; then
+        AC_DEFINE(HAVE_DRI1,1,[Enable DRI1 driver support])
+	dri_msg="$dri_msg DRI1"
 else
-        DRI_CFLAGS=""
-        DRI_LIBS=""
+        DRI1_CFLAGS=""
+        DRI1_LIBS=""
 
         if test "x$enable_dri" = "xyes"; then
-                AC_MSG_ERROR([DRI requested but prerequisites not found])
+                AC_MSG_ERROR([DRI1 requested but prerequisites not found])
         fi
 fi
 
-if test "x$DRI2" != "xno"; then
-	save_CFLAGS=$CFLAGS
-	CFLAGS="$XORG_CFLAGS $DRM_CFLAGS $DRI_CFLAGS $DRI2_CFLAGS"
-	AC_CHECK_HEADERS([dri2.h], DRI2=yes, DRI2=no, [#include <dixstruct.h>])
-	CFLAGS=$save_CFLAGS
+DRI2=no
+if test "x$enable_dri" != "xno"; then
+	PKG_CHECK_MODULES(DRI2, [dri2proto >= 2.6], DRI2=yes, DRI2=no)
+	dridriverdir=`$PKG_CONFIG --variable=dridriverdir dri`
+	if test "x$dridriverdir" = "x"; then
+		dridriverdir="$libdir/dri"
+	fi
+	AC_DEFINE_DIR(DRI_DRIVER_PATH, dridriverdir, [Default DRI2 driver path])
+	if test "x$DRI2" != "xno"; then
+		save_CFLAGS=$CFLAGS
+		CFLAGS="$XORG_CFLAGS $DRM_CFLAGS $DRI_CFLAGS $DRI2_CFLAGS"
+		AC_CHECK_HEADERS([dri2.h], DRI2=yes, DRI2=no, [#include <dixstruct.h>])
+		CFLAGS=$save_CFLAGS
+	fi
 fi
 AC_MSG_CHECKING([whether to include DRI2 support])
 AM_CONDITIONAL(DRI2, test "x$DRI2" = xyes)
 AC_MSG_RESULT([$DRI2])
+if test "x$DRI2" != "xno"; then
+        AC_DEFINE(HAVE_DRI2,1,[Enable DRI2 driver support])
+	dri_msg="$dri_msg DRI2"
+fi
 
 if test "$XVMC" = yes; then
 	PKG_CHECK_MODULES(XVMCLIB, [xvmc dri2proto x11], [], [XVMC=no])
@@ -444,6 +470,9 @@ AC_MSG_RESULT([$XVMC])
 AM_CONDITIONAL(XVMC, test x$XVMC = xyes)
 if test "x$XVMC" = xyes; then
 	AC_DEFINE(ENABLE_XVMC,1,[Enable XvMC support])
+	xvmc_msg=" yes"
+else
+	xvmc_msg=" no"
 fi
 
 AM_CONDITIONAL(KMS_ONLY, test x$KMS_ONLY = xyes)
@@ -464,6 +493,7 @@ else
 		VG=auto
 	fi
 fi
+debug_msg=""
 have_valgrind=no
 if test "x$VG" != xno; then
 	PKG_CHECK_MODULES(VALGRIND, [valgrind], have_valgrind=yes, have_valgrind=no)
@@ -478,20 +508,30 @@ if test "x$VG" != xno; then
 	AC_MSG_RESULT([$have_valgrind ($VG)])
 fi
 AM_CONDITIONAL(VALGRIND, test x$have_valgrind = xyes)
+if test "x$have_valgrind" = xyes; then
+	debug_msg="$debug_msg valgrind"
+fi
 if test "x$DEBUG" = xsync; then
 	AC_DEFINE(DEBUG_SYNC,1,[Enable synchronous rendering for debugging])
+	debug_msg="$debug_msg sync"
 fi
 if test "x$DEBUG" = xmemory; then
 	AC_DEFINE(DEBUG_MEMORY,1,[Enable memory debugging])
+	debug_msg="$debug_msg memory"
 fi
 if test "x$DEBUG" = xpixmap; then
 	AC_DEFINE(DEBUG_PIXMAP,1,[Enable pixmap debugging])
+	debug_msg="$debug_msg pixmaps"
 fi
 if test "x$DEBUG" = xfull; then
 	AC_DEFINE(DEBUG_MEMORY,1,[Enable memory debugging])
 	AC_DEFINE(DEBUG_PIXMAP,1,[Enable pixmap debugging])
 	AC_DEFINE(HAS_DEBUG_FULL,1,[Enable all debugging])
         CFLAGS="$CFLAGS -O0 -ggdb3"
+	debug_msg=" full"
+fi
+if test "x$debug_msg" = x; then
+	debug_msg=" none"
 fi
 
 DRIVER_NAME=intel
@@ -500,20 +540,55 @@ AC_SUBST([moduledir])
 
 AC_CONFIG_FILES([
                 Makefile
-                uxa/Makefile
+                man/Makefile
                 src/Makefile
-                src/xvmc/Makefile
-                src/xvmc/shader/Makefile
-                src/xvmc/shader/mc/Makefile
-                src/xvmc/shader/vld/Makefile
                 src/legacy/Makefile
                 src/legacy/i810/Makefile
                 src/legacy/i810/xvmc/Makefile
+                src/render_program/Makefile
                 src/sna/Makefile
                 src/sna/brw/Makefile
                 src/sna/fb/Makefile
-                man/Makefile
-                src/render_program/Makefile
+                src/uxa/Makefile
+                xvmc/Makefile
+                xvmc/shader/Makefile
+                xvmc/shader/mc/Makefile
+                xvmc/shader/vld/Makefile
 		test/Makefile
 ])
 AC_OUTPUT
+
+accel_msg=""
+if test "x$SNA" != "xno"; then
+	if test "$accel" = "sna"; then
+		accel_msg="$accel_msg *sna"
+	else
+		accel_msg="$accel_msg sna"
+	fi
+fi
+if test "x$UXA" != "xno"; then
+	if test "$accel" = "uxa"; then
+		accel_msg="$accel_msg *uxa"
+	else
+		accel_msg="$accel_msg uxa"
+	fi
+fi
+if test "x$GLAMOR" != "xno"; then
+	if test "$accel" = "glamor"; then
+		accel_msg="$accel_msg *glamor"
+	else
+		accel_msg="$accel_msg glamor"
+	fi
+fi
+
+if test "x$dri_msg" = x; then
+	dri_msg=" none"
+fi
+
+echo ""
+echo "AC_PACKAGE_STRING will be compiled with:"
+echo "  Acceleration backends:$accel_msg"
+echo "  Additional debugging support?$debug_msg"
+echo "  Support for Direct Rendering Infrastructure:$dri_msg"
+echo "  Support for Xv motion compensation (XvMC and libXvMC):$xvmc_msg"
+echo ""

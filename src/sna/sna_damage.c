@@ -415,7 +415,7 @@ static void __sna_damage_reduce(struct sna_damage *damage)
 	assert(damage->mode != DAMAGE_ALL);
 	assert(damage->dirty);
 
-	DBG(("    reduce: before region.n=%ld\n", REGION_NUM_RECTS(region)));
+	DBG(("    reduce: before region.n=%ld\n", (long)REGION_NUM_RECTS(region)));
 
 	nboxes = damage->embedded_box.size;
 	list_for_each_entry(iter, &damage->embedded_box.list, list)
@@ -529,7 +529,7 @@ done:
 	free_list(&damage->embedded_box.list);
 	reset_embedded_box(damage);
 
-	DBG(("    reduce: after region.n=%ld\n", REGION_NUM_RECTS(region)));
+	DBG(("    reduce: after region.n=%ld\n", (long)REGION_NUM_RECTS(region)));
 }
 
 static void damage_union(struct sna_damage *damage, const BoxRec *box)
@@ -1342,13 +1342,13 @@ bool _sna_damage_contains_box__no_reduce(const struct sna_damage *damage,
 					 const BoxRec *box)
 {
 	int n, count;
-	BoxPtr b;
+	const BoxRec *b;
 
 	assert(damage && damage->mode != DAMAGE_ALL);
 	if (!box_contains(&damage->extents, box))
 		return false;
 
-	n = pixman_region_contains_rectangle(&damage->region, (BoxPtr)box);
+	n = pixman_region_contains_rectangle((pixman_region16_t *)&damage->region, (BoxPtr)box);
 	if (!damage->dirty)
 		return n == PIXMAN_REGION_IN;
 

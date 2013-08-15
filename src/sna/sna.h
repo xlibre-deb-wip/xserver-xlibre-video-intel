@@ -107,6 +107,17 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define SNA_CURSOR_X			64
 #define SNA_CURSOR_Y			SNA_CURSOR_X
 
+struct sna_client {
+	int is_compositor; /* only 4 bits used */
+};
+
+extern DevPrivateKeyRec sna_client_key;
+
+pure static inline struct sna_client *sna_client(ClientPtr client)
+{
+	return __get_private(client, sna_client_key);
+}
+
 struct sna_cow {
 	struct kgem_bo *bo;
 	struct list list;
@@ -408,17 +419,18 @@ CARD32 sna_render_format_for_depth(int depth);
 
 void sna_debug_flush(struct sna *sna);
 
-static inline void
+static inline bool
 get_drawable_deltas(DrawablePtr drawable, PixmapPtr pixmap, int16_t *x, int16_t *y)
 {
 #ifdef COMPOSITE
 	if (drawable->type == DRAWABLE_WINDOW) {
 		*x = -pixmap->screen_x;
 		*y = -pixmap->screen_y;
-		return;
+		return pixmap->screen_x | pixmap->screen_y;
 	}
 #endif
 	*x = *y = 0;
+	return false;
 }
 
 static inline int

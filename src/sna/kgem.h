@@ -179,6 +179,7 @@ struct kgem {
 	uint32_t has_pinned_batches :1;
 	uint32_t has_cacheing :1;
 	uint32_t has_llc :1;
+	uint32_t has_wt :1;
 	uint32_t has_no_reloc :1;
 	uint32_t has_handle_lut :1;
 
@@ -210,8 +211,8 @@ struct kgem {
 
 	uint16_t reloc__self[256];
 	uint32_t batch[64*1024-8] page_aligned;
-	struct drm_i915_gem_exec_object2 exec[256] page_aligned;
-	struct drm_i915_gem_relocation_entry reloc[4096] page_aligned;
+	struct drm_i915_gem_exec_object2 exec[384] page_aligned;
+	struct drm_i915_gem_relocation_entry reloc[8192] page_aligned;
 
 #ifdef DEBUG_MEMORY
 	struct {
@@ -221,9 +222,11 @@ struct kgem {
 #endif
 };
 
+#define KGEM_MAX_DEFERRED_VBO 16
+
 #define KGEM_BATCH_RESERVED 1
-#define KGEM_RELOC_RESERVED 4
-#define KGEM_EXEC_RESERVED 1
+#define KGEM_RELOC_RESERVED (KGEM_MAX_DEFERRED_VBO)
+#define KGEM_EXEC_RESERVED (1+KGEM_MAX_DEFERRED_VBO)
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a)/sizeof((a)[0]))
@@ -564,7 +567,7 @@ static inline bool kgem_bo_can_map(struct kgem *kgem, struct kgem_bo *bo)
 	if (kgem_bo_mapped(kgem, bo))
 		return true;
 
-	if (!bo->tiling && kgem->has_llc)
+	if (!bo->tiling && (kgem->has_llc || bo->domain == DOMAIN_CPU))
 		return true;
 
 	if (kgem->gen == 021 && bo->tiling == I915_TILING_Y)
@@ -577,7 +580,7 @@ static inline bool kgem_bo_can_map__cpu(struct kgem *kgem,
 					struct kgem_bo *bo,
 					bool write)
 {
-	if (bo->scanout)
+	if (bo->scanout && (write || bo->purged))
 		return false;
 
 	if (kgem->has_llc)
@@ -644,8 +647,11 @@ static inline bool __kgem_bo_is_busy(struct kgem *kgem, struct kgem_bo *bo)
 
 static inline void kgem_bo_mark_unreusable(struct kgem_bo *bo)
 {
-	while (bo->proxy)
+	while (bo->proxy) {
+		bo->flush = true;
 		bo = bo->proxy;
+	}
+	bo->flush = true;
 	bo->reusable = false;
 }
 

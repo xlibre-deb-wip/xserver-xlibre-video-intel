@@ -1,5 +1,3 @@
-# empty for now
-sna-note-that-borderClip-region.patch
-sna-fix-typo-in-computing-box.patch
-sna-fall-back-to-proc-cpuinfo.patch
+Check-for-struct-sysinfo-as-well-as-sys-sysinfo.h.patch
+Link-the-driver-against-pixman.patch
 xmir.patch

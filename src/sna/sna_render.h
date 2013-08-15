@@ -391,10 +391,10 @@ struct gen5_render_state {
 	int ve_id;
 	uint32_t drawrect_offset;
 	uint32_t drawrect_limit;
+	uint32_t last_pipelined_pointers;
 	uint16_t last_primitive;
 	int16_t floats_per_vertex;
 	uint16_t surface_table;
-	uint16_t last_pipelined_pointers;
 
 	bool needs_invariant;
 };
@@ -774,5 +774,12 @@ static inline bool sna_vertex_wait__locked(struct sna_render *r)
 		pthread_cond_wait(&r->wait, &r->lock);
 	return was_active;
 }
+
+#define alphaless(format) PICT_FORMAT(PICT_FORMAT_BPP(format),		\
+				      PICT_FORMAT_TYPE(format),		\
+				      0,				\
+				      PICT_FORMAT_R(format),		\
+				      PICT_FORMAT_G(format),		\
+				      PICT_FORMAT_B(format))
 
 #endif /* SNA_RENDER_H */

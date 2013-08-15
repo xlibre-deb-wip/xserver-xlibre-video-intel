@@ -48,6 +48,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <xf86drm.h>
 #include <i915_drm.h>
 #include <dri2.h>
+#include <compositeext.h>
 
 #if DRI2INFOREC_VERSION <= 2
 #error DRI2 version supported by the Xserver is too old
@@ -61,12 +62,12 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define COLOR_PREFER_TILING_Y 0
 
 enum frame_event_type {
+	DRI2_WAITMSC = 0,
 	DRI2_SWAP,
 	DRI2_SWAP_WAIT,
 	DRI2_SWAP_THROTTLE,
 	DRI2_FLIP,
 	DRI2_FLIP_THROTTLE,
-	DRI2_WAITMSC,
 };
 
 struct sna_dri_frame_event {
@@ -215,6 +216,11 @@ sna_dri_pixmap_update_bo(struct sna *sna, PixmapPtr pixmap)
 	if (buffer == NULL)
 		return;
 
+	DBG(("%s: pixmap=%ld, old handle=%d, new handle=%d\n", __FUNCTION__,
+	     pixmap->drawable.serialNumber,
+	     get_private(buffer)->bo->handle,
+	     sna_pixmap(pixmap)->gpu_bo->handle));
+
 	private = get_private(buffer);
 	assert(private->pixmap == pixmap);
 
@@ -247,8 +253,10 @@ sna_dri_create_buffer(DrawablePtr draw,
 	uint32_t size;
 	int bpp;
 
-	DBG(("%s(attachment=%d, format=%d, drawable=%dx%d)\n",
-	     __FUNCTION__, attachment, format, draw->width, draw->height));
+	DBG(("%s pixmap=%ld, (attachment=%d, format=%d, drawable=%dx%d)\n",
+	     __FUNCTION__,
+	     get_drawable_pixmap(draw)->drawable.serialNumber,
+	     attachment, format, draw->width, draw->height));
 
 	pixmap = NULL;
 	size = (uint32_t)draw->height << 16 | draw->width;
@@ -475,19 +483,9 @@ static void sna_dri_reference_buffer(DRI2Buffer2Ptr buffer)
 	get_private(buffer)->refcnt++;
 }
 
-static void damage(PixmapPtr pixmap, RegionPtr region)
+static void damage(PixmapPtr pixmap, struct sna_pixmap *priv, RegionPtr region)
 {
-	struct sna_pixmap *priv;
-
-	priv = sna_pixmap(pixmap);
-	assert(priv != NULL);
 	assert(priv->gpu_bo);
-
-	if (priv->cow) {
-		sna_pixmap_undo_cow(to_sna_from_pixmap(pixmap), priv,
-				    region ? MOVE_READ : 0);
-	}
-
 	if (DAMAGE_IS_ALL(priv->gpu_damage))
 		return;
 
@@ -645,59 +643,87 @@ sna_dri_copy_fallback(struct sna *sna, int bpp,
 }
 
 static struct kgem_bo *
-sna_dri_copy_to_front(struct sna *sna, DrawablePtr draw, RegionPtr region,
-		      struct kgem_bo *dst_bo, struct kgem_bo *src_bo,
+__sna_dri_copy_region(struct sna *sna, DrawablePtr draw, RegionPtr region,
+		      DRI2Buffer2Ptr src, DRI2Buffer2Ptr dst,
 		      bool sync)
 {
 	PixmapPtr pixmap = get_drawable_pixmap(draw);
+	struct sna_dri_private *src_priv = get_private(src);
+	struct sna_dri_private *dst_priv = get_private(dst);
 	pixman_region16_t clip;
 	struct kgem_bo *bo = NULL;
-	bool flush = false;
-	xf86CrtcPtr crtc;
+	struct kgem_bo *src_bo;
+	struct kgem_bo *dst_bo;
 	BoxRec *boxes;
-	int16_t dx, dy;
-	int n;
+	int16_t dx, dy, sx, sy;
+	int w, h, n;
+
+	/* To hide a stale DRI2Buffer, one may choose to substitute
+	 * pixmap->gpu_bo instead of dst/src->bo, however you then run
+	 * the risk of copying around invalid data. So either you may not
+	 * see the results of the copy, or you may see the wrong pixels.
+	 * Either way you eventually lose.
+	 *
+	 * We also have to be careful in case that the stale buffers are
+	 * now attached to invalid (non-DRI) pixmaps.
+	 */
+
+	assert(dst->attachment == DRI2BufferFrontLeft ||
+	       src->attachment == DRI2BufferFrontLeft);
+	assert(dst->attachment != src->attachment);
+
+	/* Copy the minimum of the Drawable / src / dst extents */
+	w = draw->width;
+	if ((src_priv->size & 0xffff) < w)
+		w = src_priv->size & 0xffff;
+	if ((dst_priv->size & 0xffff) < w)
+		w = dst_priv->size & 0xffff;
+
+	h = draw->height;
+	if ((src_priv->size >> 16) < h)
+		h = src_priv->size >> 16;
+	if ((dst_priv->size >> 16) < h)
+		h = dst_priv->size >> 16;
 
 	clip.extents.x1 = draw->x;
 	clip.extents.y1 = draw->y;
-	clip.extents.x2 = draw->x + draw->width;
-	clip.extents.y2 = draw->y + draw->height;
+	clip.extents.x2 = draw->x + w;
+	clip.extents.y2 = draw->y + h;
 	clip.data = NULL;
 
 	if (region) {
 		pixman_region_translate(region, draw->x, draw->y);
 		pixman_region_intersect(&clip, &clip, region);
 		region = &clip;
-
-		if (!pixman_region_not_empty(region)) {
-			DBG(("%s: all clipped\n", __FUNCTION__));
-			return NULL;
-		}
 	}
 
-	if (!wedged(sna)) {
-		if (sync)
-			sync = sna_pixmap_is_scanout(sna, pixmap);
+	if (clip.extents.x1 >= clip.extents.x2 ||
+	    clip.extents.y1 >= clip.extents.y2) {
+		DBG(("%s: all clipped\n", __FUNCTION__));
+		return NULL;
+	}
 
-		sna_dri_select_mode(sna, dst_bo, src_bo, sync);
-	} else
-		sync = false;
-
-	dx = dy = 0;
-	if (draw->type != DRAWABLE_PIXMAP) {
+	sx = sy = dx = dy = 0;
+	if (dst->attachment == DRI2BufferFrontLeft) {
+		sx = -draw->x;
+		sy = -draw->y;
+	} else {
+		dx = -draw->x;
+		dy = -draw->y;
+	}
+	if (draw->type == DRAWABLE_WINDOW) {
 		WindowPtr win = (WindowPtr)draw;
+		int16_t tx, ty;
 
 		if (is_clipped(&win->clipList, draw)) {
 			DBG(("%s: draw=(%d, %d), delta=(%d, %d), clip.extents=(%d, %d), (%d, %d)\n",
-			     __FUNCTION__, draw->x, draw->y,
-			     get_drawable_dx(draw), get_drawable_dy(draw),
-			     win->clipList.extents.x1, win->clipList.extents.y1,
-			     win->clipList.extents.x2, win->clipList.extents.y2));
+						__FUNCTION__, draw->x, draw->y,
+						get_drawable_dx(draw), get_drawable_dy(draw),
+						win->clipList.extents.x1, win->clipList.extents.y1,
+						win->clipList.extents.x2, win->clipList.extents.y2));
 
-			if (region == NULL)
-				region = &clip;
-
-			pixman_region_intersect(&clip, &win->clipList, region);
+			assert(region == NULL || region == &clip);
+			pixman_region_intersect(&clip, &win->clipList, &clip);
 			if (!pixman_region_not_empty(&clip)) {
 				DBG(("%s: all clipped\n", __FUNCTION__));
 				return NULL;
@@ -706,17 +732,62 @@ sna_dri_copy_to_front(struct sna *sna, DrawablePtr draw, RegionPtr region,
 			region = &clip;
 		}
 
-		if (sync) {
-			crtc = sna_covering_crtc(sna->scrn, &clip.extents, NULL);
-			if (crtc)
-				flush = sna_wait_for_scanline(sna, pixmap, crtc,
-							      &clip.extents);
+		if (get_drawable_deltas(draw, pixmap, &tx, &ty)) {
+			if (dst->attachment == DRI2BufferFrontLeft) {
+				pixman_region_translate(region ?: &clip, tx, ty);
+				sx -= tx;
+				sy -= ty;
+			} else {
+				sx += tx;
+				sy += ty;
+			}
 		}
+	} else
+		sync = false;
 
-		get_drawable_deltas(draw, pixmap, &dx, &dy);
+	src_bo = src_priv->bo;
+	if (src->attachment == DRI2BufferFrontLeft) {
+		struct sna_pixmap *priv;
+
+		priv = sna_pixmap_move_to_gpu(pixmap, MOVE_READ);
+		if (priv)
+			src_bo = priv->gpu_bo;
 	}
 
-	damage(pixmap, region);
+	dst_bo = dst_priv->bo;
+	if (dst->attachment == DRI2BufferFrontLeft) {
+		struct sna_pixmap *priv;
+		unsigned int flags;
+
+		flags = MOVE_WRITE;
+		if (clip.data ||
+		    clip.extents.x1 > 0 ||
+		    clip.extents.x2 < pixmap->drawable.width ||
+		    clip.extents.y1 > 0 ||
+		    clip.extents.y2 < pixmap->drawable.height)
+			flags |= MOVE_READ;
+
+		priv = sna_pixmap_move_to_gpu(pixmap, flags);
+		if (priv)
+			dst_bo = priv->gpu_bo;
+
+		damage(pixmap, priv, region);
+	} else
+		sync = false;
+
+	if (!wedged(sna)) {
+		xf86CrtcPtr crtc;
+
+		crtc = NULL;
+		if (sync && sna_pixmap_is_scanout(sna, pixmap))
+			crtc = sna_covering_crtc(sna->scrn, &clip.extents, NULL);
+		sna_dri_select_mode(sna, dst_bo, src_bo, crtc != NULL);
+
+		sync = (crtc != NULL&&
+			sna_wait_for_scanline(sna, pixmap, crtc,
+					      &clip.extents));
+	}
+
 	if (region) {
 		boxes = REGION_RECTS(region);
 		n = REGION_NUM_RECTS(region);
@@ -726,26 +797,26 @@ sna_dri_copy_to_front(struct sna *sna, DrawablePtr draw, RegionPtr region,
 		boxes = &clip.extents;
 		n = 1;
 	}
-	pixman_region_translate(region, dx, dy);
 	DamageRegionAppend(&pixmap->drawable, region);
+
 	if (wedged(sna)) {
 		sna_dri_copy_fallback(sna, draw->bitsPerPixel,
-				      src_bo, -draw->x-dx, -draw->y-dy,
-				      dst_bo, 0, 0,
+				      src_bo, sx, sy,
+				      dst_bo, dx, dy,
 				      boxes, n);
 	} else {
 		unsigned flags;
 
 		flags = COPY_LAST;
-		if (flush)
+		if (sync)
 			flags |= COPY_SYNC;
 		sna->render.copy_boxes(sna, GXcopy,
-				       (PixmapPtr)draw, src_bo, -draw->x-dx, -draw->y-dy,
-				       pixmap, dst_bo, 0, 0,
+				       pixmap, src_bo, sx, sy,
+				       pixmap, dst_bo, dx, dy,
 				       boxes, n, flags);
 
-		DBG(("%s: flushing? %d\n", __FUNCTION__, flush));
-		if (flush) { /* STAT! */
+		DBG(("%s: flushing? %d\n", __FUNCTION__, sync));
+		if (sync) { /* STAT! */
 			struct kgem_request *rq = sna->kgem.next_request;
 			kgem_submit(&sna->kgem);
 			if (rq->bo)
@@ -762,243 +833,46 @@ sna_dri_copy_to_front(struct sna *sna, DrawablePtr draw, RegionPtr region,
 }
 
 static void
-sna_dri_copy_from_front(struct sna *sna, DrawablePtr draw, RegionPtr region,
-			struct kgem_bo *dst_bo, struct kgem_bo *src_bo,
-			bool sync)
-{
-	PixmapPtr pixmap = get_drawable_pixmap(draw);
-	pixman_region16_t clip;
-	BoxRec box, *boxes;
-	int16_t dx, dy;
-	int n;
-
-	box.x1 = draw->x;
-	box.y1 = draw->y;
-	box.x2 = draw->x + draw->width;
-	box.y2 = draw->y + draw->height;
-
-	if (region) {
-		pixman_region_translate(region, draw->x, draw->y);
-		pixman_region_init_rects(&clip, &box, 1);
-		pixman_region_intersect(&clip, &clip, region);
-		region = &clip;
-
-		if (!pixman_region_not_empty(region)) {
-			DBG(("%s: all clipped\n", __FUNCTION__));
-			return;
-		}
-	}
-
-	dx = dy = 0;
-	if (draw->type != DRAWABLE_PIXMAP) {
-		WindowPtr win = (WindowPtr)draw;
-
-		DBG(("%s: draw=(%d, %d), delta=(%d, %d), clip.extents=(%d, %d), (%d, %d)\n",
-		     __FUNCTION__, draw->x, draw->y,
-		     get_drawable_dx(draw), get_drawable_dy(draw),
-		     win->clipList.extents.x1, win->clipList.extents.y1,
-		     win->clipList.extents.x2, win->clipList.extents.y2));
-
-		if (region == NULL) {
-			pixman_region_init_rects(&clip, &box, 1);
-			region = &clip;
-		}
-
-		pixman_region_intersect(region, &win->clipList, region);
-		if (!pixman_region_not_empty(region)) {
-			DBG(("%s: all clipped\n", __FUNCTION__));
-			return;
-		}
-
-		get_drawable_deltas(draw, pixmap, &dx, &dy);
-	}
-
-	if (region) {
-		boxes = REGION_RECTS(region);
-		n = REGION_NUM_RECTS(region);
-		assert(n);
-	} else {
-		pixman_region_init_rects(&clip, &box, 1);
-		region = &clip;
-		boxes = &box;
-		n = 1;
-	}
-	if (wedged(sna)) {
-		sna_dri_copy_fallback(sna, draw->bitsPerPixel,
-				      src_bo, dx, dy,
-				      dst_bo, -draw->x, -draw->y,
-				      boxes, n);
-	} else {
-		sna_dri_select_mode(sna, dst_bo, src_bo, false);
-		sna->render.copy_boxes(sna, GXcopy,
-				       pixmap, src_bo, dx, dy,
-				       (PixmapPtr)draw, dst_bo, -draw->x, -draw->y,
-				       boxes, n, COPY_LAST);
-	}
-
-	if (region == &clip)
-		pixman_region_fini(&clip);
-}
-
-static void
-sna_dri_copy(struct sna *sna, DrawablePtr draw, RegionPtr region,
-	     struct kgem_bo *dst_bo, struct kgem_bo *src_bo,
-	     bool sync)
-{
-	pixman_region16_t clip;
-	BoxRec box, *boxes;
-	int n;
-
-	box.x1 = 0;
-	box.y1 = 0;
-	box.x2 = draw->width;
-	box.y2 = draw->height;
-
-	if (region) {
-		pixman_region_init_rects(&clip, &box, 1);
-		pixman_region_intersect(&clip, &clip, region);
-		region = &clip;
-
-		if (!pixman_region_not_empty(region)) {
-			DBG(("%s: all clipped\n", __FUNCTION__));
-			return;
-		}
-
-		boxes = REGION_RECTS(region);
-		n = REGION_NUM_RECTS(region);
-		assert(n);
-	} else {
-		boxes = &box;
-		n = 1;
-	}
-
-	if (wedged(sna)) {
-		sna_dri_copy_fallback(sna, draw->bitsPerPixel,
-				      src_bo, 0, 0,
-				      dst_bo, 0, 0,
-				      boxes, n);
-	} else {
-		sna_dri_select_mode(sna, dst_bo, src_bo, false);
-		sna->render.copy_boxes(sna, GXcopy,
-				       (PixmapPtr)draw, src_bo, 0, 0,
-				       (PixmapPtr)draw, dst_bo, 0, 0,
-				       boxes, n, COPY_LAST);
-	}
-
-	if (region == &clip)
-		pixman_region_fini(&clip);
-}
-
-static bool
-can_blit(struct sna *sna,
-	 DrawablePtr draw,
-	 DRI2BufferPtr dst,
-	 DRI2BufferPtr src)
-{
-	RegionPtr clip;
-	int w, h;
-	uint32_t s;
-
-	if (draw->type == DRAWABLE_PIXMAP)
-		return true;
-
-#if 0
-	if (get_private(dst)->pixmap != get_drawable_pixmap(draw)) {
-		DBG(("%s: reject as dst pixmap=%ld, but expecting pixmap=%ld\n",
-		     __FUNCTION__,
-		     get_private(dst)->pixmap ? get_private(dst)->pixmap->drawable.serialNumber : 0,
-		     get_drawable_pixmap(draw)->drawable.serialNumber));
-		return false;
-	}
-
-	assert(sna_pixmap(get_private(dst)->pixmap)->flush);
-#endif
-	assert(get_private(dst)->bo->flush);
-	assert(get_private(src)->bo->flush);
-
-	clip = &((WindowPtr)draw)->clipList;
-	w = clip->extents.x2 - draw->x;
-	h = clip->extents.y2 - draw->y;
-	if ((w|h) < 0)
-		return false;
-
-	s = get_private(dst)->size;
-	if ((s>>16) < h || (s&0xffff) < w) {
-		DBG(("%s: reject front size (%dx%d) < (%dx%d)\n", __func__,
-		       s&0xffff, s>>16, w, h));
-		return false;
-	}
-
-	s = get_private(src)->size;
-	if ((s>>16) < h || (s&0xffff) < w) {
-		DBG(("%s:reject back size (%dx%d) < (%dx%d)\n", __func__,
-		     s&0xffff, s>>16, w, h));
-		return false;
-	}
-
-	return true;
-}
-
-static void
 sna_dri_copy_region(DrawablePtr draw,
 		    RegionPtr region,
-		    DRI2BufferPtr dst_buffer,
-		    DRI2BufferPtr src_buffer)
+		    DRI2BufferPtr dst,
+		    DRI2BufferPtr src)
 {
 	PixmapPtr pixmap = get_drawable_pixmap(draw);
 	struct sna *sna = to_sna_from_pixmap(pixmap);
-	struct kgem_bo *src, *dst;
-	void (*copy)(struct sna *, DrawablePtr, RegionPtr,
-		     struct kgem_bo *, struct kgem_bo *, bool) = sna_dri_copy;
 
-	DBG(("%s: pixmap=%ld, src=%u, dst=%u\n",
+	DBG(("%s: pixmap=%ld, src=%u (refs=%d/%d, flush=%d, attach=%d) , dst=%u (refs=%d/%d, flush=%d, attach=%d)\n",
 	     __FUNCTION__,
 	     pixmap->drawable.serialNumber,
-	     get_private(src_buffer)->bo->handle,
-	     get_private(dst_buffer)->bo->handle));
+	     get_private(src)->bo->handle,
+	     get_private(src)->refcnt,
+	     get_private(src)->bo->refcnt,
+	     get_private(src)->bo->flush,
+	     src->attachment,
+	     get_private(dst)->bo->handle,
+	     get_private(dst)->refcnt,
+	     get_private(dst)->bo->refcnt,
+	     get_private(dst)->bo->flush,
+	     dst->attachment));
 
-	assert(get_private(src_buffer)->refcnt);
-	assert(get_private(dst_buffer)->refcnt);
+	assert(src != dst);
 
-	assert(get_private(src_buffer)->bo->refcnt);
-	assert(get_private(src_buffer)->bo->flush);
+	assert(get_private(src)->refcnt);
+	assert(get_private(dst)->refcnt);
 
-	assert(get_private(dst_buffer)->bo->refcnt);
-	assert(get_private(dst_buffer)->bo->flush);
+	assert(get_private(src)->bo->refcnt);
+	assert(get_private(src)->bo->flush);
 
-	if (!can_blit(sna, draw, dst_buffer, src_buffer))
-		return;
+	assert(get_private(dst)->bo->refcnt);
+	assert(get_private(dst)->bo->flush);
 
-	if (dst_buffer->attachment == DRI2BufferFrontLeft) {
-		dst = sna_pixmap_get_bo(pixmap);
-		copy = (void *)sna_dri_copy_to_front;
-	} else
-		dst = get_private(dst_buffer)->bo;
-
-	if (src_buffer->attachment == DRI2BufferFrontLeft) {
-		src = sna_pixmap_get_bo(pixmap);
-		assert(copy == sna_dri_copy);
-		copy = sna_dri_copy_from_front;
-	} else
-		src = get_private(src_buffer)->bo;
-
-	assert(dst != NULL);
-	assert(src != NULL);
-
-	DBG(("%s: dst -- attachment=%d, name=%d, handle=%d [screen=%d]\n",
-	     __FUNCTION__,
-	     dst_buffer->attachment, dst_buffer->name, dst->handle,
-	     sna_pixmap_get_bo(sna->front)->handle));
-	DBG(("%s: src -- attachment=%d, name=%d, handle=%d\n",
-	     __FUNCTION__,
-	     src_buffer->attachment, src_buffer->name, src->handle));
-	DBG(("%s: region (%d, %d), (%d, %d) x %d\n",
+	DBG(("%s: region (%d, %d), (%d, %d) x %ld\n",
 	     __FUNCTION__,
 	     region->extents.x1, region->extents.y1,
 	     region->extents.x2, region->extents.y2,
-	     REGION_NUM_RECTS(region)));
+	     (long)REGION_NUM_RECTS(region)));
 
-	copy(sna, draw, region, dst, src, false);
+	__sna_dri_copy_region(sna, draw, region, src, dst, false);
 }
 
 static inline int sna_wait_vblank(struct sna *sna, drmVBlank *vbl)
@@ -1245,11 +1119,6 @@ can_flip(struct sna * sna,
 		return false;
 	}
 
-	if (!get_private(front)->scanout) {
-		DBG(("%s: no, DRI2 drawable not attached at time of creation)\n",
-		     __FUNCTION__));
-		return false;
-	}
 	assert(get_private(front)->pixmap == sna->front);
 	assert(sna_pixmap(sna->front)->gpu_bo == get_private(front)->bo);
 
@@ -1376,7 +1245,6 @@ static void chain_swap(struct sna *sna,
 		       struct sna_dri_frame_event *chain)
 {
 	drmVBlank vbl;
-	int type;
 
 	assert(chain == sna_dri_window_get_chain((WindowPtr)draw));
 	DBG(("%s: chaining type=%d\n", __FUNCTION__, chain->type));
@@ -1387,26 +1255,15 @@ static void chain_swap(struct sna *sna,
 		return;
 	}
 
-	if (can_blit(sna, draw, chain->front, chain->back)) {
-		DBG(("%s: emitting chained vsync'ed blit\n", __FUNCTION__));
+	DBG(("%s: emitting chained vsync'ed blit\n", __FUNCTION__));
 
-		chain->bo = sna_dri_copy_to_front(sna, draw, NULL,
-						  get_private(chain->front)->bo,
-						  get_private(chain->back)->bo,
-						  true);
-
-		type = DRI2_BLIT_COMPLETE;
-	} else {
-		DRI2SwapComplete(chain->client, draw,
-				 0, 0, 0, DRI2_BLIT_COMPLETE,
-				 chain->client ? chain->event_complete : NULL, chain->event_data);
-		sna_dri_frame_event_info_free(sna, draw, chain);
-		return;
-	}
+	chain->bo = __sna_dri_copy_region(sna, draw, NULL,
+					  chain->back, chain->front, true);
 
 	DRI2SwapComplete(chain->client, draw,
 			 frame, tv_sec, tv_usec,
-			 type, chain->client ? chain->event_complete : NULL, chain->event_data);
+			 DRI2_BLIT_COMPLETE,
+			 chain->client ? chain->event_complete : NULL, chain->event_data);
 
 	VG_CLEAR(vbl);
 	vbl.request.type =
@@ -1463,11 +1320,8 @@ void sna_dri_vblank_handler(struct sna *sna, struct drm_event_vblank *event)
 
 		/* else fall through to blit */
 	case DRI2_SWAP:
-		if (can_blit(sna, draw, info->front, info->back))
-			info->bo = sna_dri_copy_to_front(sna, draw, NULL,
-							 get_private(info->front)->bo,
-							 get_private(info->back)->bo,
-							 true);
+		info->bo = __sna_dri_copy_region(sna, draw, NULL,
+						 info->back, info->front, true);
 		info->type = DRI2_SWAP_WAIT;
 		/* fall through to SwapComplete */
 	case DRI2_SWAP_WAIT:
@@ -1521,9 +1375,6 @@ sna_dri_immediate_blit(struct sna *sna,
 	DrawablePtr draw = info->draw;
 	bool ret = false;
 
-	if (!can_blit(sna, draw, info->front, info->back))
-		goto out;
-
 	if (sna->flags & SNA_NO_WAIT)
 		sync = false;
 
@@ -1539,9 +1390,9 @@ sna_dri_immediate_blit(struct sna *sna,
 			DBG(("%s: no pending blit, starting chain\n",
 			     __FUNCTION__));
 
-			info->bo = sna_dri_copy_to_front(sna, draw, NULL,
-							 get_private(info->front)->bo,
-							 get_private(info->back)->bo,
+			info->bo = __sna_dri_copy_region(sna, draw, NULL,
+							 info->back,
+							 info->front,
 							 true);
 			if (event) {
 				DRI2SwapComplete(info->client, draw, 0, 0, 0,
@@ -1562,17 +1413,13 @@ sna_dri_immediate_blit(struct sna *sna,
 		} else
 			ret = true;
 	} else {
-		info->bo = sna_dri_copy_to_front(sna, draw, NULL,
-						 get_private(info->front)->bo,
-						 get_private(info->back)->bo,
-						 false);
-out:
-		if (event) {
+		info->bo = __sna_dri_copy_region(sna, draw, NULL,
+						 info->back, info->front, true);
+		if (event)
 			DRI2SwapComplete(info->client, draw, 0, 0, 0,
 					 DRI2_BLIT_COMPLETE,
 					 info->event_complete,
 					 info->event_data);
-		}
 	}
 
 	DBG(("%s: continue? %d\n", __FUNCTION__, ret));
@@ -1707,13 +1554,10 @@ static void chain_flip(struct sna *sna)
 	    sna_dri_page_flip(sna, chain)) {
 		DBG(("%s: performing chained flip\n", __FUNCTION__));
 	} else {
-		if (can_blit(sna, chain->draw, chain->front, chain->back)) {
-			DBG(("%s: emitting chained vsync'ed blit\n", __FUNCTION__));
-			chain->bo = sna_dri_copy_to_front(sna, chain->draw, NULL,
-							  get_private(chain->front)->bo,
-							  get_private(chain->back)->bo,
-							  true);
-		}
+		DBG(("%s: emitting chained vsync'ed blit\n", __FUNCTION__));
+		chain->bo = __sna_dri_copy_region(sna, chain->draw, NULL,
+						  chain->back, chain->front,
+						  true);
 		DRI2SwapComplete(chain->client, chain->draw, 0, 0, 0,
 				 DRI2_BLIT_COMPLETE, chain->client ? chain->event_complete : NULL, chain->event_data);
 		sna_dri_frame_event_info_free(sna, chain->draw, chain);
@@ -1837,6 +1681,34 @@ get_current_msc_for_target(struct sna *sna, CARD64 target_msc, int pipe)
 	return ret;
 }
 
+static Bool find(pointer value, XID id, pointer cdata)
+{
+	return TRUE;
+}
+
+static int use_triple_buffer(struct sna *sna, ClientPtr client)
+{
+	struct sna_client *priv;
+
+	if ((sna->flags & SNA_TRIPLE_BUFFER) == 0)
+		return DRI2_FLIP;
+
+	/* Hack: Disable triple buffering for compositors */
+
+#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,12,99,901,0)
+	priv = sna_client(client);
+	if (priv->is_compositor == 0)
+		priv->is_compositor =
+			LookupClientResourceComplex(client,
+						    CompositeClientWindowType+1,
+						    find, NULL) ? DRI2_FLIP : DRI2_FLIP_THROTTLE;
+
+	return priv->is_compositor;
+#else
+	return DRI2_FLIP_THROTTLE;
+#endif
+}
+
 static bool
 sna_dri_schedule_flip(ClientPtr client, DrawablePtr draw,
 		      DRI2BufferPtr front, DRI2BufferPtr back, int pipe,
@@ -1859,8 +1731,7 @@ sna_dri_schedule_flip(ClientPtr client, DrawablePtr draw,
 		DBG(("%s: performing immediate swap on pipe %d, pending? %d, mode: %d\n",
 		     __FUNCTION__, pipe, info != NULL, info ? info->mode : 0));
 
-		if (info &&
-		    info->draw == draw) {
+		if (info && info->draw == draw) {
 			assert(info->type == DRI2_FLIP_THROTTLE);
 			assert(info->front == front);
 			if (info->back != back) {
@@ -1886,8 +1757,7 @@ sna_dri_schedule_flip(ClientPtr client, DrawablePtr draw,
 		if (info == NULL)
 			return false;
 
-		info->type = sna->flags & SNA_TRIPLE_BUFFER ? DRI2_FLIP_THROTTLE: DRI2_FLIP;
-
+		info->type = use_triple_buffer(sna, client);
 		info->draw = draw;
 		info->client = client;
 		info->event_complete = func;
@@ -2051,6 +1921,18 @@ sna_dri_schedule_swap(ClientPtr client, DrawablePtr draw, DRI2BufferPtr front,
 	enum frame_event_type swap_type = DRI2_SWAP;
 	CARD64 current_msc;
 
+	DBG(("%s: pixmap=%ld, back=%u (refs=%d/%d, flush=%d) , fron=%u (refs=%d/%d, flush=%d)\n",
+	     __FUNCTION__,
+	     get_drawable_pixmap(draw)->drawable.serialNumber,
+	     get_private(back)->bo->handle,
+	     get_private(back)->refcnt,
+	     get_private(back)->bo->refcnt,
+	     get_private(back)->bo->flush,
+	     get_private(front)->bo->handle,
+	     get_private(front)->refcnt,
+	     get_private(front)->bo->refcnt,
+	     get_private(front)->bo->flush));
+
 	DBG(("%s(target_msc=%llu, divisor=%llu, remainder=%llu)\n",
 	     __FUNCTION__,
 	     (long long)*target_msc,
@@ -2188,13 +2070,8 @@ sna_dri_schedule_swap(ClientPtr client, DrawablePtr draw, DRI2BufferPtr front,
 	return TRUE;
 
 blit:
-	if (can_blit(sna, draw, front, back)) {
-		DBG(("%s -- blit\n", __FUNCTION__));
-		sna_dri_copy_to_front(sna, draw, NULL,
-				      get_private(front)->bo,
-				      get_private(back)->bo,
-				      false);
-	}
+	DBG(("%s -- blit\n", __FUNCTION__));
+	__sna_dri_copy_region(sna, draw, NULL, back, front, false);
 	if (info)
 		sna_dri_frame_event_info_free(sna, draw, info);
 skip:
@@ -2219,17 +2096,12 @@ sna_dri_async_swap(ClientPtr client, DrawablePtr draw,
 	    (pipe = sna_dri_get_pipe(draw)) < 0 ||
 	    !sna_dri_schedule_flip(client, draw, front, back, pipe,
 				   &target_msc, 0, 0, func, data)) {
-		pipe = DRI2_BLIT_COMPLETE;
-		if (can_blit(sna, draw, front, back)) {
-			DBG(("%s: unable to flip, so blit\n", __FUNCTION__));
-			sna_dri_copy_to_front(sna, draw, NULL,
-					      get_private(front)->bo,
-					      get_private(back)->bo,
-					      false);
-		}
+		DBG(("%s: unable to flip, so blit\n", __FUNCTION__));
+		__sna_dri_copy_region(sna, draw, NULL, back, front, false);
 
-		DRI2SwapComplete(client, draw, 0, 0, 0, pipe, func, data);
-		return pipe == DRI2_EXCHANGE_COMPLETE;
+		DRI2SwapComplete(client, draw, 0, 0, 0,
+				 DRI2_BLIT_COMPLETE, func, data);
+		return false;
 	}
 	return TRUE;
 }

@@ -83,6 +83,7 @@ struct gt_info {
 		int size;
 		int max_vs_entries;
 		int max_gs_entries;
+		int push_ps_size; /* in 1KBs */
 	} urb;
 };
 
@@ -91,7 +92,7 @@ static const struct gt_info ivb_gt_info = {
 	.max_vs_threads = 16,
 	.max_gs_threads = 16,
 	.max_wm_threads = (16-1) << IVB_PS_MAX_THREADS_SHIFT,
-	.urb = { 128, 64, 64 },
+	.urb = { 128, 64, 64, 8 },
 };
 
 static const struct gt_info ivb_gt1_info = {
@@ -99,7 +100,7 @@ static const struct gt_info ivb_gt1_info = {
 	.max_vs_threads = 36,
 	.max_gs_threads = 36,
 	.max_wm_threads = (48-1) << IVB_PS_MAX_THREADS_SHIFT,
-	.urb = { 128, 512, 192 },
+	.urb = { 128, 512, 192, 8 },
 };
 
 static const struct gt_info ivb_gt2_info = {
@@ -107,15 +108,16 @@ static const struct gt_info ivb_gt2_info = {
 	.max_vs_threads = 128,
 	.max_gs_threads = 128,
 	.max_wm_threads = (172-1) << IVB_PS_MAX_THREADS_SHIFT,
-	.urb = { 256, 704, 320 },
+	.urb = { 256, 704, 320, 8 },
 };
 
-static const struct gt_info vlv_gt_info = {
-	.name = "Valleyview (gen7)",
-	.max_vs_threads = 16,
-	.max_gs_threads = 16,
-	.max_wm_threads = (16-1) << IVB_PS_MAX_THREADS_SHIFT,
+static const struct gt_info byt_gt_info = {
+	.name = "Baytrail (gen7)",
 	.urb = { 128, 64, 64 },
+	.max_vs_threads = 36,
+	.max_gs_threads = 36,
+	.max_wm_threads = (48-1) << IVB_PS_MAX_THREADS_SHIFT,
+	.urb = { 128, 512, 192, 8 },
 };
 
 static const struct gt_info hsw_gt_info = {
@@ -125,7 +127,7 @@ static const struct gt_info hsw_gt_info = {
 	.max_wm_threads =
 		(8 - 1) << HSW_PS_MAX_THREADS_SHIFT |
 		1 << HSW_PS_SAMPLE_MASK_SHIFT,
-	.urb = { 128, 64, 64 },
+	.urb = { 128, 64, 64, 8 },
 };
 
 static const struct gt_info hsw_gt1_info = {
@@ -135,7 +137,7 @@ static const struct gt_info hsw_gt1_info = {
 	.max_wm_threads =
 		(102 - 1) << HSW_PS_MAX_THREADS_SHIFT |
 		1 << HSW_PS_SAMPLE_MASK_SHIFT,
-	.urb = { 128, 640, 256 },
+	.urb = { 128, 640, 256, 8 },
 };
 
 static const struct gt_info hsw_gt2_info = {
@@ -145,8 +147,33 @@ static const struct gt_info hsw_gt2_info = {
 	.max_wm_threads =
 		(140 - 1) << HSW_PS_MAX_THREADS_SHIFT |
 		1 << HSW_PS_SAMPLE_MASK_SHIFT,
-	.urb = { 256, 1664, 640 },
+	.urb = { 256, 1664, 640, 8 },
 };
+
+static const struct gt_info hsw_gt3_info = {
+	.name = "Haswell (gen7.5, gt3)",
+	.max_vs_threads = 280,
+	.max_gs_threads = 280,
+	.max_wm_threads =
+		(280 - 1) << HSW_PS_MAX_THREADS_SHIFT |
+		1 << HSW_PS_SAMPLE_MASK_SHIFT,
+	.urb = { 512, 3328, 1280, 16 },
+};
+
+inline static bool is_ivb(struct sna *sna)
+{
+	return sna->kgem.gen == 070;
+}
+
+inline static bool is_byt(struct sna *sna)
+{
+	return sna->kgem.gen == 071;
+}
+
+inline static bool is_hsw(struct sna *sna)
+{
+	return sna->kgem.gen == 075;
+}
 
 static const uint32_t ps_kernel_packed[][4] = {
 #include "exa_wm_src_affine.g7b"
@@ -449,7 +476,7 @@ static void
 gen7_emit_urb(struct sna *sna)
 {
 	OUT_BATCH(GEN7_3DSTATE_PUSH_CONSTANT_ALLOC_PS | (2 - 2));
-	OUT_BATCH(8); /* in 1KBs */
+	OUT_BATCH(sna->render_state.gen7.info->urb.push_ps_size);
 
 	/* num of VS entries must be divisible by 8 if size < 9 */
 	OUT_BATCH(GEN7_3DSTATE_URB_VS | (2 - 2));
@@ -475,7 +502,7 @@ gen7_emit_state_base_address(struct sna *sna)
 {
 	uint32_t mocs;
 
-	mocs = sna->kgem.gen == 075 ?  5 << 8 : 3 << 8;
+	mocs = is_hsw(sna) ? 5 << 8 : 3 << 8;
 
 	OUT_BATCH(GEN7_STATE_BASE_ADDRESS | (10 - 2));
 	OUT_BATCH(0); /* general */
@@ -1236,10 +1263,10 @@ gen7_bind_bo(struct sna *sna,
 		 (height - 1) << GEN7_SURFACE_HEIGHT_SHIFT);
 	ss[3] = (bo->pitch - 1) << GEN7_SURFACE_PITCH_SHIFT;
 	ss[4] = 0;
-	ss[5] = is_scanout ? 0 : sna->kgem.gen == 075 ? 5 << 16 : 3 << 16;
+	ss[5] = is_scanout ? 0 : is_hsw(sna) ? 5 << 16 : 3 << 16;
 	ss[6] = 0;
 	ss[7] = 0;
-	if (sna->kgem.gen == 075)
+	if (is_hsw(sna))
 		ss[7] |= HSW_SURFACE_SWIZZLE(RED, GREEN, BLUE, ALPHA);
 
 	kgem_bo_set_binding(bo, format | is_dst << 30 | is_scanout << 31, offset);
@@ -1665,7 +1692,7 @@ static uint32_t gen7_bind_video_source(struct sna *sna,
 	ss[5] = 0;
 	ss[6] = 0;
 	ss[7] = 0;
-	if (sna->kgem.gen == 075)
+	if (is_hsw(sna))
 		ss[7] |= HSW_SURFACE_SWIZZLE(RED, GREEN, BLUE, ALPHA);
 
 	DBG(("[%x] bind bo(handle=%d, addr=%d), format=%d, width=%d, height=%d, pitch=%d, offset=%d\n",
@@ -1764,7 +1791,7 @@ gen7_render_video(struct sna *sna,
 	DBG(("%s: src=(%d, %d), dst=(%d, %d), %ldx[(%d, %d), (%d, %d)...]\n",
 	     __FUNCTION__,
 	     src_width, src_height, dst_width, dst_height,
-	     REGION_NUM_RECTS(dstRegion),
+	     (long)REGION_NUM_RECTS(dstRegion),
 	     REGION_EXTENTS(NULL, dstRegion)->x1,
 	     REGION_EXTENTS(NULL, dstRegion)->y1,
 	     REGION_EXTENTS(NULL, dstRegion)->x2,
@@ -2106,7 +2133,7 @@ static int prefer_blt_bo(struct sna *sna, struct kgem_bo *bo)
 	if (bo->rq)
 		return RQ_IS_BLT(bo->rq) ? 1 : -1;
 
-	return bo->tiling == I915_TILING_NONE || bo->scanout;
+	return bo->tiling == I915_TILING_NONE || (bo->scanout && !sna->kgem.has_wt);
 }
 
 inline static bool prefer_blt_ring(struct sna *sna,
@@ -3738,14 +3765,20 @@ static void gen7_render_fini(struct sna *sna)
 	kgem_bo_destroy(&sna->kgem, sna->render_state.gen7.general_bo);
 }
 
+static bool is_gt3(struct sna *sna)
+{
+	assert(sna->kgem.gen == 075);
+	return sna->PciInfo->device_id & 0x20;
+}
+
 static bool is_gt2(struct sna *sna)
 {
-	return DEVICE_ID(sna->PciInfo) & (sna->kgem.gen == 075 ? 0x30 : 0x20);
+	return sna->PciInfo->device_id & (is_hsw(sna)? 0x30 : 0x20);
 }
 
 static bool is_mobile(struct sna *sna)
 {
-	return (DEVICE_ID(sna->PciInfo) & 0xf) == 0x6;
+	return (sna->PciInfo->device_id & 0xf) == 0x6;
 }
 
 static bool gen7_render_setup(struct sna *sna)
@@ -3755,21 +3788,24 @@ static bool gen7_render_setup(struct sna *sna)
 	struct gen7_sampler_state *ss;
 	int i, j, k, l, m;
 
-	if (sna->kgem.gen == 070) {
+	if (is_ivb(sna)) {
 		state->info = &ivb_gt_info;
-		if (DEVICE_ID(sna->PciInfo) & 0xf) {
+		if (sna->PciInfo->device_id & 0xf) {
 			state->info = &ivb_gt1_info;
 			if (is_gt2(sna))
 				state->info = &ivb_gt2_info; /* XXX requires GT_MODE WiZ disabled */
 		}
-	} else if (sna->kgem.gen == 071) {
-		state->info = &vlv_gt_info;
-	} else if (sna->kgem.gen == 075) {
+	} else if (is_byt(sna)) {
+		state->info = &byt_gt_info;
+	} else if (is_hsw(sna)) {
 		state->info = &hsw_gt_info;
-		if (DEVICE_ID(sna->PciInfo) & 0xf) {
-			state->info = &hsw_gt1_info;
-			if (is_gt2(sna))
+		if (sna->PciInfo->device_id & 0xf) {
+			if (is_gt3(sna))
+				state->info = &hsw_gt3_info;
+			else if (is_gt2(sna))
 				state->info = &hsw_gt2_info;
+			else
+				state->info = &hsw_gt1_info;
 		}
 	} else
 		return false;
@@ -3852,7 +3888,7 @@ const char *gen7_render_init(struct sna *sna, const char *backend)
 #if !NO_COMPOSITE_SPANS
 	sna->render.check_composite_spans = gen7_check_composite_spans;
 	sna->render.composite_spans = gen7_render_composite_spans;
-	if (is_mobile(sna) || is_gt2(sna))
+	if (is_mobile(sna) || is_gt2(sna) || is_byt(sna))
 		sna->render.prefer_gpu |= PREFER_GPU_SPANS;
 #endif
 	sna->render.video = gen7_render_video;

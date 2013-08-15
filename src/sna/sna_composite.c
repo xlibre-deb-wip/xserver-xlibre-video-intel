@@ -216,10 +216,13 @@ sna_compute_composite_region(RegionPtr region,
 			pixman_region_fini (region);
 			return FALSE;
 		}
-		DBG(("%s: clip against src: (%d, %d), (%d, %d)\n",
-		     __FUNCTION__,
-		     region->extents.x1, region->extents.y1,
-		     region->extents.x2, region->extents.y2));
+		DBG(("%s: clip against src (%dx%d clip=%d): (%d, %d), (%d, %d)\n",
+		       __FUNCTION__,
+		       src->pDrawable ? src->pDrawable->width : 0,
+		       src->pDrawable ? src->pDrawable->height : 0,
+		       src->clientClipType,
+		       region->extents.x1, region->extents.y1,
+		       region->extents.x2, region->extents.y2));
 
 		if (src->alphaMap) {
 			if (!clip_to_src(region, src->alphaMap,
@@ -458,16 +461,25 @@ sna_composite_fb(CARD8 op,
 		 PicturePtr mask,
 		 PicturePtr dst,
 		 RegionPtr region,
-		 INT16 src_x,  INT16 src_y,
-		 INT16 mask_x, INT16 mask_y,
-		 INT16 dst_x,  INT16 dst_y,
+		 INT16 src_x, INT16 src_y,
+		 INT16 msk_x, INT16 msk_y,
+		 INT16 dst_x, INT16 dst_y,
 		 CARD16 width, CARD16 height)
 {
 	pixman_image_t *src_image, *mask_image, *dest_image;
 	int src_xoff, src_yoff;
 	int msk_xoff, msk_yoff;
 	int dst_xoff, dst_yoff;
+	int16_t tx, ty;
 	unsigned flags;
+
+	DBG(("%s -- op=%d, fallback dst=(%d, %d)+(%d, %d), size=(%d, %d): region=((%d,%d), (%d, %d))\n",
+	     __FUNCTION__, op,
+	     dst_x, dst_y,
+	     dst->pDrawable->x, dst->pDrawable->y,
+	     width, height,
+	     region->extents.x1, region->extents.y1,
+	     region->extents.x2, region->extents.y2));
 
 	DBG(("%s: fallback -- move dst to cpu\n", __FUNCTION__));
 	if (op <= PictOpSrc && !dst->alphaMap)
@@ -504,11 +516,69 @@ sna_composite_fb(CARD8 op,
 			return;
 	}
 
-	DBG(("%s: fallback -- fbComposite\n", __FUNCTION__));
-
 	validate_source(src);
 	if (mask)
 		validate_source(mask);
+
+	if (mask == NULL &&
+	    src->pDrawable &&
+	    dst->pDrawable->bitsPerPixel >= 8 &&
+	    src->filter != PictFilterConvolution &&
+	    (op == PictOpSrc || (op == PictOpOver && !PICT_FORMAT_A(src->format))) &&
+	    (dst->format == src->format || dst->format == alphaless(src->format)) &&
+	    sna_transform_is_integer_translation(src->transform, &tx, &ty)) {
+		PixmapPtr dst_pixmap = get_drawable_pixmap(dst->pDrawable);
+		PixmapPtr src_pixmap = get_drawable_pixmap(src->pDrawable);
+		int16_t sx = src_x + tx - (dst->pDrawable->x - dst_x);
+		int16_t sy = src_y + ty - (dst->pDrawable->y - dst_y);
+		if (region->extents.x1 + sx >= 0 &&
+		    region->extents.y1 + sy >= 0 &&
+		    region->extents.x2 + sx <= src->pDrawable->width &&
+		    region->extents.y2 + sy <= src->pDrawable->height) {
+			BoxPtr box = RegionRects(region);
+			int nbox = RegionNumRects(region);
+
+			sx += src->pDrawable->x;
+			sy += src->pDrawable->y;
+			if (get_drawable_deltas(src->pDrawable, src_pixmap, &tx, &ty))
+				sx += tx, sy += ty;
+
+			assert(region->extents.x1 + sx >= 0);
+			assert(region->extents.x2 + sx <= src_pixmap->drawable.width);
+			assert(region->extents.y1 + sy >= 0);
+			assert(region->extents.y2 + sy <= src_pixmap->drawable.height);
+
+			if (get_drawable_deltas(dst->pDrawable, dst_pixmap, &tx, &ty))
+				dst_x += tx, dst_y += ty;
+
+			assert(nbox);
+			do {
+				assert(box->x1 + sx >= 0);
+				assert(box->x2 + sx <= src_pixmap->drawable.width);
+				assert(box->y1 + sy >= 0);
+				assert(box->y2 + sy <= src_pixmap->drawable.height);
+
+				assert(box->x1 + dst_x >= 0);
+				assert(box->x2 + dst_x <= dst_pixmap->drawable.width);
+				assert(box->y1 + dst_y >= 0);
+				assert(box->y2 + dst_y <= dst_pixmap->drawable.height);
+
+				assert(box->x2 > box->x1 && box->y2 > box->y1);
+
+				memcpy_blt(src_pixmap->devPrivate.ptr,
+					   dst_pixmap->devPrivate.ptr,
+					   dst_pixmap->drawable.bitsPerPixel,
+					   src_pixmap->devKind,
+					   dst_pixmap->devKind,
+					   box->x1 + sx, box->y1 + sy,
+					   box->x1 + dst_x, box->y1 + dst_y,
+					   box->x2 - box->x1, box->y2 - box->y1);
+				box++;
+			} while (--nbox);
+
+			return;
+		}
+	}
 
 	src_image = image_from_pict(src, FALSE, &src_xoff, &src_yoff);
 	mask_image = image_from_pict(mask, FALSE, &msk_xoff, &msk_yoff);
@@ -516,10 +586,10 @@ sna_composite_fb(CARD8 op,
 
 	if (src_image && dest_image && !(mask && !mask_image))
 		sna_image_composite(op, src_image, mask_image, dest_image,
-				       src_x + src_xoff, src_y + src_yoff,
-				       mask_x + msk_xoff, mask_y + msk_yoff,
-				       dst_x + dst_xoff, dst_y + dst_yoff,
-				       width, height);
+				    src_x + src_xoff, src_y + src_yoff,
+				    msk_x + msk_xoff, msk_y + msk_yoff,
+				    dst_x + dst_xoff, dst_y + dst_yoff,
+				    width, height);
 
 	free_pixman_pict(src, src_image);
 	free_pixman_pict(mask, mask_image);
@@ -540,7 +610,6 @@ sna_composite(CARD8 op,
 	struct sna *sna = to_sna_from_pixmap(pixmap);
 	struct sna_pixmap *priv;
 	struct sna_composite_op tmp;
-	unsigned flags;
 	RegionRec region;
 	int dx, dy;
 
@@ -619,8 +688,7 @@ sna_composite(CARD8 op,
 	if (op <= PictOpSrc && priv->cpu_damage) {
 		int16_t x, y;
 
-		get_drawable_deltas(dst->pDrawable, pixmap, &x, &y);
-		if (x|y)
+		if (get_drawable_deltas(dst->pDrawable, pixmap, &x, &y))
 			pixman_region_translate(&region, x, y);
 
 		sna_damage_subtract(&priv->cpu_damage, &region);
@@ -658,46 +726,6 @@ sna_composite(CARD8 op,
 	goto out;
 
 fallback:
-	DBG(("%s -- fallback dst=(%d, %d)+(%d, %d), size=(%d, %d): region=((%d,%d), (%d, %d))\n",
-	     __FUNCTION__,
-	     dst_x, dst_y,
-	     dst->pDrawable->x, dst->pDrawable->y,
-	     width, height,
-	     region.extents.x1, region.extents.y1,
-	     region.extents.x2, region.extents.y2));
-	if (op <= PictOpSrc && !dst->alphaMap)
-		flags = MOVE_WRITE | MOVE_INPLACE_HINT;
-	else
-		flags = MOVE_WRITE | MOVE_READ;
-	DBG(("%s: fallback -- move dst to cpu\n", __FUNCTION__));
-	if (!sna_drawable_move_region_to_cpu(dst->pDrawable, &region, flags))
-		goto out;
-	if (dst->alphaMap &&
-	    !sna_drawable_move_to_cpu(dst->alphaMap->pDrawable, flags))
-		goto out;
-	if (src->pDrawable) {
-		DBG(("%s: fallback -- move src to cpu\n", __FUNCTION__));
-		if (!sna_drawable_move_to_cpu(src->pDrawable,
-					      MOVE_READ))
-			goto out;
-
-		if (src->alphaMap &&
-		    !sna_drawable_move_to_cpu(src->alphaMap->pDrawable,
-					      MOVE_READ))
-			goto out;
-	}
-	if (mask && mask->pDrawable) {
-		DBG(("%s: fallback -- move mask to cpu\n", __FUNCTION__));
-		if (!sna_drawable_move_to_cpu(mask->pDrawable,
-					      MOVE_READ))
-			goto out;
-
-		if (mask->alphaMap &&
-		    !sna_drawable_move_to_cpu(mask->alphaMap->pDrawable,
-					      MOVE_READ))
-			goto out;
-	}
-
 	DBG(("%s: fallback -- fbComposite\n", __FUNCTION__));
 	sna_composite_fb(op, src, mask, dst, &region,
 			 src_x,  src_y,
@@ -881,8 +909,8 @@ sna_composite_rectangles(CARD8		 op,
 	     (long)RegionNumRects(&region)));
 
 	pixmap = get_drawable_pixmap(dst->pDrawable);
-	get_drawable_deltas(dst->pDrawable, pixmap, &dst_x, &dst_y);
-	pixman_region_translate(&region, dst_x, dst_y);
+	if (get_drawable_deltas(dst->pDrawable, pixmap, &dst_x, &dst_y))
+		pixman_region_translate(&region, dst_x, dst_y);
 
 	DBG(("%s: pixmap +(%d, %d) extents (%d, %d),(%d, %d)\n",
 	     __FUNCTION__, dst_x, dst_y,
