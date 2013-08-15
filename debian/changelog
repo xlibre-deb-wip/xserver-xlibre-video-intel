@@ -1,3 +1,11 @@
+xserver-xorg-video-intel (2:2.21.12-1ubuntu3) saucy; urgency=low
+
+  * fix-preinit-cleanup-paths.patch: Upstream cherrypick to fix leaks in
+    sna_pre_init failure paths. Prerequisite for new XMir patch.
+  * xmir.patch: Update to follow upstream developments
+
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Thu, 15 Aug 2013 11:46:10 +1000
+
 xserver-xorg-video-intel (2:2.21.12-1ubuntu2) saucy; urgency=low
 
   * Fix crash in sna_adjust_frame under XMir (LP: #1212065)

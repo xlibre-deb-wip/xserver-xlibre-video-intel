@@ -1,4 +1,348 @@
-commit ea3344d571ff728f5cb84c6920635e552090ec7c
+commit b6b5c3f009585151eb772dfc2526843c7cee82b3
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Aug 9 11:34:39 2013 +0100
+
+    intel: Disable incompatible features whilst hosted
+    
+    Start adding the infrastructure to disable direct hardware access if X
+    is being run under a system compositor (aka "hosted").
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+diff --git a/src/intel_device.c b/src/intel_device.c
+index c5f0a38..d9ff8bc 100644
+--- a/src/intel_device.c
++++ b/src/intel_device.c
+@@ -92,7 +92,7 @@ static int __intel_check_device(int fd)
+ 		if (drmIoctl(fd, DRM_IOCTL_I915_GETPARAM, &gp))
+ 			ret = FALSE;
+ 	}
+-	if (ret) {
++	if (ret && !hosted()) {
+ 		struct drm_mode_card_res res;
+ 
+ 		memset(&res, 0, sizeof(res));
+@@ -199,6 +199,12 @@ int intel_open_device(int entity_num,
+ 	dev->open_count = 0;
+ 	dev->master_count = 0;
+ 
++	/* If hosted under a system compositor, just pretend to be master */
++	if (hosted()) {
++		dev->open_count++;
++		dev->master_count++;
++	}
++
+ 	xf86GetEntityPrivate(entity_num, intel_device_key)->ptr = dev;
+ 
+ 	return fd;
+@@ -222,6 +228,8 @@ int intel_get_device(ScrnInfoPtr scrn)
+ 		drmSetVersion sv;
+ 		int retry = 2000;
+ 
++		assert(!hosted());
++
+ 		/* Check that what we opened was a master or a
+ 		 * master-capable FD, by setting the version of the
+ 		 * interface we'll use to talk to it.
+@@ -267,6 +275,7 @@ int intel_get_master(ScrnInfoPtr scrn)
+ 	if (dev->master_count++ == 0) {
+ 		int retry = 2000;
+ 
++		assert(!hosted());
+ 		do {
+ 			ret = drmSetMaster(dev->fd);
+ 			if (ret == 0)
+@@ -288,6 +297,7 @@ int intel_put_master(ScrnInfoPtr scrn)
+ 	ret = 0;
+ 	assert(dev->master_count);
+ 	if (--dev->master_count == 0) {
++		assert(!hosted());
+ 		assert(drmSetMaster(dev->fd) == 0);
+ 		ret = drmDropMaster(dev->fd);
+ 	}
+@@ -317,6 +327,7 @@ void intel_put_device(ScrnInfoPtr scrn)
+ 	if (--dev->open_count)
+ 		return;
+ 
++	assert(!hosted());
+ 	intel_set_device(scrn, NULL);
+ 
+ 	drmClose(dev->fd);
+diff --git a/src/intel_driver.h b/src/intel_driver.h
+index 1e67eab..4768536 100644
+--- a/src/intel_driver.h
++++ b/src/intel_driver.h
+@@ -129,4 +129,6 @@ void intel_put_device(ScrnInfoPtr scrn);
+ 
+ void __intel_uxa_release_device(ScrnInfoPtr scrn);
+ 
++#define hosted() (0)
++
+ #endif /* INTEL_DRIVER_H */
+diff --git a/src/intel_module.c b/src/intel_module.c
+index 47e494c..42fa8d8 100644
+--- a/src/intel_module.c
++++ b/src/intel_module.c
+@@ -382,6 +382,9 @@ static Bool intel_driver_func(ScrnInfoPtr pScrn,
+ #else
+ 		(*flag) = HW_IO | HW_MMIO;
+ #endif
++		if (hosted())
++			(*flag) = HW_SKIP_CONSOLE;
++
+ 		return TRUE;
+ 	default:
+ 		/* Unknown or deprecated function */
+@@ -410,6 +413,9 @@ static enum accel_method { UXA, SNA } get_accel_method(void)
+ 	enum accel_method accel_method = DEFAULT_ACCEL_METHOD;
+ 	XF86ConfDevicePtr dev;
+ 
++	if (hosted())
++		return SNA;
++
+ 	dev = _xf86findDriver("intel", xf86configptr->conf_device_lst);
+ 	if (dev && dev->dev_option_lst) {
+ 		const char *s;
+@@ -493,7 +499,8 @@ static Bool intel_pci_probe(DriverPtr		driver,
+ 		case PCI_CHIP_I810_DC100:
+ 		case PCI_CHIP_I810_E:
+ 		case PCI_CHIP_I815:
+-			break;
++			if (!hosted())
++				break;
+ 		default:
+ 			return FALSE;
+ 		}
+diff --git a/src/sna/sna.h b/src/sna/sna.h
+index caf671f..7387088 100644
+--- a/src/sna/sna.h
++++ b/src/sna/sna.h
+@@ -229,6 +229,7 @@ struct sna {
+ #define SNA_TEAR_FREE		0x10
+ #define SNA_FORCE_SHADOW	0x20
+ #define SNA_FLUSH_GTT		0x40
++#define SNA_IS_HOSTED		0x80
+ #define SNA_REPROBE		0x80000000
+ 
+ 	unsigned cpu_features;
+diff --git a/src/sna/sna_display.c b/src/sna/sna_display.c
+index 5dcf47f..f86d93d 100644
+--- a/src/sna/sna_display.c
++++ b/src/sna/sna_display.c
+@@ -3151,11 +3151,22 @@ sna_crtc_config_notify(ScreenPtr screen)
+ 	sna_mode_update(to_sna_from_screen(screen));
+ }
+ 
++#if HAS_PIXMAP_SHARING
++#define sna_setup_provider(scrn) xf86ProviderSetup(scrn, NULL, "Intel")
++#else
++#define sna_setup_provider(scrn)
++#endif
++
+ bool sna_mode_pre_init(ScrnInfoPtr scrn, struct sna *sna)
+ {
+ 	struct sna_mode *mode = &sna->mode;
+ 	int i;
+ 
++	if (sna->flags & SNA_IS_HOSTED) {
++		sna_setup_provider(scrn);
++		return true;
++	}
++
+ 	mode->kmode = drmModeGetResources(sna->kgem.fd);
+ 	if (mode->kmode) {
+ 		xf86CrtcConfigInit(scrn, &sna_mode_funcs);
+@@ -3172,9 +3183,7 @@ bool sna_mode_pre_init(ScrnInfoPtr scrn, struct sna *sna)
+ 		if (!xf86IsEntityShared(scrn->entityList[0]))
+ 			sna_mode_compute_possible_clones(scrn);
+ 
+-#if HAS_PIXMAP_SHARING
+-		xf86ProviderSetup(scrn, NULL, "Intel");
+-#endif
++		sna_setup_provider(scrn);
+ 	} else {
+ 		if (!sna_mode_fake_init(sna))
+ 			return false;
+@@ -3200,6 +3209,9 @@ sna_mode_close(struct sna *sna)
+ 	while (sna_mode_has_pending_events(sna))
+ 		sna_mode_wakeup(sna);
+ 
++	if (sna->flags & SNA_IS_HOSTED)
++		return;
++
+ 	for (i = 0; i < xf86_config->num_crtc; i++)
+ 		sna_crtc_disable_shadow(sna, to_sna_crtc(xf86_config->crtc[i]));
+ }
+diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
+index fc8773b..7f2c0ac 100644
+--- a/src/sna/sna_driver.c
++++ b/src/sna/sna_driver.c
+@@ -287,7 +287,7 @@ static bool has_pageflipping(struct sna *sna)
+ 	drm_i915_getparam_t gp;
+ 	int v;
+ 
+-	if (sna->flags & SNA_NO_WAIT)
++	if (sna->flags & (SNA_IS_HOSTED | SNA_NO_WAIT))
+ 		return false;
+ 
+ 	v = 0;
+@@ -413,6 +413,7 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
+ 	sna = to_sna(scrn);
+ 	sna->scrn = scrn;
+ 	sna->pEnt = pEnt;
++	sna->flags = 0;
+ 
+ 	scrn->displayWidth = 640;	/* default it */
+ 
+@@ -425,7 +426,7 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
+ 	fd = intel_get_device(scrn);
+ 	if (fd == -1) {
+ 		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
+-			   "Failed to become DRM master.\n");
++			   "Failed to claim DRM device.\n");
+ 		goto cleanup;
+ 	}
+ 
+@@ -484,7 +485,6 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
+ 	if (xf86ReturnOptValBool(sna->Options, OPTION_TILING_FB, FALSE))
+ 		sna->tiling &= ~SNA_TILING_FB;
+ 
+-	sna->flags = 0;
+ 	if (!xf86ReturnOptValBool(sna->Options, OPTION_SWAPBUFFERS_WAIT, TRUE))
+ 		sna->flags |= SNA_NO_WAIT;
+ 	if (xf86ReturnOptValBool(sna->Options, OPTION_TRIPLE_BUFFER, TRUE))
+@@ -629,6 +629,9 @@ sna_uevent_init(ScrnInfoPtr scrn)
+ 	Bool hotplug;
+ 	MessageType from = X_CONFIG;
+ 
++	if (sna->flags & SNA_IS_HOSTED)
++		return;
++
+ 	DBG(("%s\n", __FUNCTION__));
+ 
+ 	/* RandR will be disabled if Xinerama is active, and so generating
+@@ -895,7 +898,8 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
+ 	if (!miDCInitialize(screen, xf86GetPointerScreenFuncs()))
+ 		return FALSE;
+ 
+-	if (xf86_cursors_init(screen, SNA_CURSOR_X, SNA_CURSOR_Y,
++	if ((sna->flags & SNA_IS_HOSTED) == 0 &&
++	    xf86_cursors_init(screen, SNA_CURSOR_X, SNA_CURSOR_Y,
+ 			       HARDWARE_CURSOR_TRUECOLOR_AT_8BPP |
+ 			       HARDWARE_CURSOR_BIT_ORDER_MSBFIRST |
+ 			       HARDWARE_CURSOR_INVERT_MASK |
+diff --git a/src/sna/sna_video_overlay.c b/src/sna/sna_video_overlay.c
+index a0b4db9..a68a173 100644
+--- a/src/sna/sna_video_overlay.c
++++ b/src/sna/sna_video_overlay.c
+@@ -683,6 +683,9 @@ void sna_video_overlay_setup(struct sna *sna, ScreenPtr screen)
+ 	struct sna_video *video;
+ 	XvPortPtr port;
+ 
++	if (sna->flags & SNA_IS_HOSTED)
++		return;
++
+ 	if (!sna_has_overlay(sna))
+ 		return;
+ 
+diff --git a/src/sna/sna_video_sprite.c b/src/sna/sna_video_sprite.c
+index 07e59bd..a8d50ab 100644
+--- a/src/sna/sna_video_sprite.c
++++ b/src/sna/sna_video_sprite.c
+@@ -456,6 +456,9 @@ void sna_video_sprite_setup(struct sna *sna, ScreenPtr screen)
+ 	struct sna_video *video;
+ 	XvPortPtr port;
+ 
++	if (sna->flags & SNA_IS_HOSTED)
++		return;
++
+ 	memset(&r, 0, sizeof(struct drm_mode_get_plane_res));
+ 	if (drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_GETPLANERESOURCES, &r))
+ 		return;
+commit 3d818c0a36919add462c05d01a64b297f693fa69
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Aug 14 08:34:46 2013 +0100
+
+    sna: unwrap old modesetting API whilst hosted
+    
+    If we are hosted, then we do not have our own modesetting backend and
+    calling it results in fireworks. So leave the old modesetting entry
+    points for the hosting midlayer to control.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
+index 7f2c0ac..c27deb6 100644
+--- a/src/sna/sna_driver.c
++++ b/src/sna/sna_driver.c
+@@ -1080,6 +1080,15 @@ static Bool sna_pm_event(SCRN_ARG_TYPE arg, pmEvent event, Bool undo)
+ 	return TRUE;
+ }
+ 
++static Bool sna_enter_vt__hosted(VT_FUNC_ARGS_DECL)
++{
++	return TRUE;
++}
++
++static void sna_leave_vt__hosted(VT_FUNC_ARGS_DECL)
++{
++}
++
+ Bool sna_init_scrn(ScrnInfoPtr scrn, int entity_num)
+ {
+ 	DBG(("%s: entity_num=%d\n", __FUNCTION__, entity_num));
+@@ -1110,13 +1119,18 @@ Bool sna_init_scrn(ScrnInfoPtr scrn, int entity_num)
+ 
+ 	scrn->PreInit = sna_pre_init;
+ 	scrn->ScreenInit = sna_screen_init;
+-	scrn->SwitchMode = sna_switch_mode;
+-	scrn->AdjustFrame = sna_adjust_frame;
+-	scrn->EnterVT = sna_enter_vt;
+-	scrn->LeaveVT = sna_leave_vt;
++	if (!hosted()) {
++		scrn->SwitchMode = sna_switch_mode;
++		scrn->AdjustFrame = sna_adjust_frame;
++		scrn->EnterVT = sna_enter_vt;
++		scrn->LeaveVT = sna_leave_vt;
++		scrn->ValidMode = sna_valid_mode;
++		scrn->PMEvent = sna_pm_event;
++	} else {
++		scrn->EnterVT = sna_enter_vt__hosted;
++		scrn->LeaveVT = sna_leave_vt__hosted;
++	}
+ 	scrn->FreeScreen = sna_free_screen;
+-	scrn->ValidMode = sna_valid_mode;
+-	scrn->PMEvent = sna_pm_event;
+ 
+ 	xf86SetEntitySharable(entity_num);
+ 	xf86SetEntityInstanceForScreen(scrn, entity_num,
+commit 394978867edf3746c285491db6be41abfe325d87
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Aug 14 08:38:52 2013 +0100
+
+    sna: Check that we successfully install the required hosting midlayer
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
+index c27deb6..83a5bba 100644
+--- a/src/sna/sna_driver.c
++++ b/src/sna/sna_driver.c
+@@ -430,6 +430,13 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
+ 		goto cleanup;
+ 	}
+ 
++	/* Sanity check */
++	if (hosted() && (sna->flags & SNA_IS_HOSTED) == 0) {
++		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
++			   "Failed to setup hosted device.\n");
++		goto cleanup;
++	}
++
+ 	preferred_depth = sna->info->gen < 030 ? 15 : 24;
+ 	if (!fb_supports_depth(fd, preferred_depth))
+ 		preferred_depth = 24;
+commit 96e2b3c6ee7aad96612a2efad97656a764e197f4
 Author: Chris Wilson <chris@chris-wilson.co.uk>
 Date:   Wed Jul 24 01:44:30 2013 +0100
 
@@ -9,32 +353,23 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
     
     Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
 
-Index: xf86-video-intel/src/Makefile.am
-===================================================================
---- xf86-video-intel.orig/src/Makefile.am	2013-08-14 14:01:04.235601828 +1000
-+++ xf86-video-intel/src/Makefile.am	2013-08-14 14:01:04.231601828 +1000
-@@ -46,6 +46,7 @@
- 	intel_device.c \
+diff --git a/src/Makefile.am b/src/Makefile.am
+index b0781ca..126bde2 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -59,6 +59,7 @@ intel_drv_la_SOURCES = \
+ 	intel_driver.h \
  	intel_options.c \
  	intel_module.c \
 +	intel_xmir.h \
  	compat-api.h \
  	$(NULL)
  
-Index: xf86-video-intel/src/intel_device.c
-===================================================================
---- xf86-video-intel.orig/src/intel_device.c	2013-08-14 14:01:04.235601828 +1000
-+++ xf86-video-intel/src/intel_device.c	2013-08-14 14:01:04.231601828 +1000
-@@ -92,7 +92,7 @@
- 		if (drmIoctl(fd, DRM_IOCTL_I915_GETPARAM, &gp))
- 			ret = FALSE;
- 	}
--	if (ret) {
-+	if (ret && !xorgMir) {
- 		struct drm_mode_card_res res;
- 
- 		memset(&res, 0, sizeof(res));
-@@ -121,10 +121,34 @@
+diff --git a/src/intel_device.c b/src/intel_device.c
+index d9ff8bc..706b156 100644
+--- a/src/intel_device.c
++++ b/src/intel_device.c
+@@ -121,10 +121,34 @@ static int fd_set_cloexec(int fd)
  	return fd;
  }
  
@@ -69,56 +404,10 @@ Index: xf86-video-intel/src/intel_device.c
  	if (*path == NULL) {
  		char id[20];
  		int ret;
-@@ -199,6 +223,12 @@
- 	dev->open_count = 0;
- 	dev->master_count = 0;
- 
-+	/* If hosted under a system compositor, just pretend to be master */
-+	if (xorgMir) {
-+		dev->open_count++;
-+		dev->master_count++;
-+	}
-+
- 	xf86GetEntityPrivate(entity_num, intel_device_key)->ptr = dev;
- 
- 	return fd;
-@@ -222,6 +252,8 @@
- 		drmSetVersion sv;
- 		int retry = 2000;
- 
-+		assert(!xorgMir);
-+
- 		/* Check that what we opened was a master or a
- 		 * master-capable FD, by setting the version of the
- 		 * interface we'll use to talk to it.
-@@ -267,6 +299,7 @@
- 	if (dev->master_count++ == 0) {
- 		int retry = 2000;
- 
-+		assert(!xorgMir);
- 		do {
- 			ret = drmSetMaster(dev->fd);
- 			if (ret == 0)
-@@ -288,6 +321,7 @@
- 	ret = 0;
- 	assert(dev->master_count);
- 	if (--dev->master_count == 0) {
-+		assert(!xorgMir);
- 		assert(drmSetMaster(dev->fd) == 0);
- 		ret = drmDropMaster(dev->fd);
- 	}
-@@ -317,6 +351,7 @@
- 	if (--dev->open_count)
- 		return;
- 
-+	assert(!xorgMir);
- 	intel_set_device(scrn, NULL);
- 
- 	drmClose(dev->fd);
-Index: xf86-video-intel/src/intel_driver.h
-===================================================================
---- xf86-video-intel.orig/src/intel_driver.h	2013-08-14 14:01:04.235601828 +1000
-+++ xf86-video-intel/src/intel_driver.h	2013-08-14 14:01:04.231601828 +1000
+diff --git a/src/intel_driver.h b/src/intel_driver.h
+index 4768536..d5caa4f 100644
+--- a/src/intel_driver.h
++++ b/src/intel_driver.h
 @@ -1,6 +1,8 @@
  #ifndef INTEL_DRIVER_H
  #define INTEL_DRIVER_H
@@ -128,34 +417,19 @@ Index: xf86-video-intel/src/intel_driver.h
  #define INTEL_VERSION 4000
  #define INTEL_NAME "intel"
  #define INTEL_DRIVER_NAME "intel"
-Index: xf86-video-intel/src/intel_module.c
-===================================================================
---- xf86-video-intel.orig/src/intel_module.c	2013-08-14 14:01:04.235601828 +1000
-+++ xf86-video-intel/src/intel_module.c	2013-08-14 14:01:04.231601828 +1000
-@@ -422,6 +422,9 @@
- #else
- 		(*flag) = HW_IO | HW_MMIO;
- #endif
-+		if (xorgMir)
-+			(*flag) = HW_SKIP_CONSOLE;
-+
- 		return TRUE;
- 	default:
- 		/* Unknown or deprecated function */
-@@ -533,7 +536,8 @@
- 		case PCI_CHIP_I810_DC100:
- 		case PCI_CHIP_I810_E:
- 		case PCI_CHIP_I815:
--			break;
-+			if (!xorgMir)
-+				break;
- 		default:
- 			return FALSE;
- 		}
-Index: xf86-video-intel/src/intel_xmir.h
-===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ xf86-video-intel/src/intel_xmir.h	2013-08-14 14:01:04.231601828 +1000
+@@ -129,6 +131,6 @@ void intel_put_device(ScrnInfoPtr scrn);
+ 
+ void __intel_uxa_release_device(ScrnInfoPtr scrn);
+ 
+-#define hosted() (0)
++#define hosted() (xorgMir)
+ 
+ #endif /* INTEL_DRIVER_H */
+diff --git a/src/intel_xmir.h b/src/intel_xmir.h
+new file mode 100644
+index 0000000..2e3c85a
+--- /dev/null
++++ b/src/intel_xmir.h
 @@ -0,0 +1,15 @@
 +#ifndef INTEL_XMIR_H
 +#define INTEL_XMIR_H
@@ -172,11 +446,11 @@ Index: xf86-video-intel/src/intel_xmir.h
 +#endif
 +
 +#endif /* INTEL_XMIR_H */
-Index: xf86-video-intel/src/sna/Makefile.am
-===================================================================
---- xf86-video-intel.orig/src/sna/Makefile.am	2013-08-14 14:01:04.235601828 +1000
-+++ xf86-video-intel/src/sna/Makefile.am	2013-08-14 14:01:04.231601828 +1000
-@@ -73,6 +73,7 @@
+diff --git a/src/sna/Makefile.am b/src/sna/Makefile.am
+index 5d5417e..1c5dda0 100644
+--- a/src/sna/Makefile.am
++++ b/src/sna/Makefile.am
+@@ -75,6 +75,7 @@ libsna_la_SOURCES = \
  	sna_video_overlay.c \
  	sna_video_sprite.c \
  	sna_video_textured.c \
@@ -184,19 +458,11 @@ Index: xf86-video-intel/src/sna/Makefile.am
  	gen2_render.c \
  	gen2_render.h \
  	gen3_render.c \
-Index: xf86-video-intel/src/sna/sna.h
-===================================================================
---- xf86-video-intel.orig/src/sna/sna.h	2013-08-14 14:01:04.235601828 +1000
-+++ xf86-video-intel/src/sna/sna.h	2013-08-14 14:01:04.231601828 +1000
-@@ -218,6 +218,7 @@
- #define SNA_TEAR_FREE		0x10
- #define SNA_FORCE_SHADOW	0x20
- #define SNA_FLUSH_GTT		0x40
-+#define SNA_IS_HOSTED		0x80
- #define SNA_REPROBE		0x80000000
- 
- 	unsigned cpu_features;
-@@ -271,6 +272,7 @@
+diff --git a/src/sna/sna.h b/src/sna/sna.h
+index fe84074..d9ebd75 100644
+--- a/src/sna/sna.h
++++ b/src/sna/sna.h
+@@ -283,6 +283,7 @@ struct sna {
  	EntityInfoPtr pEnt;
  	struct pci_device *PciInfo;
  	const struct intel_device_info *info;
@@ -204,7 +470,25 @@ Index: xf86-video-intel/src/sna/sna.h
  
  	ScreenBlockHandlerProcPtr BlockHandler;
  	ScreenWakeupHandlerProcPtr WakeupHandler;
-@@ -912,4 +914,18 @@
+@@ -420,6 +421,17 @@ CARD32 sna_render_format_for_depth(int depth);
+ 
+ void sna_debug_flush(struct sna *sna);
+ 
++static inline void
++get_window_deltas(PixmapPtr pixmap, int16_t *x, int16_t *y)
++{
++#ifdef COMPOSITE
++	*x = -pixmap->screen_x;
++	*y = -pixmap->screen_y;
++#else
++	*x = *y = 0;
++#endif
++}
++
+ static inline bool
+ get_drawable_deltas(DrawablePtr drawable, PixmapPtr pixmap, int16_t *x, int16_t *y)
+ {
+@@ -930,4 +942,18 @@ void sna_image_composite(pixman_op_t        op,
  			 uint16_t           width,
  			 uint16_t           height);
  
@@ -223,59 +507,11 @@ Index: xf86-video-intel/src/sna/sna.h
 +#endif
 +
  #endif /* _SNA_H */
-Index: xf86-video-intel/src/sna/sna_display.c
-===================================================================
---- xf86-video-intel.orig/src/sna/sna_display.c	2013-08-14 14:01:04.235601828 +1000
-+++ xf86-video-intel/src/sna/sna_display.c	2013-08-14 14:01:13.183602136 +1000
-@@ -1488,6 +1488,9 @@
- 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(sna->scrn);
- 	xf86CrtcPtr crtc;
- 
-+	if (sna->flags & SNA_IS_HOSTED)
-+		return;
-+
- 	if ((unsigned)config->compat_output >= config->num_output)
- 		return;
- 
-@@ -3128,11 +3131,22 @@
- 	sna_mode_update(to_sna_from_screen(screen));
- }
- 
-+#if HAS_PIXMAP_SHARING
-+#define sna_setup_provider(scrn) xf86ProviderSetup(scrn, NULL, "Intel")
-+#else
-+#define sna_setup_provider(scrn)
-+#endif
-+
- bool sna_mode_pre_init(ScrnInfoPtr scrn, struct sna *sna)
- {
- 	struct sna_mode *mode = &sna->mode;
- 	int i;
- 
-+	if (sna->flags & SNA_IS_HOSTED) {
-+		sna_setup_provider(scrn);
-+		return true;
-+	}
-+
- 	mode->kmode = drmModeGetResources(sna->kgem.fd);
- 	if (mode->kmode) {
- 		xf86CrtcConfigInit(scrn, &sna_mode_funcs);
-@@ -3149,9 +3163,7 @@
- 		if (!xf86IsEntityShared(scrn->entityList[0]))
- 			sna_mode_compute_possible_clones(scrn);
- 
--#if HAS_PIXMAP_SHARING
--		xf86ProviderSetup(scrn, NULL, "Intel");
--#endif
-+		sna_setup_provider(scrn);
- 	} else {
- 		if (!sna_mode_fake_init(sna))
- 			return false;
-Index: xf86-video-intel/src/sna/sna_dri.c
-===================================================================
---- xf86-video-intel.orig/src/sna/sna_dri.c	2013-08-14 14:01:04.235601828 +1000
-+++ xf86-video-intel/src/sna/sna_dri.c	2013-08-14 14:01:04.231601828 +1000
-@@ -2399,6 +2399,13 @@
+diff --git a/src/sna/sna_dri.c b/src/sna/sna_dri.c
+index 1569251..d0db3de 100644
+--- a/src/sna/sna_dri.c
++++ b/src/sna/sna_dri.c
+@@ -2272,6 +2272,13 @@ out_complete:
  }
  #endif
  
@@ -289,7 +525,7 @@ Index: xf86-video-intel/src/sna/sna_dri.c
  static bool has_i830_dri(void)
  {
  	return access(DRI_DRIVER_PATH "/i830_dri.so", R_OK) == 0;
-@@ -2474,6 +2481,13 @@
+@@ -2347,6 +2354,13 @@ bool sna_dri_open(struct sna *sna, ScreenPtr screen)
  	info.ReuseBufferNotify = NULL;
  #endif
  
@@ -303,41 +539,26 @@ Index: xf86-video-intel/src/sna/sna_dri.c
  #if USE_ASYNC_SWAP
  	info.version = 10;
  	info.AsyncSwap = sna_dri_async_swap;
-Index: xf86-video-intel/src/sna/sna_driver.c
-===================================================================
---- xf86-video-intel.orig/src/sna/sna_driver.c	2013-08-14 14:01:04.235601828 +1000
-+++ xf86-video-intel/src/sna/sna_driver.c	2013-08-14 14:01:04.231601828 +1000
-@@ -295,7 +295,7 @@
- 	drm_i915_getparam_t gp;
- 	int v;
+diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
+index 83a5bba..6fe49c9 100644
+--- a/src/sna/sna_driver.c
++++ b/src/sna/sna_driver.c
+@@ -430,6 +430,9 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
+ 		goto cleanup;
+ 	}
  
--	if (sna->flags & SNA_NO_WAIT)
-+	if (sna->flags & (SNA_IS_HOSTED | SNA_NO_WAIT))
- 		return false;
- 
- 	v = 0;
-@@ -421,6 +421,7 @@
- 	sna = to_sna(scrn);
- 	sna->scrn = scrn;
- 	sna->pEnt = pEnt;
-+	sna->flags = 0;
- 
- 	scrn->displayWidth = 640;	/* default it */
- 
-@@ -433,13 +434,21 @@
- 	fd = intel_get_device(scrn);
- 	if (fd == -1) {
++	if (!sna_xmir_create(sna))
++		return FALSE;
++
+ 	/* Sanity check */
+ 	if (hosted() && (sna->flags & SNA_IS_HOSTED) == 0) {
  		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
--			   "Failed to become DRM master.\n");
-+			   "Failed to claim DRM device.\n");
- 		return FALSE;
+@@ -437,9 +440,14 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
+ 		goto cleanup;
  	}
  
 -	preferred_depth = sna->info->gen < 030 ? 15 : 24;
 -	if (!fb_supports_depth(fd, preferred_depth))
-+	if (!sna_xmir_create(sna))
-+		return FALSE;
-+
 +	if (sna->xmir) {
 +		/* XXX query depth from xmir */
  		preferred_depth = 24;
@@ -349,7 +570,7 @@ Index: xf86-video-intel/src/sna/sna_driver.c
  
  	if (!xf86SetDepthBpp(scrn, preferred_depth, 0, 0,
  			     Support32bppFb |
-@@ -475,6 +484,9 @@
+@@ -475,6 +483,9 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
  
  	intel_detect_chipset(scrn, sna->pEnt, sna->PciInfo);
  
@@ -359,15 +580,7 @@ Index: xf86-video-intel/src/sna/sna_driver.c
  	kgem_init(&sna->kgem, fd, sna->PciInfo, sna->info->gen);
  	if (xf86ReturnOptValBool(sna->Options, OPTION_ACCEL_DISABLE, FALSE) ||
  	    !sna_option_cast_to_bool(sna, OPTION_ACCEL_METHOD, TRUE)) {
-@@ -492,7 +504,6 @@
- 	if (xf86ReturnOptValBool(sna->Options, OPTION_TILING_FB, FALSE))
- 		sna->tiling &= ~SNA_TILING_FB;
- 
--	sna->flags = 0;
- 	if (!xf86ReturnOptValBool(sna->Options, OPTION_SWAPBUFFERS_WAIT, TRUE))
- 		sna->flags |= SNA_NO_WAIT;
- 	if (xf86ReturnOptValBool(sna->Options, OPTION_TRIPLE_BUFFER, TRUE))
-@@ -555,6 +566,8 @@
+@@ -558,6 +569,8 @@ sna_block_handler(BLOCKHANDLER_ARGS_DECL)
  
  	if (*tv == NULL || ((*tv)->tv_usec | (*tv)->tv_sec))
  		sna_accel_block_handler(sna, tv);
@@ -376,17 +589,7 @@ Index: xf86-video-intel/src/sna/sna_driver.c
  }
  
  static void
-@@ -633,6 +646,9 @@
- 	Bool hotplug;
- 	MessageType from = X_CONFIG;
- 
-+	if (sna->flags & SNA_IS_HOSTED)
-+		return;
-+
- 	DBG(("%s\n", __FUNCTION__));
- 
- 	/* RandR will be disabled if Xinerama is active, and so generating
-@@ -885,6 +901,8 @@
+@@ -898,6 +911,8 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
  		return FALSE;
  	}
  
@@ -395,49 +598,12 @@ Index: xf86-video-intel/src/sna/sna_driver.c
  	xf86SetBlackWhitePixels(screen);
  
  	xf86SetBackingStore(screen);
-@@ -892,7 +910,8 @@
- 	if (!miDCInitialize(screen, xf86GetPointerScreenFuncs()))
- 		return FALSE;
- 
--	if (xf86_cursors_init(screen, SNA_CURSOR_X, SNA_CURSOR_Y,
-+	if ((sna->flags & SNA_IS_HOSTED) == 0 &&
-+	    xf86_cursors_init(screen, SNA_CURSOR_X, SNA_CURSOR_Y,
- 			       HARDWARE_CURSOR_TRUECOLOR_AT_8BPP |
- 			       HARDWARE_CURSOR_BIT_ORDER_MSBFIRST |
- 			       HARDWARE_CURSOR_INVERT_MASK |
-Index: xf86-video-intel/src/sna/sna_video_overlay.c
-===================================================================
---- xf86-video-intel.orig/src/sna/sna_video_overlay.c	2013-08-14 14:01:04.235601828 +1000
-+++ xf86-video-intel/src/sna/sna_video_overlay.c	2013-08-14 14:01:04.231601828 +1000
-@@ -683,6 +683,9 @@
- 	struct sna_video *video;
- 	XvPortPtr port;
- 
-+	if (sna->flags & SNA_IS_HOSTED)
-+		return;
-+
- 	if (!sna_has_overlay(sna))
- 		return;
- 
-Index: xf86-video-intel/src/sna/sna_video_sprite.c
-===================================================================
---- xf86-video-intel.orig/src/sna/sna_video_sprite.c	2013-08-14 14:01:04.235601828 +1000
-+++ xf86-video-intel/src/sna/sna_video_sprite.c	2013-08-14 14:01:04.231601828 +1000
-@@ -456,6 +456,9 @@
- 	struct sna_video *video;
- 	XvPortPtr port;
- 
-+	if (sna->flags & SNA_IS_HOSTED)
-+		return;
-+
- 	memset(&r, 0, sizeof(struct drm_mode_get_plane_res));
- 	if (drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_GETPLANERESOURCES, &r))
- 		return;
-Index: xf86-video-intel/src/sna/sna_xmir.c
-===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ xf86-video-intel/src/sna/sna_xmir.c	2013-08-14 14:01:04.231601828 +1000
-@@ -0,0 +1,165 @@
+diff --git a/src/sna/sna_xmir.c b/src/sna/sna_xmir.c
+new file mode 100644
+index 0000000..a7c882d
+--- /dev/null
++++ b/src/sna/sna_xmir.c
+@@ -0,0 +1,163 @@
 +/***************************************************************************
 +
 + Copyright 2013 Intel Corporation.  All Rights Reserved.
@@ -489,7 +655,7 @@ Index: xf86-video-intel/src/sna/sna_xmir.c
 +
 +#define FORCE_FULL_REDRAW 0
 +
-+static bool
++static void
 +sna_xmir_copy_to_mir(WindowPtr win, RegionPtr region)
 +{
 +	PixmapPtr src = get_window_pixmap(win);
@@ -497,20 +663,23 @@ Index: xf86-video-intel/src/sna/sna_xmir.c
 +	struct sna_pixmap *priv;
 +	struct kgem_bo *bo;
 +	BoxRec box, *boxes;
++	int16_t sx, sy;
 +	int nbox;
-+	bool ret;
++
++	if (wedged(sna)) /* XXX need pitch/size for CPU copy fallback */
++		return;
 +
 +	priv = sna_pixmap_force_to_gpu(src, MOVE_READ);
 +	if (priv == NULL)
-+		return false;
++		return;
 +
-+	/* XXX size and pitch are bogus */
++	/* XXX size and pitch are bogus, but only used for sanity checks */
 +
 +	bo = kgem_create_for_prime(&sna->kgem,
 +				   xmir_prime_fd_for_window(win),
 +				   priv->gpu_bo->pitch * src->drawable.height);
 +	if (bo == NULL)
-+		return false;
++		return;
 +
 +	bo->pitch = priv->gpu_bo->pitch;
 +
@@ -525,29 +694,24 @@ Index: xf86-video-intel/src/sna/sna_xmir.c
 +		nbox = REGION_NUM_RECTS(region);
 +	}
 +
-+	ret = sna->render.copy_boxes(sna, GXcopy,
-+				     src, priv->gpu_bo, 0, 0,
-+				     src, bo, 0, 0,
-+				     boxes, nbox, COPY_LAST);
++	get_window_deltas(src, &sx, &sy);
++	if (sna->render.copy_boxes(sna, GXcopy,
++				   src, priv->gpu_bo, sx, sy,
++				   src, bo, 0, 0,
++				   boxes, nbox, COPY_LAST)) {
++		kgem_submit(&sna->kgem);
++		xmir_submit_rendering_for_window(win, region);
++	}
 +
 +	kgem_bo_destroy(&sna->kgem, bo);
-+	if (!ret)
-+		return false;
-+
-+	kgem_submit(&sna->kgem);
-+	xmir_submit_rendering_for_window(win, region);
-+	return true;
 +}
 +
 +static void
 +sna_xmir_buffer_available(WindowPtr win)
 +{
-+#if 0
-+	if (!xmir_window_is_dirty(win))
-+		return;
-+
-+	sna_xmir_copy_to_mir(win, NULL);
-+#endif
++	RegionPtr region = xmir_window_get_dirty(win);
++	if (RegionNotEmpty(region))
++		sna_xmir_copy_to_mir(win, region);
 +}
 +
 +static void
