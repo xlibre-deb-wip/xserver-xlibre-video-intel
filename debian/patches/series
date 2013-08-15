@@ -1,3 +1,4 @@
 Check-for-struct-sysinfo-as-well-as-sys-sysinfo.h.patch
 Link-the-driver-against-pixman.patch
+0001-sna-Make-sure-the-frontbuffer-exists-before-doing-pi.patch
 xmir.patch
