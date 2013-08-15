@@ -1,3 +1,13 @@
+xserver-xorg-video-intel (2:2.21.14-4ubuntu1) UNRELEASED; urgency=low
+
+  * Merge against released debian-unstable.
+  * Drop upstreamed patches.
+  * Remaining changes:
+    - Use SNA by default.
+    - Add support for XMIR.
+
+ -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Thu, 15 Aug 2013 09:50:35 +0200
+
 xserver-xorg-video-intel (2:2.21.14-4) unstable; urgency=low
 
   * Link the driver against pixman to get correct dependency (closes: #719518).
