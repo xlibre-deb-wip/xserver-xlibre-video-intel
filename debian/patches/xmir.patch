@@ -9,22 +9,18 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
     
     Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
 
-Index: xf86-video-intel/src/Makefile.am
-===================================================================
---- xf86-video-intel.orig/src/Makefile.am	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/Makefile.am	2013-08-01 16:06:54.212945668 +1000
-@@ -46,6 +46,7 @@
- 	intel_device.c \
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -59,6 +59,7 @@
+ 	intel_driver.h \
  	intel_options.c \
  	intel_module.c \
 +	intel_xmir.h \
  	compat-api.h \
  	$(NULL)
  
-Index: xf86-video-intel/src/intel_device.c
-===================================================================
---- xf86-video-intel.orig/src/intel_device.c	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/intel_device.c	2013-08-01 16:06:54.212945668 +1000
+--- a/src/intel_device.c
++++ b/src/intel_device.c
 @@ -92,7 +92,7 @@
  		if (drmIoctl(fd, DRM_IOCTL_I915_GETPARAM, &gp))
  			ret = FALSE;
@@ -115,10 +111,8 @@ Index: xf86-video-intel/src/intel_device.c
  	intel_set_device(scrn, NULL);
  
  	drmClose(dev->fd);
-Index: xf86-video-intel/src/intel_driver.h
-===================================================================
---- xf86-video-intel.orig/src/intel_driver.h	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/intel_driver.h	2013-08-01 16:06:54.212945668 +1000
+--- a/src/intel_driver.h
++++ b/src/intel_driver.h
 @@ -1,6 +1,8 @@
  #ifndef INTEL_DRIVER_H
  #define INTEL_DRIVER_H
@@ -128,11 +122,9 @@ Index: xf86-video-intel/src/intel_driver.h
  #define INTEL_VERSION 4000
  #define INTEL_NAME "intel"
  #define INTEL_DRIVER_NAME "intel"
-Index: xf86-video-intel/src/intel_module.c
-===================================================================
---- xf86-video-intel.orig/src/intel_module.c	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/intel_module.c	2013-08-01 16:06:54.212945668 +1000
-@@ -422,6 +422,9 @@
+--- a/src/intel_module.c
++++ b/src/intel_module.c
+@@ -382,6 +382,9 @@
  #else
  		(*flag) = HW_IO | HW_MMIO;
  #endif
@@ -142,7 +134,7 @@ Index: xf86-video-intel/src/intel_module.c
  		return TRUE;
  	default:
  		/* Unknown or deprecated function */
-@@ -533,7 +536,8 @@
+@@ -493,7 +496,8 @@
  		case PCI_CHIP_I810_DC100:
  		case PCI_CHIP_I810_E:
  		case PCI_CHIP_I815:
@@ -152,10 +144,8 @@ Index: xf86-video-intel/src/intel_module.c
  		default:
  			return FALSE;
  		}
-Index: xf86-video-intel/src/intel_xmir.h
-===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ xf86-video-intel/src/intel_xmir.h	2013-08-01 16:06:54.212945668 +1000
+--- /dev/null
++++ b/src/intel_xmir.h
 @@ -0,0 +1,15 @@
 +#ifndef INTEL_XMIR_H
 +#define INTEL_XMIR_H
@@ -172,11 +162,9 @@ Index: xf86-video-intel/src/intel_xmir.h
 +#endif
 +
 +#endif /* INTEL_XMIR_H */
-Index: xf86-video-intel/src/sna/Makefile.am
-===================================================================
---- xf86-video-intel.orig/src/sna/Makefile.am	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/sna/Makefile.am	2013-08-01 16:06:54.212945668 +1000
-@@ -73,6 +73,7 @@
+--- a/src/sna/Makefile.am
++++ b/src/sna/Makefile.am
+@@ -75,6 +75,7 @@
  	sna_video_overlay.c \
  	sna_video_sprite.c \
  	sna_video_textured.c \
@@ -184,11 +172,9 @@ Index: xf86-video-intel/src/sna/Makefile.am
  	gen2_render.c \
  	gen2_render.h \
  	gen3_render.c \
-Index: xf86-video-intel/src/sna/sna.h
-===================================================================
---- xf86-video-intel.orig/src/sna/sna.h	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/sna/sna.h	2013-08-01 16:06:54.212945668 +1000
-@@ -218,6 +218,7 @@
+--- a/src/sna/sna.h
++++ b/src/sna/sna.h
+@@ -229,6 +229,7 @@
  #define SNA_TEAR_FREE		0x10
  #define SNA_FORCE_SHADOW	0x20
  #define SNA_FLUSH_GTT		0x40
@@ -196,7 +182,7 @@ Index: xf86-video-intel/src/sna/sna.h
  #define SNA_REPROBE		0x80000000
  
  	unsigned cpu_features;
-@@ -271,6 +272,7 @@
+@@ -282,6 +283,7 @@
  	EntityInfoPtr pEnt;
  	struct pci_device *PciInfo;
  	const struct intel_device_info *info;
@@ -204,7 +190,7 @@ Index: xf86-video-intel/src/sna/sna.h
  
  	ScreenBlockHandlerProcPtr BlockHandler;
  	ScreenWakeupHandlerProcPtr WakeupHandler;
-@@ -912,4 +914,18 @@
+@@ -924,4 +926,18 @@
  			 uint16_t           width,
  			 uint16_t           height);
  
@@ -223,11 +209,9 @@ Index: xf86-video-intel/src/sna/sna.h
 +#endif
 +
  #endif /* _SNA_H */
-Index: xf86-video-intel/src/sna/sna_display.c
-===================================================================
---- xf86-video-intel.orig/src/sna/sna_display.c	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/sna/sna_display.c	2013-08-01 16:06:54.212945668 +1000
-@@ -3128,11 +3128,22 @@
+--- a/src/sna/sna_display.c
++++ b/src/sna/sna_display.c
+@@ -3151,11 +3151,22 @@
  	sna_mode_update(to_sna_from_screen(screen));
  }
  
@@ -250,7 +234,7 @@ Index: xf86-video-intel/src/sna/sna_display.c
  	mode->kmode = drmModeGetResources(sna->kgem.fd);
  	if (mode->kmode) {
  		xf86CrtcConfigInit(scrn, &sna_mode_funcs);
-@@ -3149,9 +3160,7 @@
+@@ -3172,9 +3183,7 @@
  		if (!xf86IsEntityShared(scrn->entityList[0]))
  			sna_mode_compute_possible_clones(scrn);
  
@@ -261,11 +245,9 @@ Index: xf86-video-intel/src/sna/sna_display.c
  	} else {
  		if (!sna_mode_fake_init(sna))
  			return false;
-Index: xf86-video-intel/src/sna/sna_dri.c
-===================================================================
---- xf86-video-intel.orig/src/sna/sna_dri.c	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/sna/sna_dri.c	2013-08-01 16:06:54.216945668 +1000
-@@ -2399,6 +2399,13 @@
+--- a/src/sna/sna_dri.c
++++ b/src/sna/sna_dri.c
+@@ -2271,6 +2271,13 @@
  }
  #endif
  
@@ -279,7 +261,7 @@ Index: xf86-video-intel/src/sna/sna_dri.c
  static bool has_i830_dri(void)
  {
  	return access(DRI_DRIVER_PATH "/i830_dri.so", R_OK) == 0;
-@@ -2474,6 +2481,13 @@
+@@ -2346,6 +2353,13 @@
  	info.ReuseBufferNotify = NULL;
  #endif
  
@@ -293,11 +275,9 @@ Index: xf86-video-intel/src/sna/sna_dri.c
  #if USE_ASYNC_SWAP
  	info.version = 10;
  	info.AsyncSwap = sna_dri_async_swap;
-Index: xf86-video-intel/src/sna/sna_driver.c
-===================================================================
---- xf86-video-intel.orig/src/sna/sna_driver.c	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/sna/sna_driver.c	2013-08-01 16:06:54.216945668 +1000
-@@ -295,7 +295,7 @@
+--- a/src/sna/sna_driver.c
++++ b/src/sna/sna_driver.c
+@@ -287,7 +287,7 @@
  	drm_i915_getparam_t gp;
  	int v;
  
@@ -306,7 +286,7 @@ Index: xf86-video-intel/src/sna/sna_driver.c
  		return false;
  
  	v = 0;
-@@ -421,6 +421,7 @@
+@@ -413,6 +413,7 @@
  	sna = to_sna(scrn);
  	sna->scrn = scrn;
  	sna->pEnt = pEnt;
@@ -314,13 +294,13 @@ Index: xf86-video-intel/src/sna/sna_driver.c
  
  	scrn->displayWidth = 640;	/* default it */
  
-@@ -433,13 +434,21 @@
+@@ -425,13 +426,21 @@
  	fd = intel_get_device(scrn);
  	if (fd == -1) {
  		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
 -			   "Failed to become DRM master.\n");
 +			   "Failed to claim DRM device.\n");
- 		return FALSE;
+ 		goto cleanup;
  	}
  
 -	preferred_depth = sna->info->gen < 030 ? 15 : 24;
@@ -339,7 +319,7 @@ Index: xf86-video-intel/src/sna/sna_driver.c
  
  	if (!xf86SetDepthBpp(scrn, preferred_depth, 0, 0,
  			     Support32bppFb |
-@@ -475,6 +484,9 @@
+@@ -467,6 +476,9 @@
  
  	intel_detect_chipset(scrn, sna->pEnt, sna->PciInfo);
  
@@ -349,7 +329,7 @@ Index: xf86-video-intel/src/sna/sna_driver.c
  	kgem_init(&sna->kgem, fd, sna->PciInfo, sna->info->gen);
  	if (xf86ReturnOptValBool(sna->Options, OPTION_ACCEL_DISABLE, FALSE) ||
  	    !sna_option_cast_to_bool(sna, OPTION_ACCEL_METHOD, TRUE)) {
-@@ -492,7 +504,6 @@
+@@ -484,7 +496,6 @@
  	if (xf86ReturnOptValBool(sna->Options, OPTION_TILING_FB, FALSE))
  		sna->tiling &= ~SNA_TILING_FB;
  
@@ -357,7 +337,7 @@ Index: xf86-video-intel/src/sna/sna_driver.c
  	if (!xf86ReturnOptValBool(sna->Options, OPTION_SWAPBUFFERS_WAIT, TRUE))
  		sna->flags |= SNA_NO_WAIT;
  	if (xf86ReturnOptValBool(sna->Options, OPTION_TRIPLE_BUFFER, TRUE))
-@@ -555,6 +566,8 @@
+@@ -551,6 +562,8 @@
  
  	if (*tv == NULL || ((*tv)->tv_usec | (*tv)->tv_sec))
  		sna_accel_block_handler(sna, tv);
@@ -366,7 +346,7 @@ Index: xf86-video-intel/src/sna/sna_driver.c
  }
  
  static void
-@@ -633,6 +646,9 @@
+@@ -629,6 +642,9 @@
  	Bool hotplug;
  	MessageType from = X_CONFIG;
  
@@ -376,7 +356,7 @@ Index: xf86-video-intel/src/sna/sna_driver.c
  	DBG(("%s\n", __FUNCTION__));
  
  	/* RandR will be disabled if Xinerama is active, and so generating
-@@ -885,6 +901,8 @@
+@@ -888,6 +904,8 @@
  		return FALSE;
  	}
  
@@ -385,7 +365,7 @@ Index: xf86-video-intel/src/sna/sna_driver.c
  	xf86SetBlackWhitePixels(screen);
  
  	xf86SetBackingStore(screen);
-@@ -892,7 +910,8 @@
+@@ -895,7 +913,8 @@
  	if (!miDCInitialize(screen, xf86GetPointerScreenFuncs()))
  		return FALSE;
  
@@ -395,10 +375,8 @@ Index: xf86-video-intel/src/sna/sna_driver.c
  			       HARDWARE_CURSOR_TRUECOLOR_AT_8BPP |
  			       HARDWARE_CURSOR_BIT_ORDER_MSBFIRST |
  			       HARDWARE_CURSOR_INVERT_MASK |
-Index: xf86-video-intel/src/sna/sna_video_overlay.c
-===================================================================
---- xf86-video-intel.orig/src/sna/sna_video_overlay.c	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/sna/sna_video_overlay.c	2013-08-01 16:06:54.216945668 +1000
+--- a/src/sna/sna_video_overlay.c
++++ b/src/sna/sna_video_overlay.c
 @@ -683,6 +683,9 @@
  	struct sna_video *video;
  	XvPortPtr port;
@@ -409,10 +387,8 @@ Index: xf86-video-intel/src/sna/sna_video_overlay.c
  	if (!sna_has_overlay(sna))
  		return;
  
-Index: xf86-video-intel/src/sna/sna_video_sprite.c
-===================================================================
---- xf86-video-intel.orig/src/sna/sna_video_sprite.c	2013-08-01 16:06:54.220945668 +1000
-+++ xf86-video-intel/src/sna/sna_video_sprite.c	2013-08-01 16:06:54.216945668 +1000
+--- a/src/sna/sna_video_sprite.c
++++ b/src/sna/sna_video_sprite.c
 @@ -456,6 +456,9 @@
  	struct sna_video *video;
  	XvPortPtr port;
@@ -423,10 +399,8 @@ Index: xf86-video-intel/src/sna/sna_video_sprite.c
  	memset(&r, 0, sizeof(struct drm_mode_get_plane_res));
  	if (drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_GETPLANERESOURCES, &r))
  		return;
-Index: xf86-video-intel/src/sna/sna_xmir.c
-===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ xf86-video-intel/src/sna/sna_xmir.c	2013-08-01 16:07:47.936945593 +1000
+--- /dev/null
++++ b/src/sna/sna_xmir.c
 @@ -0,0 +1,165 @@
 +/***************************************************************************
 +
