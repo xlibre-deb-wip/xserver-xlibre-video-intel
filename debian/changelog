@@ -1,3 +1,9 @@
+xserver-xorg-video-intel (2:2.21.14-4ubuntu3) UNRELEASED; urgency=low
+
+  * Fix valgrind-enabling check
+
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Mon, 26 Aug 2013 18:54:40 +1000
+
 xserver-xorg-video-intel (2:2.21.14-4ubuntu2) saucy; urgency=low
 
   * Re-add changes to xmir.
