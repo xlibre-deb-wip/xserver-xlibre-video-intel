@@ -1,8 +1,10 @@
 xserver-xorg-video-intel (2:2.21.15-1) unstable; urgency=low
 
   * New upstream release.
+  * Drop patches Check-for-struct-sysinfo-as-well-as-sys-sysinfo.h.patch and
+    Link-the-driver-against-pixman.patch, they were applied upstream.
 
- -- Michael Stapelberg <stapelberg@debian.org>  Wed, 28 Aug 2013 19:04:15 +0200
+ -- Michael Stapelberg <stapelberg@debian.org>  Wed, 28 Aug 2013 19:22:11 +0200
 
 xserver-xorg-video-intel (2:2.21.14-4) unstable; urgency=low
 
