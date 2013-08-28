@@ -5,6 +5,7 @@ xserver-xorg-video-intel (2:2.21.15-1) unstable; urgency=low
     Link-the-driver-against-pixman.patch, they were applied upstream.
   * Add myself to Uploaders to prevent lintian NMU warnings
   * Bump Standards-Version to 3.9.4 (no changes necessary)
+  * Canonicalize Vcs-* fields
 
  -- Michael Stapelberg <stapelberg@debian.org>  Wed, 28 Aug 2013 19:35:24 +0200
 
