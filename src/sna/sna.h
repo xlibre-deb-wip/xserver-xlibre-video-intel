@@ -155,9 +155,9 @@ struct sna_pixmap {
 
 struct sna_glyph {
 	PicturePtr atlas;
-	pixman_image_t *image;
 	struct sna_coordinate coordinate;
 	uint16_t size, pos;
+	pixman_image_t *image;
 };
 
 static inline WindowPtr get_root_window(ScreenPtr screen)
@@ -229,6 +229,7 @@ struct sna {
 #define SNA_TEAR_FREE		0x10
 #define SNA_FORCE_SHADOW	0x20
 #define SNA_FLUSH_GTT		0x40
+#define SNA_IS_HOSTED		0x80
 #define SNA_REPROBE		0x80000000
 
 	unsigned cpu_features;
@@ -547,6 +548,11 @@ inline static int16_t clamp(int16_t a, int16_t b)
 	return v;
 }
 
+static inline bool box_empty(const BoxRec *box)
+{
+	return box->x2 <= box->x1 || box->y2 <= box->y1;
+}
+
 static inline bool
 box_inplace(PixmapPtr pixmap, const BoxRec *box)
 {
@@ -606,9 +612,14 @@ sna_drawable_is_clear(DrawablePtr d)
 	return priv && priv->clear && priv->clear_color == 0;
 }
 
-static inline struct kgem_bo *sna_pixmap_get_bo(PixmapPtr pixmap)
+static inline struct kgem_bo *__sna_pixmap_get_bo(PixmapPtr pixmap)
 {
 	return sna_pixmap(pixmap)->gpu_bo;
+}
+
+static inline struct kgem_bo *__sna_drawable_peek_bo(DrawablePtr d)
+{
+	return sna_pixmap(get_drawable_pixmap(d))->gpu_bo;
 }
 
 static inline struct kgem_bo *sna_pixmap_pin(PixmapPtr pixmap, unsigned flags)
@@ -895,12 +906,17 @@ box_intersect(BoxPtr a, const BoxRec *b)
 		a->x1 = b->x1;
 	if (a->x2 > b->x2)
 		a->x2 = b->x2;
+	if (a->x1 >= a->x2)
+		return false;
+
 	if (a->y1 < b->y1)
 		a->y1 = b->y1;
 	if (a->y2 > b->y2)
 		a->y2 = b->y2;
+	if (a->y1 >= a->y2)
+		return false;
 
-	return a->x1 < a->x2 && a->y1 < a->y2;
+	return true;
 }
 
 unsigned sna_cpu_detect(void);

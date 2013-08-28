@@ -23,7 +23,7 @@
 # Initialize Autoconf
 AC_PREREQ([2.60])
 AC_INIT([xf86-video-intel],
-        [2.21.14],
+        [2.21.15],
         [https://bugs.freedesktop.org/enter_bug.cgi?product=xorg],
         [xf86-video-intel])
 AC_CONFIG_SRCDIR([Makefile.am])
@@ -44,9 +44,11 @@ XORG_MACROS_VERSION(1.8)
 XORG_DEFAULT_OPTIONS
 
 # And disable a few very noisy warnings
+m4_ifdef([XORG_TESTSET_CFLAG], [
 XORG_TESTSET_CFLAG([NOWARNFLAGS], [-Wno-cast-qual])
 XORG_TESTSET_CFLAG([NOWARNFLAGS], [-Wno-redundant-decls])
 XORG_TESTSET_CFLAG([NOWARNFLAGS], [-Wno-maybe-uninitialized])
+])
 AC_SUBST(NOWARNFLAGS)
 
 # Require X.Org server macros (i.e. XORG_DRIVER_CHECK_EXT) to check for required modules 
@@ -209,7 +211,7 @@ AC_ARG_ENABLE(sna,
 
 if test "x$SNA" != "xno"; then
 	AC_DEFINE(USE_SNA, 1, [Enable SNA support])
-	AC_CHECK_HEADERS([sys/sysinfo.h])
+	AC_CHECK_HEADERS([sys/sysinfo.h], AC_CHECK_MEMBERS([struct sysinfo.totalram], [], [], [[#include <sys/sysinfo.h>]]))
 fi
 AC_MSG_CHECKING([whether to include SNA support])
 AM_CONDITIONAL(SNA, test x$SNA != xno)
@@ -261,10 +263,10 @@ AC_ARG_ENABLE(xaa,
 	      [XAA="$enableval"],
 	      [XAA=auto])
 if test "x$XAA" != xno; then
-        save_CFLAGS=$CFLAGS
-        CFLAGS=$XORG_CFLAGS
+        save_CPPFLAGS=$CPPFLAGS
+        CPPFLAGS=$XORG_CFLAGS
 	AC_CHECK_HEADERS([xaa.h], XAA=yes, XAA=no)
-        CFLAGS=$save_CFLAGS
+        CPPFLAGS=$save_CPPFLAGS
 fi
 AC_MSG_CHECKING([whether to include XAA support])
 AM_CONDITIONAL(XAA, test "x$XAA" = xyes)
@@ -332,6 +334,8 @@ if test "x$accel" = xnone -a "x$UMS_ONLY" != "xyes"; then
 	AC_MSG_ERROR([No default acceleration option])
 fi
 
+xp_msg=""
+
 AC_ARG_ENABLE(create2,
 	      AS_HELP_STRING([--enable-create2],
 			     [Enable use of create2 ioctl (experimental) [default=no]]),
@@ -340,6 +344,7 @@ AC_ARG_ENABLE(create2,
 AM_CONDITIONAL(USE_CREATE2, test x$CREATE2 = xyes)
 if test "x$CREATE2" = xyes; then
 	AC_DEFINE(USE_CREATE2,1,[Assume "create2" support])
+	xp_msg="$xp_msg create2"
 fi
 
 AC_ARG_ENABLE(userptr,
@@ -350,6 +355,7 @@ AC_ARG_ENABLE(userptr,
 AM_CONDITIONAL(USE_USERPTR, test x$USERPTR = xyes)
 if test "x$USERPTR" = xyes; then
 	AC_DEFINE(USE_USERPTR,1,[Assume "userptr" support])
+	xp_msg="$xp_msg userptr"
 fi
 
 AC_ARG_ENABLE(async-swap,
@@ -360,16 +366,18 @@ AC_ARG_ENABLE(async-swap,
 AM_CONDITIONAL(USE_ASYNC_SWAP, test x$ASYNC_SWAP = xyes)
 if test "x$ASYNC_SWAP" = xyes; then
 	AC_DEFINE(USE_ASYNC_SWAP,1,[Assume asynchronous swap support])
+	xp_msg="$xp_msg async-swap"
 fi
 
 AC_ARG_ENABLE(wt,
 	      AS_HELP_STRING([--enable-wt],
-			     [Enable use of WT cacheing (experimental) [default=no]]),
+			     [Enable use of WT caching (experimental) [default=no]]),
 	      [WT="$enableval"],
 	      [WT=no])
 AM_CONDITIONAL(USE_WT, test x$WT = xyes)
 if test "x$WT" = xyes; then
-	AC_DEFINE(USE_WT,1,[Assume WriteThrough cacheing support])
+	AC_DEFINE(USE_WT,1,[Assume WriteThrough caching support])
+	xp_msg="$xp_msg wt-cache"
 fi
 
 AC_ARG_ENABLE(debug,
@@ -433,7 +441,7 @@ else
         DRI1_CFLAGS=""
         DRI1_LIBS=""
 
-        if test "x$enable_dri" = "xyes"; then
+        if test "x$enable_dri" = "xyes" -a "x$KMS_ONLY" != "xyes"; then
                 AC_MSG_ERROR([DRI1 requested but prerequisites not found])
         fi
 fi
@@ -591,4 +599,7 @@ echo "  Acceleration backends:$accel_msg"
 echo "  Additional debugging support?$debug_msg"
 echo "  Support for Direct Rendering Infrastructure:$dri_msg"
 echo "  Support for Xv motion compensation (XvMC and libXvMC):$xvmc_msg"
+if test -n "$xp_msg"; then
+echo "  Experimental support:$xp_msg"
+fi
 echo ""

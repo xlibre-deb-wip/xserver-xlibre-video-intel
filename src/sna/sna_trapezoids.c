@@ -2556,7 +2556,7 @@ trapezoids_fallback(struct sna *sna,
 			if (!scratch)
 				return;
 
-			num_threads = sna_use_threads(width, height, 4);
+			num_threads = sna_use_threads(width, height, 8);
 			if (num_threads == 1) {
 				if (depth < 8) {
 					image = pixman_image_create_bits(format, width, height,
@@ -4123,15 +4123,15 @@ choose_span(struct sna_composite_spans_op *tmp,
 		/* XXX An imprecise approximation */
 		if (maskFormat && !operator_is_bounded(tmp->base.op)) {
 			span = tor_blt_span_mono_unbounded;
-			if (REGION_NUM_RECTS(clip) > 1)
+			if (clip->data)
 				span = tor_blt_span_mono_unbounded_clipped;
 		} else {
 			span = tor_blt_span_mono;
-			if (REGION_NUM_RECTS(clip) > 1)
+			if (clip->data)
 				span = tor_blt_span_mono_clipped;
 		}
 	} else {
-		if (REGION_NUM_RECTS(clip) > 1)
+		if (clip->data)
 			span = tor_blt_span_clipped;
 		else if (tmp->base.damage == NULL)
 			span = tor_blt_span__no_damage;
@@ -4280,7 +4280,7 @@ mono_trapezoids_span_converter(struct sna *sna,
 	    !unbounded)
 		num_threads = sna_use_threads(mono.clip.extents.x2 - mono.clip.extents.x1,
 					      mono.clip.extents.y2 - mono.clip.extents.y1,
-					      16);
+					      32);
 	if (num_threads > 1) {
 		struct mono_span_thread threads[num_threads];
 		int y, h;
@@ -4485,13 +4485,18 @@ thread_choose_span(struct sna_composite_spans_op *tmp,
 {
 	span_func_t span;
 
-	if (tmp->base.damage)
+	if (tmp->base.damage) {
+		DBG(("%s: damaged -> no thread support\n", __FUNCTION__));
 		return NULL;
+	}
 
 	if (is_mono(dst, maskFormat)) {
+		DBG(("%s: mono rendering -> no thread support\n", __FUNCTION__));
 		return NULL;
 	} else {
-		if (REGION_NUM_RECTS(clip) > 1)
+		assert(tmp->thread_boxes);
+		DBG(("%s: clipped? %d\n", __FUNCTION__, clip->data != NULL));
+		if (clip->data)
 			span = span_thread_clipped_box;
 		else
 			span = span_thread_box;
@@ -4667,6 +4672,7 @@ trapezoid_span_converter(struct sna *sna,
 		num_threads = sna_use_threads(extents.x2-extents.x1,
 					      extents.y2-extents.y1,
 					      16);
+	DBG(("%s: using %d threads\n", __FUNCTION__, num_threads));
 	if (num_threads == 1) {
 		struct tor tor;
 
@@ -5789,7 +5795,7 @@ trapezoid_span_inplace__x8r8g8b8(CARD8 op,
 
 	num_threads = sna_use_threads(4*(region.extents.x2 - region.extents.x1),
 				      region.extents.y2 - region.extents.y1,
-				      8);
+				      16);
 
 	DBG(("%s: %dx%d, format=%x, op=%d, lerp?=%d, num_threads=%d\n",
 	     __FUNCTION__,
@@ -6160,7 +6166,7 @@ trapezoid_span_inplace(struct sna *sna,
 
 	num_threads = sna_use_threads(region.extents.x2 - region.extents.x1,
 				      region.extents.y2 - region.extents.y1,
-				      8);
+				      16);
 	if (num_threads == 1) {
 		struct tor tor;
 
@@ -6832,7 +6838,7 @@ trap_mask_converter(struct sna *sna,
 	get_drawable_deltas(picture->pDrawable, pixmap, &x, &y);
 	sna = to_sna_from_screen(screen);
 	sna->render.copy_boxes(sna, GXcopy,
-			       scratch, sna_pixmap_get_bo(scratch), -extents.x1, -extents.x1,
+			       scratch, __sna_pixmap_get_bo(scratch), -extents.x1, -extents.x1,
 			       pixmap, priv->gpu_bo, x, y,
 			       &extents, 1, 0);
 	mark_damaged(pixmap, priv, &extents ,x, y);
@@ -6909,7 +6915,7 @@ trap_upload(PicturePtr picture,
 	/* XXX clip boxes */
 	get_drawable_deltas(picture->pDrawable, pixmap, &x, &y);
 	sna->render.copy_boxes(sna, GXcopy,
-			       scratch, sna_pixmap_get_bo(scratch), -extents.x1, -extents.x1,
+			       scratch, __sna_pixmap_get_bo(scratch), -extents.x1, -extents.x1,
 			       pixmap, priv->gpu_bo, x, y,
 			       &extents, 1, 0);
 	mark_damaged(pixmap, priv, &extents, x, y);

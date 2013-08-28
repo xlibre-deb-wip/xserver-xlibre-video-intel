@@ -481,17 +481,6 @@ sna_composite_fb(CARD8 op,
 	     region->extents.x1, region->extents.y1,
 	     region->extents.x2, region->extents.y2));
 
-	DBG(("%s: fallback -- move dst to cpu\n", __FUNCTION__));
-	if (op <= PictOpSrc && !dst->alphaMap)
-		flags = MOVE_WRITE | MOVE_INPLACE_HINT;
-	else
-		flags = MOVE_WRITE | MOVE_READ;
-	if (!sna_drawable_move_region_to_cpu(dst->pDrawable, region, flags))
-		return;
-	if (dst->alphaMap &&
-	    !sna_drawable_move_to_cpu(dst->alphaMap->pDrawable, flags))
-		return;
-
 	if (src->pDrawable) {
 		DBG(("%s: fallback -- move src to cpu\n", __FUNCTION__));
 		if (!sna_drawable_move_to_cpu(src->pDrawable,
@@ -504,21 +493,34 @@ sna_composite_fb(CARD8 op,
 			return;
 	}
 
-	if (mask && mask->pDrawable) {
-		DBG(("%s: fallback -- move mask to cpu\n", __FUNCTION__));
-		if (!sna_drawable_move_to_cpu(mask->pDrawable,
-					      MOVE_READ))
-			return;
+	validate_source(src);
 
-		if (mask->alphaMap &&
-		    !sna_drawable_move_to_cpu(mask->alphaMap->pDrawable,
-					      MOVE_READ))
-			return;
+	if (mask) {
+		if (mask->pDrawable) {
+			DBG(("%s: fallback -- move mask to cpu\n", __FUNCTION__));
+			if (!sna_drawable_move_to_cpu(mask->pDrawable,
+						      MOVE_READ))
+				return;
+
+			if (mask->alphaMap &&
+			    !sna_drawable_move_to_cpu(mask->alphaMap->pDrawable,
+						      MOVE_READ))
+				return;
+		}
+
+		validate_source(mask);
 	}
 
-	validate_source(src);
-	if (mask)
-		validate_source(mask);
+	DBG(("%s: fallback -- move dst to cpu\n", __FUNCTION__));
+	if (op <= PictOpSrc && !dst->alphaMap)
+		flags = MOVE_WRITE | MOVE_INPLACE_HINT;
+	else
+		flags = MOVE_WRITE | MOVE_READ;
+	if (!sna_drawable_move_region_to_cpu(dst->pDrawable, region, flags))
+		return;
+	if (dst->alphaMap &&
+	    !sna_drawable_move_to_cpu(dst->alphaMap->pDrawable, flags))
+		return;
 
 	if (mask == NULL &&
 	    src->pDrawable &&
@@ -529,8 +531,12 @@ sna_composite_fb(CARD8 op,
 	    sna_transform_is_integer_translation(src->transform, &tx, &ty)) {
 		PixmapPtr dst_pixmap = get_drawable_pixmap(dst->pDrawable);
 		PixmapPtr src_pixmap = get_drawable_pixmap(src->pDrawable);
-		int16_t sx = src_x + tx - (dst->pDrawable->x - dst_x);
-		int16_t sy = src_y + ty - (dst->pDrawable->y - dst_y);
+		int16_t sx = src_x + tx - (dst->pDrawable->x + dst_x);
+		int16_t sy = src_y + ty - (dst->pDrawable->y + dst_y);
+
+		assert(src->pDrawable->bitsPerPixel == dst->pDrawable->bitsPerPixel);
+		assert(src_pixmap->drawable.bitsPerPixel == dst_pixmap->drawable.bitsPerPixel);
+
 		if (region->extents.x1 + sx >= 0 &&
 		    region->extents.y1 + sy >= 0 &&
 		    region->extents.x2 + sx <= src->pDrawable->width &&
@@ -548,8 +554,7 @@ sna_composite_fb(CARD8 op,
 			assert(region->extents.y1 + sy >= 0);
 			assert(region->extents.y2 + sy <= src_pixmap->drawable.height);
 
-			if (get_drawable_deltas(dst->pDrawable, dst_pixmap, &tx, &ty))
-				dst_x += tx, dst_y += ty;
+			get_drawable_deltas(dst->pDrawable, dst_pixmap, &tx, &ty);
 
 			assert(nbox);
 			do {
@@ -558,10 +563,10 @@ sna_composite_fb(CARD8 op,
 				assert(box->y1 + sy >= 0);
 				assert(box->y2 + sy <= src_pixmap->drawable.height);
 
-				assert(box->x1 + dst_x >= 0);
-				assert(box->x2 + dst_x <= dst_pixmap->drawable.width);
-				assert(box->y1 + dst_y >= 0);
-				assert(box->y2 + dst_y <= dst_pixmap->drawable.height);
+				assert(box->x1 + tx >= 0);
+				assert(box->x2 + tx <= dst_pixmap->drawable.width);
+				assert(box->y1 + ty >= 0);
+				assert(box->y2 + ty <= dst_pixmap->drawable.height);
 
 				assert(box->x2 > box->x1 && box->y2 > box->y1);
 
@@ -571,7 +576,7 @@ sna_composite_fb(CARD8 op,
 					   src_pixmap->devKind,
 					   dst_pixmap->devKind,
 					   box->x1 + sx, box->y1 + sy,
-					   box->x1 + dst_x, box->y1 + dst_y,
+					   box->x1 + tx, box->y1 + ty,
 					   box->x2 - box->x1, box->y2 - box->y1);
 				box++;
 			} while (--nbox);

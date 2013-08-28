@@ -1093,7 +1093,7 @@ static bool use_shadow(struct sna *sna, xf86CrtcPtr crtc)
 	PictTransform crtc_to_fb;
 	struct pict_f_transform f_crtc_to_fb, f_fb_to_crtc;
 	unsigned long pitch_limit;
-	struct kgem_bo *bo;
+	struct sna_pixmap *priv;
 	BoxRec b;
 
 	assert(sna->scrn->virtualX && sna->scrn->virtualY);
@@ -1118,18 +1118,21 @@ static bool use_shadow(struct sna *sna, xf86CrtcPtr crtc)
 		return true;
 	}
 
-	bo = sna_pixmap_get_bo(sna->front);
+	priv = sna_pixmap_force_to_gpu(sna->front, MOVE_READ | MOVE_WRITE);
+	if (priv == NULL)
+		return true; /* maybe we can create a bo for the scanout? */
+
 	if (sna->kgem.gen == 071)
-		pitch_limit = bo->tiling ? 16 * 1024 : 32 * 1024;
+		pitch_limit = priv->gpu_bo->tiling ? 16 * 1024 : 32 * 1024;
 	else if ((sna->kgem.gen >> 3) > 4)
 		pitch_limit = 32 * 1024;
 	else if ((sna->kgem.gen >> 3) == 4)
-		pitch_limit = bo->tiling ? 16 * 1024 : 32 * 1024;
+		pitch_limit = priv->gpu_bo->tiling ? 16 * 1024 : 32 * 1024;
 	else if ((sna->kgem.gen >> 3) == 3)
-		pitch_limit = bo->tiling ? 8 * 1024 : 16 * 1024;
+		pitch_limit = priv->gpu_bo->tiling ? 8 * 1024 : 16 * 1024;
 	else
 		pitch_limit = 8 * 1024;
-	if (bo->pitch > pitch_limit)
+	if (priv->gpu_bo->pitch > pitch_limit)
 		return true;
 
 	transform = NULL;
@@ -2626,8 +2629,6 @@ sna_mode_compute_possible_clones(ScrnInfoPtr scrn)
 static void copy_front(struct sna *sna, PixmapPtr old, PixmapPtr new)
 {
 	struct sna_pixmap *old_priv, *new_priv;
-	int16_t sx, sy, dx, dy;
-	BoxRec box;
 
 	DBG(("%s\n", __FUNCTION__));
 
@@ -2642,25 +2643,6 @@ static void copy_front(struct sna *sna, PixmapPtr old, PixmapPtr new)
 	if (!new_priv)
 		return;
 
-	box.x1 = box.y1 = 0;
-	box.x2 = min(old->drawable.width, new->drawable.width);
-	box.y2 = min(old->drawable.height, new->drawable.height);
-
-	sx = dx = 0;
-	if (box.x2 < old->drawable.width)
-		sx = (old->drawable.width - box.x2) / 2;
-	if (box.x2 < new->drawable.width)
-		dx = (new->drawable.width - box.x2) / 2;
-
-	sy = dy = 0;
-	if (box.y2 < old->drawable.height)
-		sy = (old->drawable.height - box.y2) / 2;
-	if (box.y2 < new->drawable.height)
-		dy = (new->drawable.height - box.y2) / 2;
-
-	DBG(("%s: copying box (%dx%d) from (%d, %d) to (%d, %d)\n",
-	     __FUNCTION__, box.x2, box.y2, sx, sy, dx, dy));
-
 	if (old_priv->clear) {
 		(void)sna->render.fill_one(sna, new, new_priv->gpu_bo,
 					   old_priv->clear_color,
@@ -2671,17 +2653,69 @@ static void copy_front(struct sna *sna, PixmapPtr old, PixmapPtr new)
 		new_priv->clear = true;
 		new_priv->clear_color = old_priv->clear_color;
 	} else {
-		if (box.x2 != new->drawable.width || box.y2 != new->drawable.height) {
-			(void)sna->render.fill_one(sna, new, new_priv->gpu_bo, 0,
-						   0, 0,
-						   new->drawable.width,
-						   new->drawable.height,
-						   GXclear);
+		BoxRec box;
+		int16_t sx, sy, dx, dy;
+
+		if (new->drawable.width >= old->drawable.width &&
+		    new->drawable.height >= old->drawable.height)
+		{
+			int nx = (new->drawable.width + old->drawable.width - 1) / old->drawable.width;
+			int ny = (new->drawable.height + old->drawable.height - 1) / old->drawable.height;
+
+			box.x1 = box.y1 = 0;
+
+			dy = 0;
+			for (sy = 0; sy < ny; sy++) {
+				box.y2 = old->drawable.height;
+				if (box.y2 + dy > new->drawable.height)
+					box.y2 = new->drawable.height - dy;
+
+				dx = 0;
+				for (sx = 0; sx < nx; sx++) {
+					box.x2 = old->drawable.width;
+					if (box.x2 + dx > new->drawable.width)
+						box.x2 = new->drawable.width - dx;
+
+					(void)sna->render.copy_boxes(sna, GXcopy,
+								     old, old_priv->gpu_bo, 0, 0,
+								     new, new_priv->gpu_bo, dx, dy,
+								     &box, 1, 0);
+					dx += old->drawable.width;
+				}
+				dy += old->drawable.height;
+			}
+		} else {
+			box.x1 = box.y1 = 0;
+			box.x2 = min(old->drawable.width, new->drawable.width);
+			box.y2 = min(old->drawable.height, new->drawable.height);
+
+			sx = dx = 0;
+			if (box.x2 < old->drawable.width)
+				sx = (old->drawable.width - box.x2) / 2;
+			if (box.x2 < new->drawable.width)
+				dx = (new->drawable.width - box.x2) / 2;
+
+			sy = dy = 0;
+			if (box.y2 < old->drawable.height)
+				sy = (old->drawable.height - box.y2) / 2;
+			if (box.y2 < new->drawable.height)
+				dy = (new->drawable.height - box.y2) / 2;
+
+			DBG(("%s: copying box (%dx%d) from (%d, %d) to (%d, %d)\n",
+			     __FUNCTION__, box.x2, box.y2, sx, sy, dx, dy));
+
+			if (box.x2 != new->drawable.width || box.y2 != new->drawable.height) {
+				(void)sna->render.fill_one(sna, new, new_priv->gpu_bo, 0,
+							   0, 0,
+							   new->drawable.width,
+							   new->drawable.height,
+							   GXclear);
+			}
+			(void)sna->render.copy_boxes(sna, GXcopy,
+						     old, old_priv->gpu_bo, sx, sy,
+						     new, new_priv->gpu_bo, dx, dy,
+						     &box, 1, 0);
 		}
-		(void)sna->render.copy_boxes(sna, GXcopy,
-					     old, old_priv->gpu_bo, sx, sy,
-					     new, new_priv->gpu_bo, dx, dy,
-					     &box, 1, 0);
 	}
 
 	if (!DAMAGE_IS_ALL(new_priv->gpu_damage))
@@ -3033,27 +3067,17 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 			continue;
 
 		DBG(("%s: CRTC:%d, pipe=%d: has mode?=%d\n", __FUNCTION__,
-		     sna_crtc->id, sna_crtc->pipe, mode.mode_valid));
-		if (!mode.mode_valid)
+		     sna_crtc->id, sna_crtc->pipe,
+		     mode.mode_valid && mode.mode.clock));
+
+		if (!mode.mode_valid || mode.mode.clock == 0)
 			continue;
 
-		memset(&crtc->desiredMode, 0, sizeof(crtc->desiredMode));
 		mode_from_kmode(scrn, &mode.mode, &crtc->desiredMode);
 		crtc->desiredRotation = RR_Rotate_0;
 		crtc->desiredX = mode.x;
 		crtc->desiredY = mode.y;
 		crtc->desiredTransformPresent = FALSE;
-
-		crtc->mode = crtc->desiredMode;
-		crtc->mode.name = NULL;
-		crtc->x = mode.x;
-		crtc->y = mode.y;
-		crtc->rotation = RR_Rotate_0;
-		crtc->transformPresent = FALSE;
-
-		memset(&crtc->panningTotalArea, 0, sizeof(BoxRec));
-		memset(&crtc->panningTrackingArea, 0, sizeof(BoxRec));
-		memset(crtc->panningBorder, 0, 4 * sizeof(INT16));
 	}
 
 	/* Reconstruct outputs pointing to active CRTC */
@@ -3072,40 +3096,42 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 
 		for (j = 0; j < config->num_crtc; j++) {
 			xf86CrtcPtr crtc = config->crtc[j];
-			if (to_sna_crtc(crtc)->id == crtc_id) {
-				if (crtc->desiredMode.status == MODE_OK) {
-					DisplayModePtr M;
+			if (to_sna_crtc(crtc)->id != crtc_id)
+				continue;
 
-					xf86DrvMsg(scrn->scrnIndex, X_PROBED,
-						   "Output %s using initial mode %s on pipe %d\n",
-						   output->name,
-						   crtc->desiredMode.name,
-						   to_sna_crtc(crtc)->pipe);
+			if (crtc->desiredMode.status == MODE_OK) {
+				DisplayModePtr M;
 
-					output->crtc = crtc;
-					crtc->enabled = TRUE;
+				xf86DrvMsg(scrn->scrnIndex, X_PROBED,
+						"Output %s using initial mode %s on pipe %d\n",
+						output->name,
+						crtc->desiredMode.name,
+						to_sna_crtc(crtc)->pipe);
 
-					if (output->mm_width == 0 ||
-					    output->mm_height == 0) {
-						output->mm_height = (crtc->desiredMode.VDisplay * 254) / (10*DEFAULT_DPI);
-						output->mm_width = (crtc->desiredMode.HDisplay * 254) / (10*DEFAULT_DPI);
-					}
+				output->crtc = crtc;
+				crtc->enabled = TRUE;
 
-					set_initial_gamma(output, crtc);
-
-					M = calloc(1, sizeof(DisplayModeRec));
-					if (M) {
-						*M = crtc->desiredMode;
-						M->name = strdup(M->name);
-						output->probed_modes =
-							xf86ModesAdd(output->probed_modes, M);
-					}
+				if (output->mm_width == 0 ||
+						output->mm_height == 0) {
+					output->mm_height = (crtc->desiredMode.VDisplay * 254) / (10*DEFAULT_DPI);
+					output->mm_width = (crtc->desiredMode.HDisplay * 254) / (10*DEFAULT_DPI);
 				}
-				break;
+
+				set_initial_gamma(output, crtc);
+
+				M = calloc(1, sizeof(DisplayModeRec));
+				if (M) {
+					*M = crtc->desiredMode;
+					M->name = strdup(M->name);
+					output->probed_modes =
+						xf86ModesAdd(output->probed_modes, M);
+				}
 			}
+
+			break;
 		}
 
-		if (output->crtc == NULL) {
+		if (j == config->num_crtc) {
 			/* Can not find the earlier associated CRTC, bail */
 			return false;
 		}
@@ -3151,10 +3177,21 @@ sna_crtc_config_notify(ScreenPtr screen)
 	sna_mode_update(to_sna_from_screen(screen));
 }
 
+#if HAS_PIXMAP_SHARING
+#define sna_setup_provider(scrn) xf86ProviderSetup(scrn, NULL, "Intel")
+#else
+#define sna_setup_provider(scrn)
+#endif
+
 bool sna_mode_pre_init(ScrnInfoPtr scrn, struct sna *sna)
 {
 	struct sna_mode *mode = &sna->mode;
 	int i;
+
+	if (sna->flags & SNA_IS_HOSTED) {
+		sna_setup_provider(scrn);
+		return true;
+	}
 
 	mode->kmode = drmModeGetResources(sna->kgem.fd);
 	if (mode->kmode) {
@@ -3172,9 +3209,7 @@ bool sna_mode_pre_init(ScrnInfoPtr scrn, struct sna *sna)
 		if (!xf86IsEntityShared(scrn->entityList[0]))
 			sna_mode_compute_possible_clones(scrn);
 
-#if HAS_PIXMAP_SHARING
-		xf86ProviderSetup(scrn, NULL, "Intel");
-#endif
+		sna_setup_provider(scrn);
 	} else {
 		if (!sna_mode_fake_init(sna))
 			return false;
@@ -3200,6 +3235,9 @@ sna_mode_close(struct sna *sna)
 	while (sna_mode_has_pending_events(sna))
 		sna_mode_wakeup(sna);
 
+	if (sna->flags & SNA_IS_HOSTED)
+		return;
+
 	for (i = 0; i < xf86_config->num_crtc; i++)
 		sna_crtc_disable_shadow(sna, to_sna_crtc(xf86_config->crtc[i]));
 }
@@ -3213,6 +3251,9 @@ static bool sna_box_intersect(BoxPtr r, const BoxRec *a, const BoxRec *b)
 {
 	r->x1 = a->x1 > b->x1 ? a->x1 : b->x1;
 	r->x2 = a->x2 < b->x2 ? a->x2 : b->x2;
+	if (r->x1 >= r->x2)
+		return false;
+
 	r->y1 = a->y1 > b->y1 ? a->y1 : b->y1;
 	r->y2 = a->y2 < b->y2 ? a->y2 : b->y2;
 	DBG(("%s: (%d, %d), (%d, %d) intersect (%d, %d), (%d, %d) = (%d, %d), (%d, %d)\n",
@@ -3220,7 +3261,10 @@ static bool sna_box_intersect(BoxPtr r, const BoxRec *a, const BoxRec *b)
 	     a->x1, a->y1, a->x2, a->y2,
 	     b->x1, b->y1, b->x2, b->y2,
 	     r->x1, r->y1, r->x2, r->y2));
-	return r->x2 > r->x1 && r->y2 > r->y1;
+	if (r->y1 >= r->y2)
+		return false;
+
+	return true;
 }
 
 static int sna_box_area(const BoxRec *box)
@@ -3823,7 +3867,7 @@ sna_crtc_redisplay(xf86CrtcPtr crtc, RegionPtr region)
 		 */
 
 		if (sna->render.copy_boxes(sna, GXcopy,
-					   sna->front, sna_pixmap_get_bo(sna->front), 0, 0,
+					   sna->front, __sna_pixmap_get_bo(sna->front), 0, 0,
 					   &tmp, sna_crtc->bo, -tx, -ty,
 					   REGION_RECTS(region), REGION_NUM_RECTS(region), 0))
 			return;
@@ -3924,7 +3968,7 @@ void sna_mode_redisplay(struct sna *sna)
 	}
 
 	if (sna->mode.shadow_flip == 0) {
-		struct kgem_bo *new = sna_pixmap_get_bo(sna->front);
+		struct kgem_bo *new = __sna_pixmap_get_bo(sna->front);
 		struct kgem_bo *old = sna->mode.shadow;
 
 		DBG(("%s: flipping tear-free outputs\n", __FUNCTION__));

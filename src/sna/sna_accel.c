@@ -1406,6 +1406,7 @@ static inline bool has_coherent_map(struct sna *sna,
 				    struct kgem_bo *bo,
 				    unsigned flags)
 {
+	assert(bo);
 	assert(bo->map);
 
 	if (!IS_CPU_MAP(bo->map))
@@ -1446,10 +1447,13 @@ static inline bool pixmap_inplace(struct sna *sna,
 	if (wedged(sna) && !priv->pinned)
 		return false;
 
-	if (priv->gpu_damage &&
-	    (priv->clear || (flags & MOVE_READ) == 0) &&
-	    kgem_bo_is_busy(priv->gpu_bo))
-		return false;
+	if (priv->gpu_bo && kgem_bo_is_busy(priv->gpu_bo)) {
+		if ((flags & (MOVE_WRITE | MOVE_READ)) == (MOVE_WRITE | MOVE_READ))
+			return false;
+
+		if ((flags & MOVE_READ) == 0)
+			return !priv->pinned;
+	}
 
 	if (priv->mapped)
 		return has_coherent_map(sna, priv->gpu_bo, flags);
@@ -1845,8 +1849,8 @@ _sna_pixmap_move_to_cpu(PixmapPtr pixmap, unsigned int flags)
 		DBG(("%s: no readbck, discarding gpu damage [%d], pending clear[%d]\n",
 		     __FUNCTION__, priv->gpu_damage != NULL, priv->clear));
 
-		if (priv->create & KGEM_CAN_CREATE_GPU &&
-		    pixmap_inplace(sna, pixmap, priv, true) &&
+		if ((priv->gpu_bo || priv->create & KGEM_CAN_CREATE_GPU) &&
+		    pixmap_inplace(sna, pixmap, priv, flags) &&
 		    sna_pixmap_create_mappable_gpu(pixmap, true)) {
 			DBG(("%s: write inplace\n", __FUNCTION__));
 			assert(priv->cow == NULL || (flags & MOVE_WRITE) == 0);
@@ -2211,11 +2215,6 @@ static inline bool region_inplace(struct sna *sna,
 		(int)(region->extents.y2 - region->extents.y1) *
 		pixmap->drawable.bitsPerPixel >> 12)
 		>= sna->kgem.half_cpu_cache_pages;
-}
-
-static inline bool box_empty(const BoxRec *box)
-{
-	return box->x2 <= box->x1 || box->y2 <= box->y1;
 }
 
 bool
@@ -4307,7 +4306,7 @@ sna_put_xybitmap_blt(DrawablePtr drawable, GCPtr gc, RegionPtr region,
 
 	if (bo->tiling == I915_TILING_Y) {
 		DBG(("%s: converting bo from Y-tiling\n", __FUNCTION__));
-		assert(bo == sna_pixmap_get_bo(pixmap));
+		assert(bo == __sna_pixmap_get_bo(pixmap));
 		bo = sna_pixmap_change_tiling(pixmap, I915_TILING_X);
 		if (bo == NULL) {
 			DBG(("%s: fallback -- unable to change tiling\n",
@@ -4431,7 +4430,7 @@ sna_put_xypixmap_blt(DrawablePtr drawable, GCPtr gc, RegionPtr region,
 
 	if (bo->tiling == I915_TILING_Y) {
 		DBG(("%s: converting bo from Y-tiling\n", __FUNCTION__));
-		assert(bo == sna_pixmap_get_bo(pixmap));
+		assert(bo == __sna_pixmap_get_bo(pixmap));
 		bo = sna_pixmap_change_tiling(pixmap, I915_TILING_X);
 		if (bo == NULL) {
 			DBG(("%s: fallback -- unable to change tiling\n",
@@ -4963,7 +4962,7 @@ source_prefer_gpu(struct sna *sna, struct sna_pixmap *priv,
 static bool use_shm_bo(struct sna *sna,
 		       struct kgem_bo *bo,
 		       struct sna_pixmap *priv,
-		       int alu)
+		       int alu, bool replaces)
 {
 	if (priv == NULL || priv->cpu_bo == NULL) {
 		DBG(("%s: no, not attached\n", __FUNCTION__));
@@ -4980,7 +4979,7 @@ static bool use_shm_bo(struct sna *sna,
 		return true;
 	}
 
-	if (__kgem_bo_is_busy(&sna->kgem, bo)) {
+	if (!replaces && __kgem_bo_is_busy(&sna->kgem, bo)) {
 		DBG(("%s: yes, dst is busy\n", __FUNCTION__));
 		return true;
 	}
@@ -5228,7 +5227,7 @@ sna_copy_boxes(DrawablePtr src, DrawablePtr dst, GCPtr gc,
 		if (bo != dst_priv->gpu_bo)
 			goto fallback;
 
-		if (use_shm_bo(sna, bo, src_priv, alu)) {
+		if (use_shm_bo(sna, bo, src_priv, alu, replaces)) {
 			bool ret;
 
 			DBG(("%s: region overlaps CPU damage, copy from CPU bo (shm? %d)\n",
@@ -5336,7 +5335,7 @@ sna_copy_boxes(DrawablePtr src, DrawablePtr dst, GCPtr gc,
 			if (tmp == NullPixmap)
 				return;
 
-			src_bo = sna_pixmap_get_bo(tmp);
+			src_bo = __sna_pixmap_get_bo(tmp);
 			assert(src_bo != NULL);
 
 			dx = -region->extents.x1;
@@ -7262,7 +7261,7 @@ sna_copy_plane(DrawablePtr src, DrawablePtr dst, GCPtr gc,
 				     &region.extents, &arg.damage);
 	if (arg.bo) {
 		if (arg.bo->tiling == I915_TILING_Y) {
-			assert(arg.bo == sna_pixmap_get_bo(pixmap));
+			assert(arg.bo == __sna_pixmap_get_bo(pixmap));
 			arg.bo = sna_pixmap_change_tiling(pixmap, I915_TILING_X);
 			if (arg.bo == NULL) {
 				DBG(("%s: fallback -- unable to change tiling\n",
@@ -12563,7 +12562,7 @@ sna_poly_fill_rect_stippled_blt(DrawablePtr drawable,
 
 		DBG(("%s: converting bo from Y-tiling\n", __FUNCTION__));
 		/* This is cheating, but only the gpu_bo can be tiled */
-		assert(bo == sna_pixmap_get_bo(pixmap));
+		assert(bo == __sna_pixmap_get_bo(pixmap));
 		bo = sna_pixmap_change_tiling(pixmap, I915_TILING_X);
 		if (bo == NULL) {
 			DBG(("%s: fallback -- unable to change tiling\n",
@@ -13099,7 +13098,7 @@ sna_glyph_blt(DrawablePtr drawable, GCPtr gc,
 
 	if (bo->tiling == I915_TILING_Y) {
 		DBG(("%s: converting bo from Y-tiling\n", __FUNCTION__));
-		assert(bo == sna_pixmap_get_bo(pixmap));
+		assert(bo == __sna_pixmap_get_bo(pixmap));
 		bo = sna_pixmap_change_tiling(pixmap, I915_TILING_X);
 		if (bo == NULL) {
 			DBG(("%s: fallback -- unable to change tiling\n",
@@ -13758,7 +13757,7 @@ sna_reversed_glyph_blt(DrawablePtr drawable, GCPtr gc,
 
 	if (bo->tiling == I915_TILING_Y) {
 		DBG(("%s: converting bo from Y-tiling\n", __FUNCTION__));
-		assert(bo == sna_pixmap_get_bo(pixmap));
+		assert(bo == __sna_pixmap_get_bo(pixmap));
 		bo = sna_pixmap_change_tiling(pixmap, I915_TILING_X);
 		if (bo == NULL) {
 			DBG(("%s: fallback -- unable to change tiling\n",
@@ -14152,7 +14151,7 @@ sna_push_pixels_solid_blt(GCPtr gc,
 
 	if (bo->tiling == I915_TILING_Y) {
 		DBG(("%s: converting bo from Y-tiling\n", __FUNCTION__));
-		assert(bo == sna_pixmap_get_bo(pixmap));
+		assert(bo == __sna_pixmap_get_bo(pixmap));
 		bo = sna_pixmap_change_tiling(pixmap, I915_TILING_X);
 		if (bo == NULL) {
 			DBG(("%s: fallback -- unable to change tiling\n",
@@ -15085,8 +15084,8 @@ fallback:
 				goto fallback;
 
 			if (!sna->render.copy_boxes(sna, GXcopy,
-						    src, sna_pixmap_get_bo(src), dirty->x, dirty->y,
-						    dst, sna_pixmap_get_bo(dst),0, 0,
+						    src, __sna_pixmap_get_bo(src), dirty->x, dirty->y,
+						    dst, __sna_pixmap_get_bo(dst),0, 0,
 						    box, n, COPY_LAST))
 				goto fallback;
 
