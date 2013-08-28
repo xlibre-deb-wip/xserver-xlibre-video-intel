@@ -6,8 +6,10 @@ xserver-xorg-video-intel (2:2.21.15-1) unstable; urgency=low
   * Add myself to Uploaders to prevent lintian NMU warnings
   * Bump Standards-Version to 3.9.4 (no changes necessary)
   * Canonicalize Vcs-* fields
+  * Explicitly set source format to '3.0 (quilt)'
+  * Move homepage from description to homepage: field
 
- -- Michael Stapelberg <stapelberg@debian.org>  Wed, 28 Aug 2013 19:35:24 +0200
+ -- Michael Stapelberg <stapelberg@debian.org>  Wed, 28 Aug 2013 19:39:47 +0200
 
 xserver-xorg-video-intel (2:2.21.14-4) unstable; urgency=low
 
