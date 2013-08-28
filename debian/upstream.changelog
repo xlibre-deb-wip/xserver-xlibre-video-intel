@@ -1,3 +1,593 @@
+commit f57ce6ef9ca735d5cb428b2f12f1f9413a70506a
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Aug 21 12:20:29 2013 +0100
+
+    2.21.15 release
+
+commit ed40a7c3de3bbb178278c05907e59239712b98b6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Aug 18 14:33:44 2013 +0100
+
+    sna/gen6+: Tweak semaphore avoidance for composite operations
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4486ae2d829781e32652bce84c08e63ee1960bf0
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Aug 18 10:11:49 2013 +0100
+
+    sna: Do not force use of the CPU bo if replacing a busy GPU bo
+    
+    To minimise waiting for the SHM pixmap afterwards.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f1cbf13bb1ad7432d681ef7cbbc17bcf2d23c554
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Aug 17 23:37:57 2013 +0100
+
+    sna/video: Initialise the UV offsets to 0 for packed formats
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit db41bec0fd4dc8eec1f44a988f1c5a531594604f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Aug 17 23:33:17 2013 +0100
+
+    sna/video: Return the planar offset calculations to the planar branch
+    
+    They where accidentally move the packed branch in
+    commit 85e89f2121bad96d34ff8df9456e2fbaa9ff7881
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Fri Aug 16 21:11:33 2013 +0100
+    
+        sna/video: YUV420 is not supported by sprites, replace it with a RGB passthrough
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit fed9ca236a0b5bbd7f1d137aa4ef9c2caf26719c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Aug 16 22:43:26 2013 +0100
+
+    sna/video: Turn off passthrough if given a zero name
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 18e274425d728baa62445dc091cae6b1eab94a89
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Aug 16 21:58:29 2013 +0100
+
+    sna: Make sure that external scanouts are immediately discarded
+    
+    An issue with passthrough Xv buffers is that they end up in the scanout
+    cache and potentially reused instead of being immediately discarded.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6692077aca2dcb7754b23b6404ff2db2f70228dc
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Aug 16 21:55:16 2013 +0100
+
+    sna/video: Keep a ref to the passthrough overlay bo
+    
+    Otherwise we will destroy it at the end of the frame whilst it is still
+    meant to be shown. Not normally an issue as the next frame is show
+    before it vanishes, but is if the image is shown for an extended period
+    of time.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d8c9b2c85256c870f9677a590f190856826c821c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Aug 16 21:47:25 2013 +0100
+
+    sna/video: Mark the sprite color key as changed when disabling
+    
+    Otherwise we will forgot to send the command to turn off the colorkey.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 85e89f2121bad96d34ff8df9456e2fbaa9ff7881
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Aug 16 21:11:33 2013 +0100
+
+    sna/video: YUV420 is not supported by sprites, replace it with a RGB passthrough
+    
+    As YUV420 is not supported by any of the current sprite implementations
+    drop it. Instead implement some RGB passthroughs.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c610d37dae7e025027fd09a6889bf94853af8b8c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Aug 16 18:22:45 2013 +0100
+
+    sna/video: Expose an attribute to keep the overlay always on top
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 7a6bd55da90382459db072bffbd4aa36d18f9a17
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Aug 16 15:38:18 2013 +0100
+
+    sna/video: Don't assert on a client error, return BadAlloc
+    
+    If the client sends a BO that is too small to satifsy the PutImage, then
+    reject with BadAlloc rather than die with an assert.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit cb35a0b19a4a1c9ac4e2bb552a61057c215ce890
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Aug 16 08:47:16 2013 +0100
+
+    uxa: Restore the lost copyright block after splitting i965_reg.h from i915_reg.h
+    
+    Reported-by: "Lim, Siew Hoon" <siew.hoon.lim@intel.com>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 445f205a18f7548aa97b04379ff66a4fafb3f79c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Aug 15 00:28:25 2013 +0100
+
+    sna: Clip the tiled copy during framebuffer resize
+    
+    If we use the BLT for copies, then we need to supply correctly clipped
+    coordinates.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6bd897157b34e3b80dea68fa615d0fba08238486
+Author: Sedat Dilek <sedat.dilek@gmail.com>
+Date:   Wed Aug 14 10:01:13 2013 +0200
+
+    Correct misspelled caching
+    
+    Signed-off-by: Sedat Dilek <sedat.dilek@gmail.com>
+
+commit 5d29daa7df72d9a96e044d0706f3014811389629
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Aug 14 18:16:22 2013 +0100
+
+    sna: Make sure the frontbuffer exists before doing pitch checks
+    
+    An unusual path to be sure, to call sna_crtc_set_mode_major before we
+    create a GPU bo for the scanout - but might be possible after a GPU
+    hang, or it appears after trying to set a 0x0 mode. At any rate, make
+    sure the GPU bo exists before dereferencing.
+    
+    Bugzilla: https://bugs.launchpad.net/ubuntu/+source/xorg-server/+bug/1212344
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a0f90a4c79799780592c004c846a963aad5f28e6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Aug 14 18:12:15 2013 +0100
+
+    sna: Rename sna_pixmap_get_bo()
+    
+    Mark how dangerous this function is by giving it a __ prefix.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2be9118e882f59591dc0fb9b98ec25494f020bb4
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Aug 14 17:48:13 2013 +0100
+
+    sna: Tile the old image onto the new framebuffer when enlarging
+    
+    This improves the transition from going from a mirrored fbcon
+    framebuffer to an extended mode.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 394978867edf3746c285491db6be41abfe325d87
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Aug 14 08:38:52 2013 +0100
+
+    sna: Check that we successfully install the required hosting midlayer
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 3d818c0a36919add462c05d01a64b297f693fa69
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Aug 14 08:34:46 2013 +0100
+
+    sna: unwrap old modesetting API whilst hosted
+    
+    If we are hosted, then we do not have our own modesetting backend and
+    calling it results in fireworks. So leave the old modesetting entry
+    points for the hosting midlayer to control.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 504b18b079e0a12a9d18b46418411805ef1d8377
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Aug 13 11:01:03 2013 +0100
+
+    sna: Fix the assertions for the composite fb path
+    
+    Having updated the offsets for the dst, we also need to update the
+    assertions.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 5840bfe285e3fd9dc550cbe5fa87437870c92038
+Author: Julien Cristau <jcristau@debian.org>
+Date:   Mon Aug 12 19:31:53 2013 +0200
+
+    Link the driver against pixman
+
+commit b2df6cc8f0bcac6311f2b1d0c008add9b7d05787
+Author: Julien Cristau <jcristau@debian.org>
+Date:   Mon Aug 12 14:45:04 2013 +0200
+
+    configure: use CPPFLAGS for xaa.h check, not CFLAGS
+    
+    CFLAGS aren't passed to the preprocessor, which then can't find the
+    header.
+    
+    Signed-off-by: Julien Cristau <jcristau@debian.org>
+
+commit d661332de946c356c10a75e29a48f2c2e3599fec
+Author: Julien Cristau <jcristau@debian.org>
+Date:   Mon Aug 12 14:38:22 2013 +0200
+
+    Check for struct sysinfo as well as <sys/sysinfo.h>
+    
+    Non-linux glibc systems have the latter but not the former.
+    
+    Signed-off-by: Julien Cristau <jcristau@debian.org>
+
+commit 5775731b6489c63212914163f51b7a576df70658
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Aug 12 22:24:47 2013 +0100
+
+    sna/glyphs: Do not attempt to release the negative cache lookup
+    
+    Following
+    
+    commit 021c59f6243c51871f664e5fdd43aa00a809033a
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Sat Aug 10 13:15:48 2013 +0000
+    
+        sna/glyphs: Micro-optimise glyph drawing
+    
+    we need to be careful during sna_glyph_release() that the atlas points
+    into the glyph cache before releasing it. Fortunately caught by an
+    assertion.
+    
+    Reported-by: Jiri Slaby <jirislaby@gmail.com>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8da8c88e999d74fb110dddd497f03854adc089cc
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Aug 12 13:12:21 2013 +0100
+
+    intel: Check for HW_SKIP_CONSOLE before use
+    
+    For the older xserver.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4abc9c317b1f79f3f3d687fcf2d255b4d7416c2c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Aug 12 13:10:05 2013 +0100
+
+    configure: Correct the spelling of XORG_TESTSET_CFLAGS
+    
+    Reported-by: Julien Cristau <jcristau@debian.org>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ce666270c8861e039a06718cc3e9093d63d15187
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Aug 12 13:07:03 2013 +0100
+
+    sna: Fix use of obsolete this_atlas in a DBG message
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b3cb8b209d0515c54e1126f8ed6adf3cf7fbf3bd
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Aug 12 13:05:00 2013 +0100
+
+    configure: Fix reversed check for XORG_TESTSET_CFLAG
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 9645e71cb2580adb78bea1cfa70dfc3f66630834
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Aug 12 11:28:03 2013 +0100
+
+    sna: Reorder composite fallback migration to handle src==dst || mask==dst
+    
+    Order is important when moving and marking damaged regions.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e8dfc5b3f4ffeec93e52a5319b5a3118edf0e94e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Aug 12 10:33:41 2013 +0100
+
+    sna: Fix destination offset along memcpy composite fallback fastback
+    
+    The application of dst_x|y was incorrect, and so the drawing could end
+    up in the wrong location for a window.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=66990
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8d48a43ed956ff21d779aff1a11a0f7bf6b65bcb
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Aug 11 11:49:04 2013 +0100
+
+    sna/gen7: Refine ring selection
+    
+    Don't force us to select BLT too early if we allow ring switching. As
+    the RENDER ring benefits from more cacheing over time (e.g. HSW:GT3e) it
+    becomes much more preferable to use it over the BLT. Since we already
+    have the logic to decide if ring switching is possible/preferred, relax
+    the initial checks on where the current activity is to allow switching
+    between batches.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6f3999f38c71689298ac44e5b64830f754199740
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Aug 10 19:44:00 2013 +0100
+
+    sna: Avoid confusing conflicting CRTC probes vs a DRM race
+    
+    Only bail we fail to find the CRTC for this output amongst the allowed
+    set for this ZaphodHead - but allow us to find an invalid CRTC.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6cd366b79ad15be608f829e884b4880c311cf58b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Aug 10 17:55:07 2013 +0000
+
+    sna: Remove the redundant clearing of kgem at startup
+    
+    struct kgem is contained within a cleared superstruct.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b364305b16d79e32592235004872d38406ce8e9d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Aug 10 13:41:46 2013 +0000
+
+    sna/glyphs: Micro-optimise glyphs-to-dst
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 021c59f6243c51871f664e5fdd43aa00a809033a
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Aug 10 13:15:48 2013 +0000
+
+    sna/glyphs: Micro-optimise glyph drawing
+    
+    When you don't have many cycles to play with, every one counts.
+    
+    Here we make sure we cache negative lookups for large glyphs.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4d5483c253a9a29f54f2eed9b40623c8e9de6c22
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Aug 10 08:59:33 2013 +0100
+
+    sna: Tune pixmap_inplace() not to use a pinned busy GPU bo for replacement
+    
+    Obviously we can only replace the bo if it is not pinned and so just
+    incur a stall when we could have instead rerouted the rendering through
+    its CPU bo.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit de379943b49b94cc065fd55ad7ca1067e1802a31
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Aug 9 16:37:29 2013 +0100
+
+    sna: Allow LLC to reuse any active write buffer
+    
+    The inplace write distinction is not important on LLC, so pick any
+    buffer that is on the GPU and available for reuse.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 821b34f5db2936394e8969b15c1cdd5144acf6e3
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Aug 9 14:55:09 2013 +0100
+
+    sna: Squelch a "valid" mode without a dotclock
+    
+    There is yet another race in drm initialisation where X is starting long
+    before the drm device is completely ready, and is being told that the
+    output has a valid mode, but with bogus settings. Ignore it, and hope it
+    comes to its senses later on.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b6b5c3f009585151eb772dfc2526843c7cee82b3
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Aug 9 11:34:39 2013 +0100
+
+    intel: Disable incompatible features whilst hosted
+    
+    Start adding the infrastructure to disable direct hardware access if X
+    is being run under a system compositor (aka "hosted").
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ab445c23079a76eaa2a7d499ec4755599012bd2f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Aug 9 10:39:22 2013 +0100
+
+    sna: Rewrite the can-mmap-cpu test to handle stolen unclaimed bo
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f1d3d1f8c677b938362eee8b9f4e81f5463bc16a
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Aug 9 10:07:59 2013 +0100
+
+    sna: Check for EINVAL after mmapping
+    
+    I want to catch this error as it happens to see which (stolen) bo is
+    being erroneously mmapped.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 039a64e89e0323bd02eec24fba21a3924ee5cc31
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Aug 9 09:13:10 2013 +0100
+
+    configure: Only use XORG_TESTSET_CFLAG if defined
+    
+    Repairs the build for f16 which has an older version of xorg-macros.
+    Fortunately, as it doesn't define XORG_TESTSET_CFLAG it also doesn't use
+    it generate noisy output.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 31b4110b5119ad1643f3e75c5e23a44c4ceb30fe
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Aug 8 22:25:57 2013 +0100
+
+    sna: Use create2 to allocate a DISPLAY bo even if we have not enough stolen
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0f82c1a451a2d5763d9cf53b48f55200f7716966
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Aug 8 22:05:34 2013 +0100
+
+    sna: Always reuse scanout bo where possible
+    
+    When looking for an inactive scanout and all are busy, select the oldest
+    for reuse.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit bd7e653e1ee009e225b0bbf60dcaebc9b0fa2788
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Aug 8 22:03:16 2013 +0100
+
+    sna: Avoid leaking stolen framebuffer bo
+    
+    Framebuffers created from stolen bo were not being released and so the
+    kernel would keep the fb and bo alive, causing the memory to be
+    remain unreusable whilst X lived and us to leak all available stolen
+    memory.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 097669cd728e612bf3e3c531b83892e37481ee7b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Aug 8 20:44:24 2013 +0100
+
+    sna/dri: Do not create a scanout-capable buffer if not flipping
+    
+    Avoid paying the penalty of creating an uncached buffer if we never
+    intend to flip to it.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit cbf1f97d5dadbf569c7d26e78899bda95b28b16d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Aug 8 19:43:24 2013 +0100
+
+    configure: Include the experimental features in the configuration summary
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit fcac4f7f2b8d06cf2451609739ea342e5e3bfd5a
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Aug 8 14:52:26 2013 +0100
+
+    sna: Only use the experimental create2 if we support DISPLAY cacheing as well
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c6add09791a44d9b3af79d50f52e6913c46341a8
+Author: Raul Fernandes <rgfernandes@gmail.com>
+Date:   Thu Aug 8 09:26:59 2013 +0100
+
+    Micro-optimise box intersections
+    
+    We can shave a few instructions off the routine by incrementally
+    performing the "is-empty" check as soon as we compute the intersection
+    in each dimension.
+
+commit c01c66bca2c64ae2d77233b6ccdca26431ee51b8
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Aug 7 10:35:04 2013 +0100
+
+    sna: Update experimental create2 struct definition
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6004870d53221caf05a330fcfc8a72e68b2b8898
+Author: Dave Airlie <airlied@redhat.com>
+Date:   Tue Aug 6 13:03:18 2013 +1000
+
+    configure.ac: fix dri enabled with kms only picked
+    
+    Otherwise we'd fail saying DRI1 wasn't possible, when that
+    is exactly what we asked for.
+    
+    [ickle: The breakage was introduced with
+    
+    commit bd6ffd1ad2f903215d2c631252e742a0f6893054 [2.21.14]
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Sat Jul 27 15:33:19 2013 +0100
+    
+        configure: Print a summary of compilation options
+    
+    which modified the search to only take place if UMS was enabled, but
+    missed mollifying the resulting error.]
+    
+    Signed-off-by: Dave Airlie <airlied@redhat.com>
+
+commit a875ba39bea4a951e8cf1450ba9722b7cda95943
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Aug 5 16:15:48 2013 +0100
+
+    sna: Rename the attribute macro __packed__ to avoid clang barfing
+    
+    Using __packed__ as shorthand for ___attribute__(__packed__) confuses
+    clang as. (I guess to it expands (__packed__) which gcc skips.) As
+    clang also uses packed in its builtins, we have to find a compromise,
+    and so tightly_packed wins for being a more verbose description without
+    the dangerous leading underscores.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2536ad044b259eb3ce3e7b1ccf2c59ab3fe37d06
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Aug 4 12:50:41 2013 +0100
+
+    sna: Tweak threading thresholds
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2cdd57c804706bcf558d16d3370c1880ef482af1
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Aug 4 11:43:54 2013 +0100
+
+    sna/trapezoids: Some minor DBG to investigate threaded rendering
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1f7e20d812ef46fa0cba492e06a8f9f5a326d3c5
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Aug 4 12:26:36 2013 +0100
+
+    sna: Define fast function attribute for old gcc or other compilers
+    
+    Also written by Mark Kettenis and reported by Sedat Dilek.
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
 commit 0cd154039ab02799dc972d93c415e762226df1aa
 Author: Chris Wilson <chris@chris-wilson.co.uk>
 Date:   Sun Aug 4 10:30:14 2013 +0100
