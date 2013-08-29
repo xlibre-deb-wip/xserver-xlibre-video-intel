@@ -767,3 +767,382 @@ index 0000000..a7c882d
 +}
 +
 +#endif
+commit 5c4c1309ed043cce920c97633c5d5228d60308b8
+Author: Christopher James Halse Rogers <raof@ubuntu.com>
+Date:   Thu Aug 22 11:17:04 2013 +1000
+
+    Update to new XMir API
+
+diff --git a/src/sna/sna_xmir.c b/src/sna/sna_xmir.c
+index a7c882d..4ecdad9 100644
+--- a/src/sna/sna_xmir.c
++++ b/src/sna/sna_xmir.c
+@@ -50,9 +50,9 @@
+ #define FORCE_FULL_REDRAW 0
+ 
+ static void
+-sna_xmir_copy_to_mir(WindowPtr win, RegionPtr region)
++sna_xmir_copy_to_mir(xmir_window *xmir_win, RegionPtr region)
+ {
+-	PixmapPtr src = get_window_pixmap(win);
++	PixmapPtr src = get_window_pixmap(xmir_window_to_windowptr(xmir_win));
+ 	struct sna *sna = to_sna_from_pixmap(src);
+ 	struct sna_pixmap *priv;
+ 	struct kgem_bo *bo;
+@@ -70,7 +70,7 @@ sna_xmir_copy_to_mir(WindowPtr win, RegionPtr region)
+ 	/* XXX size and pitch are bogus, but only used for sanity checks */
+ 
+ 	bo = kgem_create_for_prime(&sna->kgem,
+-				   xmir_prime_fd_for_window(win),
++				   xmir_window_get_fd(xmir_win),
+ 				   priv->gpu_bo->pitch * src->drawable.height);
+ 	if (bo == NULL)
+ 		return;
+@@ -94,32 +94,15 @@ sna_xmir_copy_to_mir(WindowPtr win, RegionPtr region)
+ 				   src, bo, 0, 0,
+ 				   boxes, nbox, COPY_LAST)) {
+ 		kgem_submit(&sna->kgem);
+-		xmir_submit_rendering_for_window(win, region);
++		xmir_submit_rendering_for_window(xmir_win, region);
+ 	}
+ 
+ 	kgem_bo_destroy(&sna->kgem, bo);
+ }
+ 
+-static void
+-sna_xmir_buffer_available(WindowPtr win)
+-{
+-	RegionPtr region = xmir_window_get_dirty(win);
+-	if (RegionNotEmpty(region))
+-		sna_xmir_copy_to_mir(win, region);
+-}
+-
+-static void
+-sna_xmir_submit_dirty_window(WindowPtr win)
+-{
+-	if (!xmir_window_has_free_buffer(win))
+-		return;
+-
+-	sna_xmir_copy_to_mir(win, xmir_window_get_dirty(win));
+-}
+-
+ static const xmir_driver sna_xmir_driver = {
+ 	XMIR_DRIVER_VERSION,
+-	sna_xmir_buffer_available
++	sna_xmir_copy_to_mir
+ };
+ 
+ bool sna_xmir_create(struct sna *sna)
+@@ -157,7 +140,7 @@ void sna_xmir_post_damage(struct sna *sna)
+ 		return;
+ 
+ 	xmir_screen_for_each_damaged_window(sna->xmir,
+-					    sna_xmir_submit_dirty_window);
++					    sna_xmir_copy_to_mir);
+ }
+ 
+ #endif
+commit 1edd7a1d8e54daf628df1317e65c96c903c72f85
+Author: Christopher James Halse Rogers <raof@ubuntu.com>
+Date:   Fri Aug 23 10:20:49 2013 +1000
+
+    Don't call sna_mode_update when SNA_IS_HOSTED
+
+diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
+index 6fe49c9..7870a47 100644
+--- a/src/sna/sna_driver.c
++++ b/src/sna/sna_driver.c
+@@ -207,7 +207,8 @@ static Bool sna_become_master(struct sna *sna)
+ 		sna_set_fallback_mode(scrn);
+ 	}
+ 
+-	sna_mode_update(sna);
++	if (!(sna->flags & SNA_IS_HOSTED))
++		sna_mode_update(sna);
+ 	return TRUE;
+ }
+ 
+commit 0c51dfcf7f2ef610fd3dc80bce71fc8c0a6f47cc
+Author: Christopher James Halse Rogers <raof@ubuntu.com>
+Date:   Fri Aug 23 14:36:48 2013 +1000
+
+    Fix rendering when copying from xmir_win that only partially covers the drawable
+
+diff --git a/src/sna/sna_xmir.c b/src/sna/sna_xmir.c
+index 4ecdad9..d232c24 100644
+--- a/src/sna/sna_xmir.c
++++ b/src/sna/sna_xmir.c
+@@ -57,7 +57,7 @@ sna_xmir_copy_to_mir(xmir_window *xmir_win, RegionPtr region)
+ 	struct sna_pixmap *priv;
+ 	struct kgem_bo *bo;
+ 	BoxRec box, *boxes;
+-	int16_t sx, sy;
++	int16_t sx, sy, dx, dy;
+ 	int nbox;
+ 
+ 	if (wedged(sna)) /* XXX need pitch/size for CPU copy fallback */
+@@ -89,9 +89,11 @@ sna_xmir_copy_to_mir(xmir_window *xmir_win, RegionPtr region)
+ 	}
+ 
+ 	get_window_deltas(src, &sx, &sy);
++	xmir_window_get_drawable_offset(xmir_win, &dx, &dy);
++
+ 	if (sna->render.copy_boxes(sna, GXcopy,
+ 				   src, priv->gpu_bo, sx, sy,
+-				   src, bo, 0, 0,
++				   src, bo, dx, dy,
+ 				   boxes, nbox, COPY_LAST)) {
+ 		kgem_submit(&sna->kgem);
+ 		xmir_submit_rendering_for_window(xmir_win, region);
+commit 3bab5911709da671585d6c5569173c92a6a1dc7c
+Author: Christopher James Halse Rogers <raof@ubuntu.com>
+Date:   Sat Aug 24 14:25:37 2013 +1000
+
+    Fixup rendering of partial xmir_windows harder
+
+diff --git a/src/sna/kgem.c b/src/sna/kgem.c
+index 98e801a..14bfdc8 100644
+--- a/src/sna/kgem.c
++++ b/src/sna/kgem.c
+@@ -1439,14 +1439,14 @@ void kgem_get_tile_size(struct kgem *kgem, int tiling,
+ 	}
+ }
+ 
+-static uint32_t kgem_surface_size(struct kgem *kgem,
+-				  bool relaxed_fencing,
+-				  unsigned flags,
+-				  uint32_t width,
+-				  uint32_t height,
+-				  uint32_t bpp,
+-				  uint32_t tiling,
+-				  uint32_t *pitch)
++uint32_t kgem_surface_size(struct kgem *kgem,
++			   bool relaxed_fencing,
++			   unsigned flags,
++			   uint32_t width,
++			   uint32_t height,
++			   uint32_t bpp,
++			   uint32_t tiling,
++			   uint32_t *pitch)
+ {
+ 	uint32_t tile_width, tile_height;
+ 	uint32_t size;
+diff --git a/src/sna/kgem.h b/src/sna/kgem.h
+index e08f842..74d3cff 100644
+--- a/src/sna/kgem.h
++++ b/src/sna/kgem.h
+@@ -243,6 +243,15 @@ struct kgem_bo *kgem_create_map(struct kgem *kgem,
+ 				void *ptr, uint32_t size,
+ 				bool read_only);
+ 
++uint32_t kgem_surface_size(struct kgem *kgem,
++			   bool relaxed_fencing,
++			   unsigned flags,
++			   uint32_t width,
++			   uint32_t height,
++			   uint32_t bpp,
++			   uint32_t tiling,
++			   uint32_t *pitch);
++
+ struct kgem_bo *kgem_create_for_name(struct kgem *kgem, uint32_t name);
+ struct kgem_bo *kgem_create_for_prime(struct kgem *kgem, int name, uint32_t size);
+ int kgem_bo_export_to_prime(struct kgem *kgem, struct kgem_bo *bo);
+diff --git a/src/sna/sna_xmir.c b/src/sna/sna_xmir.c
+index d232c24..9bdd619 100644
+--- a/src/sna/sna_xmir.c
++++ b/src/sna/sna_xmir.c
+@@ -57,7 +57,9 @@ sna_xmir_copy_to_mir(xmir_window *xmir_win, RegionPtr region)
+ 	struct sna_pixmap *priv;
+ 	struct kgem_bo *bo;
+ 	BoxRec box, *boxes;
+-	int16_t sx, sy, dx, dy;
++	BoxPtr dst_box;
++	int16_t sx, sy;
++	uint32_t pitch;
+ 	int nbox;
+ 
+ 	if (wedged(sna)) /* XXX need pitch/size for CPU copy fallback */
+@@ -67,15 +69,24 @@ sna_xmir_copy_to_mir(xmir_window *xmir_win, RegionPtr region)
+ 	if (priv == NULL)
+ 		return;
+ 
++	dst_box = xmir_window_get_drawable_region(xmir_win);
+ 	/* XXX size and pitch are bogus, but only used for sanity checks */
+ 
+ 	bo = kgem_create_for_prime(&sna->kgem,
+ 				   xmir_window_get_fd(xmir_win),
+-				   priv->gpu_bo->pitch * src->drawable.height);
++				   priv->gpu_bo->pitch * (dst_box->y2 - dst_box->y1));
+ 	if (bo == NULL)
+ 		return;
+ 
+-	bo->pitch = priv->gpu_bo->pitch;
++	kgem_surface_size(&sna->kgem, FALSE,
++			  KGEM_CAN_CREATE_GPU | KGEM_CAN_CREATE_GTT,
++			  dst_box->x2 - dst_box->x1,
++			  dst_box->y2 - dst_box->y1,
++			  src->drawable.bitsPerPixel,
++			  bo->tiling,
++			  &pitch);
++
++	bo->pitch = pitch;
+ 
+ 	if (FORCE_FULL_REDRAW || region == NULL) {
+ 		box.x1 = box.y1 = 0;
+@@ -89,11 +100,10 @@ sna_xmir_copy_to_mir(xmir_window *xmir_win, RegionPtr region)
+ 	}
+ 
+ 	get_window_deltas(src, &sx, &sy);
+-	xmir_window_get_drawable_offset(xmir_win, &dx, &dy);
+ 
+ 	if (sna->render.copy_boxes(sna, GXcopy,
+ 				   src, priv->gpu_bo, sx, sy,
+-				   src, bo, dx, dy,
++				   src, bo, -dst_box->x1, -dst_box->y1,
+ 				   boxes, nbox, COPY_LAST)) {
+ 		kgem_submit(&sna->kgem);
+ 		xmir_submit_rendering_for_window(xmir_win, region);
+commit 09413237f2821e7fd836a0552f3f240bdfd3cccc
+Author: Christopher James Halse Rogers <raof@ubuntu.com>
+Date:   Sun Aug 25 11:56:38 2013 +1000
+
+    Don't try to copy the fbcon if running hosted
+
+diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
+index 7870a47..026d5c4 100644
+--- a/src/sna/sna_driver.c
++++ b/src/sna/sna_driver.c
+@@ -260,7 +260,7 @@ static Bool sna_create_screen_resources(ScreenPtr screen)
+ 	screen->SetScreenPixmap(sna->front);
+ 
+ 	/* Only preserve the fbcon, not any subsequent server regens */
+-	if (serverGeneration == 1)
++	if (serverGeneration == 1 && !(sna->flags & SNA_IS_HOSTED))
+ 		sna_copy_fbcon(sna);
+ 
+ 	if (!sna_become_master(sna)) {
+commit 7bd1d3058c468f94e77aea99e538daf60de5190b
+Author: Christopher James Halse Rogers <raof@ubuntu.com>
+Date:   Sat Aug 24 19:43:32 2013 +1000
+
+    Don't try to find the covering CRTC if SNA_IS_HOSTED
+
+diff --git a/src/sna/sna_display.c b/src/sna/sna_display.c
+index e2bebad..f0807ef 100644
+--- a/src/sna/sna_display.c
++++ b/src/sna/sna_display.c
+@@ -3252,6 +3252,10 @@ sna_covering_crtc(ScrnInfoPtr scrn,
+ 	xf86CrtcPtr best_crtc;
+ 	int best_coverage, c;
+ 
++	/* If we're hosted we don't own the CRTC */
++	if (to_sna(scrn)->flags & SNA_IS_HOSTED)
++		return NULL;
++
+ 	/* If we do not own the VT, we do not own the CRTC either */
+ 	if (!scrn->vtSema)
+ 		return NULL;
+commit c197dbe099d7fb8697091e65ac7e21df8622ba6b
+Author: Christopher James Halse Rogers <raof@ubuntu.com>
+Date:   Sun Aug 25 12:19:27 2013 +1000
+
+    Unconditionally set sna->front in sna_set_screen_pixmap
+
+diff --git a/src/sna/sna_accel.c b/src/sna/sna_accel.c
+index 04b063c..051207c 100644
+--- a/src/sna/sna_accel.c
++++ b/src/sna/sna_accel.c
+@@ -15252,7 +15252,7 @@ sna_set_screen_pixmap(PixmapPtr pixmap)
+ 	PixmapPtr old_front = pixmap->drawable.pScreen->devPrivate;
+ 	WindowPtr root;
+ 
+-	assert(pixmap == to_sna_from_pixmap(pixmap)->front);
++	to_sna_from_pixmap(pixmap)->front = pixmap;
+ 
+ 	if (old_front)
+ 		migrate_dirty_tracking(old_front, pixmap);
+commit 599096c45cd9ce3b72a1941ecd24bb0f8efe2c22
+Author: Christopher James Halse Rogers <raof@ubuntu.com>
+Date:   Sun Aug 25 15:17:28 2013 +1000
+
+    Call xf86_cursors_init with 0,0 max HW cursor size even when nested
+
+diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
+index 026d5c4..58af3d2 100644
+--- a/src/sna/sna_driver.c
++++ b/src/sna/sna_driver.c
+@@ -932,6 +932,12 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
+ 			       HARDWARE_CURSOR_UPDATE_UNHIDDEN |
+ 			       HARDWARE_CURSOR_ARGB))
+ 		xf86DrvMsg(scrn->scrnIndex, X_INFO, "HW Cursor enabled\n");
++	else {
++		if (xf86_cursors_init(screen, 0, 0, 0))
++			xf86DrvMsg(scrn->scrnIndex, X_INFO, "xf86Cursors enabled, HW Cursor disabled\n");
++		else
++			xf86DrvMsg(scrn->scrnIndex, X_WARNING, "xf86Cursor initialisation failed\n");
++	}
+ 
+ 	/* Must force it before EnterVT, so we are in control of VT and
+ 	 * later memory should be bound when allocating, e.g rotate_mem */
+commit 9922021dcc7a665bb8df833ee76814a9d047edae
+Author: Christopher James Halse Rogers <raof@ubuntu.com>
+Date:   Sun Aug 25 20:38:04 2013 +1000
+
+    Fixups
+
+diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
+index 58af3d2..f90c5ef 100644
+--- a/src/sna/sna_driver.c
++++ b/src/sna/sna_driver.c
+@@ -912,8 +912,6 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
+ 		return FALSE;
+ 	}
+ 
+-	sna_xmir_init(sna, screen);
+-
+ 	xf86SetBlackWhitePixels(screen);
+ 
+ 	xf86SetBackingStore(screen);
+@@ -921,6 +919,8 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
+ 	if (!miDCInitialize(screen, xf86GetPointerScreenFuncs()))
+ 		return FALSE;
+ 
++	sna_xmir_init(sna, screen);
++
+ 	if ((sna->flags & SNA_IS_HOSTED) == 0 &&
+ 	    xf86_cursors_init(screen, SNA_CURSOR_X, SNA_CURSOR_Y,
+ 			       HARDWARE_CURSOR_TRUECOLOR_AT_8BPP |
+@@ -932,12 +932,6 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
+ 			       HARDWARE_CURSOR_UPDATE_UNHIDDEN |
+ 			       HARDWARE_CURSOR_ARGB))
+ 		xf86DrvMsg(scrn->scrnIndex, X_INFO, "HW Cursor enabled\n");
+-	else {
+-		if (xf86_cursors_init(screen, 0, 0, 0))
+-			xf86DrvMsg(scrn->scrnIndex, X_INFO, "xf86Cursors enabled, HW Cursor disabled\n");
+-		else
+-			xf86DrvMsg(scrn->scrnIndex, X_WARNING, "xf86Cursor initialisation failed\n");
+-	}
+ 
+ 	/* Must force it before EnterVT, so we are in control of VT and
+ 	 * later memory should be bound when allocating, e.g rotate_mem */
+diff --git a/src/sna/sna_xmir.c b/src/sna/sna_xmir.c
+index 9bdd619..c532b95 100644
+--- a/src/sna/sna_xmir.c
++++ b/src/sna/sna_xmir.c
+@@ -78,15 +78,7 @@ sna_xmir_copy_to_mir(xmir_window *xmir_win, RegionPtr region)
+ 	if (bo == NULL)
+ 		return;
+ 
+-	kgem_surface_size(&sna->kgem, FALSE,
+-			  KGEM_CAN_CREATE_GPU | KGEM_CAN_CREATE_GTT,
+-			  dst_box->x2 - dst_box->x1,
+-			  dst_box->y2 - dst_box->y1,
+-			  src->drawable.bitsPerPixel,
+-			  bo->tiling,
+-			  &pitch);
+-
+-	bo->pitch = pitch;
++	bo->pitch = xmir_window_get_stride(xmir_win);
+ 
+ 	if (FORCE_FULL_REDRAW || region == NULL) {
+ 		box.x1 = box.y1 = 0;

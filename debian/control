@@ -9,7 +9,7 @@ Build-Depends:
  dh-autoreconf,
  pkg-config,
 # Depend on latest server to ensure XMir support
- xserver-xorg-dev (>= 2:1.14.2-0ubuntu4~),
+ xserver-xorg-dev (>= 2:1.14.2.901-2ubuntu4~),
  x11proto-core-dev,
  x11proto-fonts-dev,
  x11proto-xinerama-dev,

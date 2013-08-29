@@ -1,8 +1,10 @@
-xserver-xorg-video-intel (2:2.21.14-4ubuntu3) UNRELEASED; urgency=low
+xserver-xorg-video-intel (2:2.21.14-4ubuntu3) saucy; urgency=low
 
   * Fix valgrind-enabling check
+  * Update for new XMir API
+  * Bump build-depend on xserver-xorg-dev to ensure new XMir API
 
- -- Christopher James Halse Rogers <raof@ubuntu.com>  Mon, 26 Aug 2013 18:54:40 +1000
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Thu, 29 Aug 2013 20:08:05 +1000
 
 xserver-xorg-video-intel (2:2.21.14-4ubuntu2) saucy; urgency=low
 
