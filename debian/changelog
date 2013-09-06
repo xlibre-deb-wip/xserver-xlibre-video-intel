@@ -1,3 +1,13 @@
+xserver-xorg-video-intel (2:2.21.14-4ubuntu4) saucy; urgency=low
+
+  * XMir: Make a conservative guess as to whether the Mir buffer will be used
+    for scanout, and take caching decisions appropriately. Fixes "cache dirt"
+    transient horizontal-line misrendering with Mir bypass (LP: #1218735)
+  * xmir.patch: Split monolithic concatenated patch out into a quilt patch
+    series.
+
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Thu, 05 Sep 2013 15:56:49 +1000
+
 xserver-xorg-video-intel (2:2.21.14-4ubuntu3) saucy; urgency=low
 
   * Fix valgrind-enabling check

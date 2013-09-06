@@ -1,348 +1,4 @@
-commit b6b5c3f009585151eb772dfc2526843c7cee82b3
-Author: Chris Wilson <chris@chris-wilson.co.uk>
-Date:   Fri Aug 9 11:34:39 2013 +0100
-
-    intel: Disable incompatible features whilst hosted
-    
-    Start adding the infrastructure to disable direct hardware access if X
-    is being run under a system compositor (aka "hosted").
-    
-    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
-
-diff --git a/src/intel_device.c b/src/intel_device.c
-index c5f0a38..d9ff8bc 100644
---- a/src/intel_device.c
-+++ b/src/intel_device.c
-@@ -92,7 +92,7 @@ static int __intel_check_device(int fd)
- 		if (drmIoctl(fd, DRM_IOCTL_I915_GETPARAM, &gp))
- 			ret = FALSE;
- 	}
--	if (ret) {
-+	if (ret && !hosted()) {
- 		struct drm_mode_card_res res;
- 
- 		memset(&res, 0, sizeof(res));
-@@ -199,6 +199,12 @@ int intel_open_device(int entity_num,
- 	dev->open_count = 0;
- 	dev->master_count = 0;
- 
-+	/* If hosted under a system compositor, just pretend to be master */
-+	if (hosted()) {
-+		dev->open_count++;
-+		dev->master_count++;
-+	}
-+
- 	xf86GetEntityPrivate(entity_num, intel_device_key)->ptr = dev;
- 
- 	return fd;
-@@ -222,6 +228,8 @@ int intel_get_device(ScrnInfoPtr scrn)
- 		drmSetVersion sv;
- 		int retry = 2000;
- 
-+		assert(!hosted());
-+
- 		/* Check that what we opened was a master or a
- 		 * master-capable FD, by setting the version of the
- 		 * interface we'll use to talk to it.
-@@ -267,6 +275,7 @@ int intel_get_master(ScrnInfoPtr scrn)
- 	if (dev->master_count++ == 0) {
- 		int retry = 2000;
- 
-+		assert(!hosted());
- 		do {
- 			ret = drmSetMaster(dev->fd);
- 			if (ret == 0)
-@@ -288,6 +297,7 @@ int intel_put_master(ScrnInfoPtr scrn)
- 	ret = 0;
- 	assert(dev->master_count);
- 	if (--dev->master_count == 0) {
-+		assert(!hosted());
- 		assert(drmSetMaster(dev->fd) == 0);
- 		ret = drmDropMaster(dev->fd);
- 	}
-@@ -317,6 +327,7 @@ void intel_put_device(ScrnInfoPtr scrn)
- 	if (--dev->open_count)
- 		return;
- 
-+	assert(!hosted());
- 	intel_set_device(scrn, NULL);
- 
- 	drmClose(dev->fd);
-diff --git a/src/intel_driver.h b/src/intel_driver.h
-index 1e67eab..4768536 100644
---- a/src/intel_driver.h
-+++ b/src/intel_driver.h
-@@ -129,4 +129,6 @@ void intel_put_device(ScrnInfoPtr scrn);
- 
- void __intel_uxa_release_device(ScrnInfoPtr scrn);
- 
-+#define hosted() (0)
-+
- #endif /* INTEL_DRIVER_H */
-diff --git a/src/intel_module.c b/src/intel_module.c
-index 47e494c..42fa8d8 100644
---- a/src/intel_module.c
-+++ b/src/intel_module.c
-@@ -382,6 +382,9 @@ static Bool intel_driver_func(ScrnInfoPtr pScrn,
- #else
- 		(*flag) = HW_IO | HW_MMIO;
- #endif
-+		if (hosted())
-+			(*flag) = HW_SKIP_CONSOLE;
-+
- 		return TRUE;
- 	default:
- 		/* Unknown or deprecated function */
-@@ -410,6 +413,9 @@ static enum accel_method { UXA, SNA } get_accel_method(void)
- 	enum accel_method accel_method = DEFAULT_ACCEL_METHOD;
- 	XF86ConfDevicePtr dev;
- 
-+	if (hosted())
-+		return SNA;
-+
- 	dev = _xf86findDriver("intel", xf86configptr->conf_device_lst);
- 	if (dev && dev->dev_option_lst) {
- 		const char *s;
-@@ -493,7 +499,8 @@ static Bool intel_pci_probe(DriverPtr		driver,
- 		case PCI_CHIP_I810_DC100:
- 		case PCI_CHIP_I810_E:
- 		case PCI_CHIP_I815:
--			break;
-+			if (!hosted())
-+				break;
- 		default:
- 			return FALSE;
- 		}
-diff --git a/src/sna/sna.h b/src/sna/sna.h
-index caf671f..7387088 100644
---- a/src/sna/sna.h
-+++ b/src/sna/sna.h
-@@ -229,6 +229,7 @@ struct sna {
- #define SNA_TEAR_FREE		0x10
- #define SNA_FORCE_SHADOW	0x20
- #define SNA_FLUSH_GTT		0x40
-+#define SNA_IS_HOSTED		0x80
- #define SNA_REPROBE		0x80000000
- 
- 	unsigned cpu_features;
-diff --git a/src/sna/sna_display.c b/src/sna/sna_display.c
-index 5dcf47f..f86d93d 100644
---- a/src/sna/sna_display.c
-+++ b/src/sna/sna_display.c
-@@ -3151,11 +3151,22 @@ sna_crtc_config_notify(ScreenPtr screen)
- 	sna_mode_update(to_sna_from_screen(screen));
- }
- 
-+#if HAS_PIXMAP_SHARING
-+#define sna_setup_provider(scrn) xf86ProviderSetup(scrn, NULL, "Intel")
-+#else
-+#define sna_setup_provider(scrn)
-+#endif
-+
- bool sna_mode_pre_init(ScrnInfoPtr scrn, struct sna *sna)
- {
- 	struct sna_mode *mode = &sna->mode;
- 	int i;
- 
-+	if (sna->flags & SNA_IS_HOSTED) {
-+		sna_setup_provider(scrn);
-+		return true;
-+	}
-+
- 	mode->kmode = drmModeGetResources(sna->kgem.fd);
- 	if (mode->kmode) {
- 		xf86CrtcConfigInit(scrn, &sna_mode_funcs);
-@@ -3172,9 +3183,7 @@ bool sna_mode_pre_init(ScrnInfoPtr scrn, struct sna *sna)
- 		if (!xf86IsEntityShared(scrn->entityList[0]))
- 			sna_mode_compute_possible_clones(scrn);
- 
--#if HAS_PIXMAP_SHARING
--		xf86ProviderSetup(scrn, NULL, "Intel");
--#endif
-+		sna_setup_provider(scrn);
- 	} else {
- 		if (!sna_mode_fake_init(sna))
- 			return false;
-@@ -3200,6 +3209,9 @@ sna_mode_close(struct sna *sna)
- 	while (sna_mode_has_pending_events(sna))
- 		sna_mode_wakeup(sna);
- 
-+	if (sna->flags & SNA_IS_HOSTED)
-+		return;
-+
- 	for (i = 0; i < xf86_config->num_crtc; i++)
- 		sna_crtc_disable_shadow(sna, to_sna_crtc(xf86_config->crtc[i]));
- }
-diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
-index fc8773b..7f2c0ac 100644
---- a/src/sna/sna_driver.c
-+++ b/src/sna/sna_driver.c
-@@ -287,7 +287,7 @@ static bool has_pageflipping(struct sna *sna)
- 	drm_i915_getparam_t gp;
- 	int v;
- 
--	if (sna->flags & SNA_NO_WAIT)
-+	if (sna->flags & (SNA_IS_HOSTED | SNA_NO_WAIT))
- 		return false;
- 
- 	v = 0;
-@@ -413,6 +413,7 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
- 	sna = to_sna(scrn);
- 	sna->scrn = scrn;
- 	sna->pEnt = pEnt;
-+	sna->flags = 0;
- 
- 	scrn->displayWidth = 640;	/* default it */
- 
-@@ -425,7 +426,7 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
- 	fd = intel_get_device(scrn);
- 	if (fd == -1) {
- 		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
--			   "Failed to become DRM master.\n");
-+			   "Failed to claim DRM device.\n");
- 		goto cleanup;
- 	}
- 
-@@ -484,7 +485,6 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
- 	if (xf86ReturnOptValBool(sna->Options, OPTION_TILING_FB, FALSE))
- 		sna->tiling &= ~SNA_TILING_FB;
- 
--	sna->flags = 0;
- 	if (!xf86ReturnOptValBool(sna->Options, OPTION_SWAPBUFFERS_WAIT, TRUE))
- 		sna->flags |= SNA_NO_WAIT;
- 	if (xf86ReturnOptValBool(sna->Options, OPTION_TRIPLE_BUFFER, TRUE))
-@@ -629,6 +629,9 @@ sna_uevent_init(ScrnInfoPtr scrn)
- 	Bool hotplug;
- 	MessageType from = X_CONFIG;
- 
-+	if (sna->flags & SNA_IS_HOSTED)
-+		return;
-+
- 	DBG(("%s\n", __FUNCTION__));
- 
- 	/* RandR will be disabled if Xinerama is active, and so generating
-@@ -895,7 +898,8 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
- 	if (!miDCInitialize(screen, xf86GetPointerScreenFuncs()))
- 		return FALSE;
- 
--	if (xf86_cursors_init(screen, SNA_CURSOR_X, SNA_CURSOR_Y,
-+	if ((sna->flags & SNA_IS_HOSTED) == 0 &&
-+	    xf86_cursors_init(screen, SNA_CURSOR_X, SNA_CURSOR_Y,
- 			       HARDWARE_CURSOR_TRUECOLOR_AT_8BPP |
- 			       HARDWARE_CURSOR_BIT_ORDER_MSBFIRST |
- 			       HARDWARE_CURSOR_INVERT_MASK |
-diff --git a/src/sna/sna_video_overlay.c b/src/sna/sna_video_overlay.c
-index a0b4db9..a68a173 100644
---- a/src/sna/sna_video_overlay.c
-+++ b/src/sna/sna_video_overlay.c
-@@ -683,6 +683,9 @@ void sna_video_overlay_setup(struct sna *sna, ScreenPtr screen)
- 	struct sna_video *video;
- 	XvPortPtr port;
- 
-+	if (sna->flags & SNA_IS_HOSTED)
-+		return;
-+
- 	if (!sna_has_overlay(sna))
- 		return;
- 
-diff --git a/src/sna/sna_video_sprite.c b/src/sna/sna_video_sprite.c
-index 07e59bd..a8d50ab 100644
---- a/src/sna/sna_video_sprite.c
-+++ b/src/sna/sna_video_sprite.c
-@@ -456,6 +456,9 @@ void sna_video_sprite_setup(struct sna *sna, ScreenPtr screen)
- 	struct sna_video *video;
- 	XvPortPtr port;
- 
-+	if (sna->flags & SNA_IS_HOSTED)
-+		return;
-+
- 	memset(&r, 0, sizeof(struct drm_mode_get_plane_res));
- 	if (drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_GETPLANERESOURCES, &r))
- 		return;
-commit 3d818c0a36919add462c05d01a64b297f693fa69
-Author: Chris Wilson <chris@chris-wilson.co.uk>
-Date:   Wed Aug 14 08:34:46 2013 +0100
-
-    sna: unwrap old modesetting API whilst hosted
-    
-    If we are hosted, then we do not have our own modesetting backend and
-    calling it results in fireworks. So leave the old modesetting entry
-    points for the hosting midlayer to control.
-    
-    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
-
-diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
-index 7f2c0ac..c27deb6 100644
---- a/src/sna/sna_driver.c
-+++ b/src/sna/sna_driver.c
-@@ -1080,6 +1080,15 @@ static Bool sna_pm_event(SCRN_ARG_TYPE arg, pmEvent event, Bool undo)
- 	return TRUE;
- }
- 
-+static Bool sna_enter_vt__hosted(VT_FUNC_ARGS_DECL)
-+{
-+	return TRUE;
-+}
-+
-+static void sna_leave_vt__hosted(VT_FUNC_ARGS_DECL)
-+{
-+}
-+
- Bool sna_init_scrn(ScrnInfoPtr scrn, int entity_num)
- {
- 	DBG(("%s: entity_num=%d\n", __FUNCTION__, entity_num));
-@@ -1110,13 +1119,18 @@ Bool sna_init_scrn(ScrnInfoPtr scrn, int entity_num)
- 
- 	scrn->PreInit = sna_pre_init;
- 	scrn->ScreenInit = sna_screen_init;
--	scrn->SwitchMode = sna_switch_mode;
--	scrn->AdjustFrame = sna_adjust_frame;
--	scrn->EnterVT = sna_enter_vt;
--	scrn->LeaveVT = sna_leave_vt;
-+	if (!hosted()) {
-+		scrn->SwitchMode = sna_switch_mode;
-+		scrn->AdjustFrame = sna_adjust_frame;
-+		scrn->EnterVT = sna_enter_vt;
-+		scrn->LeaveVT = sna_leave_vt;
-+		scrn->ValidMode = sna_valid_mode;
-+		scrn->PMEvent = sna_pm_event;
-+	} else {
-+		scrn->EnterVT = sna_enter_vt__hosted;
-+		scrn->LeaveVT = sna_leave_vt__hosted;
-+	}
- 	scrn->FreeScreen = sna_free_screen;
--	scrn->ValidMode = sna_valid_mode;
--	scrn->PMEvent = sna_pm_event;
- 
- 	xf86SetEntitySharable(entity_num);
- 	xf86SetEntityInstanceForScreen(scrn, entity_num,
-commit 394978867edf3746c285491db6be41abfe325d87
-Author: Chris Wilson <chris@chris-wilson.co.uk>
-Date:   Wed Aug 14 08:38:52 2013 +0100
-
-    sna: Check that we successfully install the required hosting midlayer
-    
-    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
-
-diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
-index c27deb6..83a5bba 100644
---- a/src/sna/sna_driver.c
-+++ b/src/sna/sna_driver.c
-@@ -430,6 +430,13 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
- 		goto cleanup;
- 	}
- 
-+	/* Sanity check */
-+	if (hosted() && (sna->flags & SNA_IS_HOSTED) == 0) {
-+		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
-+			   "Failed to setup hosted device.\n");
-+		goto cleanup;
-+	}
-+
- 	preferred_depth = sna->info->gen < 030 ? 15 : 24;
- 	if (!fb_supports_depth(fd, preferred_depth))
- 		preferred_depth = 24;
-commit 96e2b3c6ee7aad96612a2efad97656a764e197f4
+commit 67c072065118115112d06e77c43b6ac225dbcf56
 Author: Chris Wilson <chris@chris-wilson.co.uk>
 Date:   Wed Jul 24 01:44:30 2013 +0100
 
@@ -351,6 +7,10 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
     For the intrepid explorer, who is desperate to encounter all the bugs we
     fixed long ago. /o\
     
+    With lots of updates by Christopher James Halse Rogers as he updated the
+    XMir API.
+    
+    Signed-off-by: Christopher James Halse Rogers <raof@ubuntu.com>
     Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
 
 diff --git a/src/Makefile.am b/src/Makefile.am
@@ -366,10 +26,10 @@ index b0781ca..126bde2 100644
  	$(NULL)
  
 diff --git a/src/intel_device.c b/src/intel_device.c
-index d9ff8bc..706b156 100644
+index b3926df..710348e 100644
 --- a/src/intel_device.c
 +++ b/src/intel_device.c
-@@ -121,10 +121,34 @@ static int fd_set_cloexec(int fd)
+@@ -144,10 +144,34 @@ static int fd_set_nonblock(int fd)
  	return fd;
  }
  
@@ -405,7 +65,7 @@ index d9ff8bc..706b156 100644
  		char id[20];
  		int ret;
 diff --git a/src/intel_driver.h b/src/intel_driver.h
-index 4768536..d5caa4f 100644
+index e54054f..0c5e4ae 100644
 --- a/src/intel_driver.h
 +++ b/src/intel_driver.h
 @@ -1,6 +1,8 @@
@@ -458,11 +118,56 @@ index 5d5417e..1c5dda0 100644
  	gen2_render.c \
  	gen2_render.h \
  	gen3_render.c \
+diff --git a/src/sna/kgem.c b/src/sna/kgem.c
+index e001b01..323fe39 100644
+--- a/src/sna/kgem.c
++++ b/src/sna/kgem.c
+@@ -168,7 +168,9 @@ struct local_i915_gem_caching {
+ };
+ 
+ #define LOCAL_I915_GEM_SET_CACHING	0x2f
++#define LOCAL_I915_GEM_GET_CACHING	0x30
+ #define LOCAL_IOCTL_I915_GEM_SET_CACHING DRM_IOW(DRM_COMMAND_BASE + LOCAL_I915_GEM_SET_CACHING, struct local_i915_gem_caching)
++#define LOCAL_IOCTL_I915_GEM_GET_CACHING DRM_IOWR(DRM_COMMAND_BASE + LOCAL_I915_GEM_GET_CACHING, struct local_i915_gem_caching)
+ 
+ struct kgem_buffer {
+ 	struct kgem_bo base;
+@@ -454,6 +456,18 @@ bool __kgem_busy(struct kgem *kgem, int handle)
+ 	return busy.busy;
+ }
+ 
++int __kgem_bo_get_caching(struct kgem *kgem, struct kgem_bo *bo)
++{
++	struct local_i915_gem_caching arg;
++
++	VG_CLEAR(arg);
++	arg.handle = bo->handle;
++	arg.caching = kgem->has_llc;
++	(void)drmIoctl(kgem->fd, LOCAL_IOCTL_I915_GEM_GET_CACHING, &arg);
++
++	return arg.caching;
++}
++
+ static void kgem_bo_retire(struct kgem *kgem, struct kgem_bo *bo)
+ {
+ 	DBG(("%s: retiring bo handle=%d (needed flush? %d), rq? %d [busy?=%d]\n",
+diff --git a/src/sna/kgem.h b/src/sna/kgem.h
+index f29f81a..44da0dc 100644
+--- a/src/sna/kgem.h
++++ b/src/sna/kgem.h
+@@ -602,6 +602,7 @@ static inline bool kgem_bo_is_snoop(struct kgem_bo *bo)
+ 
+ void kgem_bo_undo(struct kgem *kgem, struct kgem_bo *bo);
+ 
++int __kgem_bo_get_caching(struct kgem *kgem, struct kgem_bo *bo);
+ bool __kgem_busy(struct kgem *kgem, int handle);
+ 
+ static inline void kgem_bo_mark_busy(struct kgem_bo *bo, int ring)
 diff --git a/src/sna/sna.h b/src/sna/sna.h
-index fe84074..d9ebd75 100644
+index c47a8ab..1e74d3b 100644
 --- a/src/sna/sna.h
 +++ b/src/sna/sna.h
-@@ -283,6 +283,7 @@ struct sna {
+@@ -288,6 +288,7 @@ struct sna {
  	EntityInfoPtr pEnt;
  	struct pci_device *PciInfo;
  	const struct intel_device_info *info;
@@ -470,7 +175,7 @@ index fe84074..d9ebd75 100644
  
  	ScreenBlockHandlerProcPtr BlockHandler;
  	ScreenWakeupHandlerProcPtr WakeupHandler;
-@@ -420,6 +421,17 @@ CARD32 sna_render_format_for_depth(int depth);
+@@ -425,6 +426,17 @@ CARD32 sna_render_format_for_depth(int depth);
  
  void sna_debug_flush(struct sna *sna);
  
@@ -488,7 +193,7 @@ index fe84074..d9ebd75 100644
  static inline bool
  get_drawable_deltas(DrawablePtr drawable, PixmapPtr pixmap, int16_t *x, int16_t *y)
  {
-@@ -930,4 +942,18 @@ void sna_image_composite(pixman_op_t        op,
+@@ -946,4 +958,18 @@ void sna_image_composite(pixman_op_t        op,
  			 uint16_t           width,
  			 uint16_t           height);
  
@@ -508,10 +213,10 @@ index fe84074..d9ebd75 100644
 +
  #endif /* _SNA_H */
 diff --git a/src/sna/sna_dri.c b/src/sna/sna_dri.c
-index 1569251..d0db3de 100644
+index 0405186..ddb321c 100644
 --- a/src/sna/sna_dri.c
 +++ b/src/sna/sna_dri.c
-@@ -2272,6 +2272,13 @@ out_complete:
+@@ -2276,6 +2276,13 @@ out_complete:
  }
  #endif
  
@@ -525,7 +230,7 @@ index 1569251..d0db3de 100644
  static bool has_i830_dri(void)
  {
  	return access(DRI_DRIVER_PATH "/i830_dri.so", R_OK) == 0;
-@@ -2347,6 +2354,13 @@ bool sna_dri_open(struct sna *sna, ScreenPtr screen)
+@@ -2351,6 +2358,13 @@ bool sna_dri_open(struct sna *sna, ScreenPtr screen)
  	info.ReuseBufferNotify = NULL;
  #endif
  
@@ -540,20 +245,20 @@ index 1569251..d0db3de 100644
  	info.version = 10;
  	info.AsyncSwap = sna_dri_async_swap;
 diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
-index 83a5bba..6fe49c9 100644
+index 2a4a830..44eea33 100644
 --- a/src/sna/sna_driver.c
 +++ b/src/sna/sna_driver.c
-@@ -430,6 +430,9 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
+@@ -442,6 +442,9 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
  		goto cleanup;
  	}
  
 +	if (!sna_xmir_create(sna))
-+		return FALSE;
++		goto cleanup;
 +
  	/* Sanity check */
  	if (hosted() && (sna->flags & SNA_IS_HOSTED) == 0) {
  		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
-@@ -437,9 +440,14 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
+@@ -449,9 +452,14 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
  		goto cleanup;
  	}
  
@@ -570,17 +275,17 @@ index 83a5bba..6fe49c9 100644
  
  	if (!xf86SetDepthBpp(scrn, preferred_depth, 0, 0,
  			     Support32bppFb |
-@@ -475,6 +483,9 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
+@@ -488,6 +496,9 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
  
  	intel_detect_chipset(scrn, sna->pEnt, sna->PciInfo);
  
 +	if (!sna_xmir_pre_init(sna))
-+		return FALSE;
++		goto cleanup;
 +
  	kgem_init(&sna->kgem, fd, sna->PciInfo, sna->info->gen);
  	if (xf86ReturnOptValBool(sna->Options, OPTION_ACCEL_DISABLE, FALSE) ||
  	    !sna_option_cast_to_bool(sna, OPTION_ACCEL_METHOD, TRUE)) {
-@@ -558,6 +569,8 @@ sna_block_handler(BLOCKHANDLER_ARGS_DECL)
+@@ -571,6 +582,8 @@ sna_block_handler(BLOCKHANDLER_ARGS_DECL)
  
  	if (*tv == NULL || ((*tv)->tv_usec | (*tv)->tv_sec))
  		sna_accel_block_handler(sna, tv);
@@ -589,21 +294,21 @@ index 83a5bba..6fe49c9 100644
  }
  
  static void
-@@ -898,6 +911,8 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
+@@ -918,6 +931,8 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
+ 	if (!miDCInitialize(screen, xf86GetPointerScreenFuncs()))
  		return FALSE;
- 	}
  
-+	sna_xmir_init(sna, screen);
++	sna_xmir_init(sna, screen); /* after DirectCursor is initialised */
 +
- 	xf86SetBlackWhitePixels(screen);
- 
- 	xf86SetBackingStore(screen);
+ 	if ((sna->flags & SNA_IS_HOSTED) == 0 &&
+ 	    xf86_cursors_init(screen, SNA_CURSOR_X, SNA_CURSOR_Y,
+ 			       HARDWARE_CURSOR_TRUECOLOR_AT_8BPP |
 diff --git a/src/sna/sna_xmir.c b/src/sna/sna_xmir.c
 new file mode 100644
-index 0000000..a7c882d
+index 0000000..1e38a41
 --- /dev/null
 +++ b/src/sna/sna_xmir.c
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,187 @@
 +/***************************************************************************
 +
 + Copyright 2013 Intel Corporation.  All Rights Reserved.
@@ -656,76 +361,100 @@ index 0000000..a7c882d
 +#define FORCE_FULL_REDRAW 0
 +
 +static void
-+sna_xmir_copy_to_mir(WindowPtr win, RegionPtr region)
++sna_xmir_copy_to_mir(xmir_window *xmir_win, RegionPtr region)
 +{
-+	PixmapPtr src = get_window_pixmap(win);
++	PixmapPtr src = get_window_pixmap(xmir_window_to_windowptr(xmir_win));
 +	struct sna *sna = to_sna_from_pixmap(src);
++	BoxPtr dst_box = xmir_window_get_drawable_region(xmir_win);
 +	struct sna_pixmap *priv;
 +	struct kgem_bo *bo;
-+	BoxRec box, *boxes;
++	BoxRec *box;
 +	int16_t sx, sy;
++	int pitch = xmir_window_get_stride(xmir_win);
 +	int nbox;
 +
-+	if (wedged(sna)) /* XXX need pitch/size for CPU copy fallback */
++#if FORCE_FULL_REDRAW
++	RegionRec whole = { { 0, 0, src->drawable.width, src->drawable.height } };
++	region = &whole;
++#endif
++
++	assert(region);
++
++	DBG(("%s: copying region (%d, %d), (%d, %d) x %d, dst box=(%d, %d), (%d, %d), pitch=%d, fd=%d\n",
++	     __FUNCTION__,
++	     region->extents.x1, region->extents.y1,
++	     region->extents.x2, region->extents.y2,
++	     REGION_NUM_RECTS(region),
++	     dst_box->x1, dst_box->y1,
++	     dst_box->x2, dst_box->y2,
++	     pitch, xmir_window_get_fd(xmir_win)));
++
++	box = REGION_RECTS(region);
++	nbox = REGION_NUM_RECTS(region);
++	if (nbox == 0)
 +		return;
 +
-+	priv = sna_pixmap_force_to_gpu(src, MOVE_READ);
-+	if (priv == NULL)
-+		return;
-+
-+	/* XXX size and pitch are bogus, but only used for sanity checks */
-+
++	/* XXX size is bogus, but only used for sanity checks */
 +	bo = kgem_create_for_prime(&sna->kgem,
-+				   xmir_prime_fd_for_window(win),
-+				   priv->gpu_bo->pitch * src->drawable.height);
++				   xmir_window_get_fd(xmir_win),
++				   pitch * (dst_box->y2 - dst_box->y1));
 +	if (bo == NULL)
 +		return;
 +
-+	bo->pitch = priv->gpu_bo->pitch;
-+
-+	if (FORCE_FULL_REDRAW || region == NULL) {
-+		box.x1 = box.y1 = 0;
-+		box.x2 = src->drawable.width;
-+		box.y2 = src->drawable.height;
-+		boxes = &box;
-+		nbox = 1;
-+	} else {
-+		boxes = REGION_RECTS(region);
-+		nbox = REGION_NUM_RECTS(region);
-+	}
++	bo->pitch = pitch;
++	if (__kgem_bo_get_caching(&sna->kgem, bo) != 1)
++		bo->scanout = true; /* presume the worst */
 +
 +	get_window_deltas(src, &sx, &sy);
-+	if (sna->render.copy_boxes(sna, GXcopy,
++
++	priv = sna_pixmap_move_to_gpu(src, MOVE_READ);
++	if (priv &&
++	    sna->render.copy_boxes(sna, GXcopy,
 +				   src, priv->gpu_bo, sx, sy,
-+				   src, bo, 0, 0,
-+				   boxes, nbox, COPY_LAST)) {
++				   src, bo, -dst_box->x1, -dst_box->y1,
++				   box, nbox, COPY_LAST)) {
 +		kgem_submit(&sna->kgem);
-+		xmir_submit_rendering_for_window(win, region);
++		nbox = 0;
++	} else {
++		void *dst;
++
++		DBG(("%s: fallback\n", __FUNCTION__));
++
++		if (sx | sy)
++			RegionTranslate(region, sx, sy);
++
++		dst = kgem_bo_map__gtt(&sna->kgem, bo);
++		if (dst &&
++		    sna_drawable_move_region_to_cpu(&src->drawable,
++						    region, MOVE_READ)) {
++			int16_t dx = sx + dst_box->x1;
++			int16_t dy = sy + dst_box->y1;
++			kgem_bo_sync__gtt(&sna->kgem, bo);
++			do {
++				memcpy_blt(src->devPrivate.ptr, dst,
++					   src->drawable.bitsPerPixel,
++					   src->devKind, bo->pitch,
++					   box->x1, box->y1,
++					   box->x1 - dx, box->y1 - dy,
++					   box->x2 - box->x1,
++					   box->y2 - box->y1);
++			} while (--nbox);
++		}
++
++		if (sx | sy)
++			RegionTranslate(region, -sx, -sy);
 +	}
 +
++	if (nbox == 0)
++		xmir_submit_rendering_for_window(xmir_win, region);
++
++	bo->scanout = false; /* but don't confuse our caching! */
 +	kgem_bo_destroy(&sna->kgem, bo);
-+}
-+
-+static void
-+sna_xmir_buffer_available(WindowPtr win)
-+{
-+	RegionPtr region = xmir_window_get_dirty(win);
-+	if (RegionNotEmpty(region))
-+		sna_xmir_copy_to_mir(win, region);
-+}
-+
-+static void
-+sna_xmir_submit_dirty_window(WindowPtr win)
-+{
-+	if (!xmir_window_has_free_buffer(win))
-+		return;
-+
-+	sna_xmir_copy_to_mir(win, xmir_window_get_dirty(win));
 +}
 +
 +static const xmir_driver sna_xmir_driver = {
 +	XMIR_DRIVER_VERSION,
-+	sna_xmir_buffer_available
++	sna_xmir_copy_to_mir
 +};
 +
 +bool sna_xmir_create(struct sna *sna)
@@ -763,386 +492,7 @@ index 0000000..a7c882d
 +		return;
 +
 +	xmir_screen_for_each_damaged_window(sna->xmir,
-+					    sna_xmir_submit_dirty_window);
++					    sna_xmir_copy_to_mir);
 +}
 +
 +#endif
-commit 5c4c1309ed043cce920c97633c5d5228d60308b8
-Author: Christopher James Halse Rogers <raof@ubuntu.com>
-Date:   Thu Aug 22 11:17:04 2013 +1000
-
-    Update to new XMir API
-
-diff --git a/src/sna/sna_xmir.c b/src/sna/sna_xmir.c
-index a7c882d..4ecdad9 100644
---- a/src/sna/sna_xmir.c
-+++ b/src/sna/sna_xmir.c
-@@ -50,9 +50,9 @@
- #define FORCE_FULL_REDRAW 0
- 
- static void
--sna_xmir_copy_to_mir(WindowPtr win, RegionPtr region)
-+sna_xmir_copy_to_mir(xmir_window *xmir_win, RegionPtr region)
- {
--	PixmapPtr src = get_window_pixmap(win);
-+	PixmapPtr src = get_window_pixmap(xmir_window_to_windowptr(xmir_win));
- 	struct sna *sna = to_sna_from_pixmap(src);
- 	struct sna_pixmap *priv;
- 	struct kgem_bo *bo;
-@@ -70,7 +70,7 @@ sna_xmir_copy_to_mir(WindowPtr win, RegionPtr region)
- 	/* XXX size and pitch are bogus, but only used for sanity checks */
- 
- 	bo = kgem_create_for_prime(&sna->kgem,
--				   xmir_prime_fd_for_window(win),
-+				   xmir_window_get_fd(xmir_win),
- 				   priv->gpu_bo->pitch * src->drawable.height);
- 	if (bo == NULL)
- 		return;
-@@ -94,32 +94,15 @@ sna_xmir_copy_to_mir(WindowPtr win, RegionPtr region)
- 				   src, bo, 0, 0,
- 				   boxes, nbox, COPY_LAST)) {
- 		kgem_submit(&sna->kgem);
--		xmir_submit_rendering_for_window(win, region);
-+		xmir_submit_rendering_for_window(xmir_win, region);
- 	}
- 
- 	kgem_bo_destroy(&sna->kgem, bo);
- }
- 
--static void
--sna_xmir_buffer_available(WindowPtr win)
--{
--	RegionPtr region = xmir_window_get_dirty(win);
--	if (RegionNotEmpty(region))
--		sna_xmir_copy_to_mir(win, region);
--}
--
--static void
--sna_xmir_submit_dirty_window(WindowPtr win)
--{
--	if (!xmir_window_has_free_buffer(win))
--		return;
--
--	sna_xmir_copy_to_mir(win, xmir_window_get_dirty(win));
--}
--
- static const xmir_driver sna_xmir_driver = {
- 	XMIR_DRIVER_VERSION,
--	sna_xmir_buffer_available
-+	sna_xmir_copy_to_mir
- };
- 
- bool sna_xmir_create(struct sna *sna)
-@@ -157,7 +140,7 @@ void sna_xmir_post_damage(struct sna *sna)
- 		return;
- 
- 	xmir_screen_for_each_damaged_window(sna->xmir,
--					    sna_xmir_submit_dirty_window);
-+					    sna_xmir_copy_to_mir);
- }
- 
- #endif
-commit 1edd7a1d8e54daf628df1317e65c96c903c72f85
-Author: Christopher James Halse Rogers <raof@ubuntu.com>
-Date:   Fri Aug 23 10:20:49 2013 +1000
-
-    Don't call sna_mode_update when SNA_IS_HOSTED
-
-diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
-index 6fe49c9..7870a47 100644
---- a/src/sna/sna_driver.c
-+++ b/src/sna/sna_driver.c
-@@ -207,7 +207,8 @@ static Bool sna_become_master(struct sna *sna)
- 		sna_set_fallback_mode(scrn);
- 	}
- 
--	sna_mode_update(sna);
-+	if (!(sna->flags & SNA_IS_HOSTED))
-+		sna_mode_update(sna);
- 	return TRUE;
- }
- 
-commit 0c51dfcf7f2ef610fd3dc80bce71fc8c0a6f47cc
-Author: Christopher James Halse Rogers <raof@ubuntu.com>
-Date:   Fri Aug 23 14:36:48 2013 +1000
-
-    Fix rendering when copying from xmir_win that only partially covers the drawable
-
-diff --git a/src/sna/sna_xmir.c b/src/sna/sna_xmir.c
-index 4ecdad9..d232c24 100644
---- a/src/sna/sna_xmir.c
-+++ b/src/sna/sna_xmir.c
-@@ -57,7 +57,7 @@ sna_xmir_copy_to_mir(xmir_window *xmir_win, RegionPtr region)
- 	struct sna_pixmap *priv;
- 	struct kgem_bo *bo;
- 	BoxRec box, *boxes;
--	int16_t sx, sy;
-+	int16_t sx, sy, dx, dy;
- 	int nbox;
- 
- 	if (wedged(sna)) /* XXX need pitch/size for CPU copy fallback */
-@@ -89,9 +89,11 @@ sna_xmir_copy_to_mir(xmir_window *xmir_win, RegionPtr region)
- 	}
- 
- 	get_window_deltas(src, &sx, &sy);
-+	xmir_window_get_drawable_offset(xmir_win, &dx, &dy);
-+
- 	if (sna->render.copy_boxes(sna, GXcopy,
- 				   src, priv->gpu_bo, sx, sy,
--				   src, bo, 0, 0,
-+				   src, bo, dx, dy,
- 				   boxes, nbox, COPY_LAST)) {
- 		kgem_submit(&sna->kgem);
- 		xmir_submit_rendering_for_window(xmir_win, region);
-commit 3bab5911709da671585d6c5569173c92a6a1dc7c
-Author: Christopher James Halse Rogers <raof@ubuntu.com>
-Date:   Sat Aug 24 14:25:37 2013 +1000
-
-    Fixup rendering of partial xmir_windows harder
-
-diff --git a/src/sna/kgem.c b/src/sna/kgem.c
-index 98e801a..14bfdc8 100644
---- a/src/sna/kgem.c
-+++ b/src/sna/kgem.c
-@@ -1439,14 +1439,14 @@ void kgem_get_tile_size(struct kgem *kgem, int tiling,
- 	}
- }
- 
--static uint32_t kgem_surface_size(struct kgem *kgem,
--				  bool relaxed_fencing,
--				  unsigned flags,
--				  uint32_t width,
--				  uint32_t height,
--				  uint32_t bpp,
--				  uint32_t tiling,
--				  uint32_t *pitch)
-+uint32_t kgem_surface_size(struct kgem *kgem,
-+			   bool relaxed_fencing,
-+			   unsigned flags,
-+			   uint32_t width,
-+			   uint32_t height,
-+			   uint32_t bpp,
-+			   uint32_t tiling,
-+			   uint32_t *pitch)
- {
- 	uint32_t tile_width, tile_height;
- 	uint32_t size;
-diff --git a/src/sna/kgem.h b/src/sna/kgem.h
-index e08f842..74d3cff 100644
---- a/src/sna/kgem.h
-+++ b/src/sna/kgem.h
-@@ -243,6 +243,15 @@ struct kgem_bo *kgem_create_map(struct kgem *kgem,
- 				void *ptr, uint32_t size,
- 				bool read_only);
- 
-+uint32_t kgem_surface_size(struct kgem *kgem,
-+			   bool relaxed_fencing,
-+			   unsigned flags,
-+			   uint32_t width,
-+			   uint32_t height,
-+			   uint32_t bpp,
-+			   uint32_t tiling,
-+			   uint32_t *pitch);
-+
- struct kgem_bo *kgem_create_for_name(struct kgem *kgem, uint32_t name);
- struct kgem_bo *kgem_create_for_prime(struct kgem *kgem, int name, uint32_t size);
- int kgem_bo_export_to_prime(struct kgem *kgem, struct kgem_bo *bo);
-diff --git a/src/sna/sna_xmir.c b/src/sna/sna_xmir.c
-index d232c24..9bdd619 100644
---- a/src/sna/sna_xmir.c
-+++ b/src/sna/sna_xmir.c
-@@ -57,7 +57,9 @@ sna_xmir_copy_to_mir(xmir_window *xmir_win, RegionPtr region)
- 	struct sna_pixmap *priv;
- 	struct kgem_bo *bo;
- 	BoxRec box, *boxes;
--	int16_t sx, sy, dx, dy;
-+	BoxPtr dst_box;
-+	int16_t sx, sy;
-+	uint32_t pitch;
- 	int nbox;
- 
- 	if (wedged(sna)) /* XXX need pitch/size for CPU copy fallback */
-@@ -67,15 +69,24 @@ sna_xmir_copy_to_mir(xmir_window *xmir_win, RegionPtr region)
- 	if (priv == NULL)
- 		return;
- 
-+	dst_box = xmir_window_get_drawable_region(xmir_win);
- 	/* XXX size and pitch are bogus, but only used for sanity checks */
- 
- 	bo = kgem_create_for_prime(&sna->kgem,
- 				   xmir_window_get_fd(xmir_win),
--				   priv->gpu_bo->pitch * src->drawable.height);
-+				   priv->gpu_bo->pitch * (dst_box->y2 - dst_box->y1));
- 	if (bo == NULL)
- 		return;
- 
--	bo->pitch = priv->gpu_bo->pitch;
-+	kgem_surface_size(&sna->kgem, FALSE,
-+			  KGEM_CAN_CREATE_GPU | KGEM_CAN_CREATE_GTT,
-+			  dst_box->x2 - dst_box->x1,
-+			  dst_box->y2 - dst_box->y1,
-+			  src->drawable.bitsPerPixel,
-+			  bo->tiling,
-+			  &pitch);
-+
-+	bo->pitch = pitch;
- 
- 	if (FORCE_FULL_REDRAW || region == NULL) {
- 		box.x1 = box.y1 = 0;
-@@ -89,11 +100,10 @@ sna_xmir_copy_to_mir(xmir_window *xmir_win, RegionPtr region)
- 	}
- 
- 	get_window_deltas(src, &sx, &sy);
--	xmir_window_get_drawable_offset(xmir_win, &dx, &dy);
- 
- 	if (sna->render.copy_boxes(sna, GXcopy,
- 				   src, priv->gpu_bo, sx, sy,
--				   src, bo, dx, dy,
-+				   src, bo, -dst_box->x1, -dst_box->y1,
- 				   boxes, nbox, COPY_LAST)) {
- 		kgem_submit(&sna->kgem);
- 		xmir_submit_rendering_for_window(xmir_win, region);
-commit 09413237f2821e7fd836a0552f3f240bdfd3cccc
-Author: Christopher James Halse Rogers <raof@ubuntu.com>
-Date:   Sun Aug 25 11:56:38 2013 +1000
-
-    Don't try to copy the fbcon if running hosted
-
-diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
-index 7870a47..026d5c4 100644
---- a/src/sna/sna_driver.c
-+++ b/src/sna/sna_driver.c
-@@ -260,7 +260,7 @@ static Bool sna_create_screen_resources(ScreenPtr screen)
- 	screen->SetScreenPixmap(sna->front);
- 
- 	/* Only preserve the fbcon, not any subsequent server regens */
--	if (serverGeneration == 1)
-+	if (serverGeneration == 1 && !(sna->flags & SNA_IS_HOSTED))
- 		sna_copy_fbcon(sna);
- 
- 	if (!sna_become_master(sna)) {
-commit 7bd1d3058c468f94e77aea99e538daf60de5190b
-Author: Christopher James Halse Rogers <raof@ubuntu.com>
-Date:   Sat Aug 24 19:43:32 2013 +1000
-
-    Don't try to find the covering CRTC if SNA_IS_HOSTED
-
-diff --git a/src/sna/sna_display.c b/src/sna/sna_display.c
-index e2bebad..f0807ef 100644
---- a/src/sna/sna_display.c
-+++ b/src/sna/sna_display.c
-@@ -3252,6 +3252,10 @@ sna_covering_crtc(ScrnInfoPtr scrn,
- 	xf86CrtcPtr best_crtc;
- 	int best_coverage, c;
- 
-+	/* If we're hosted we don't own the CRTC */
-+	if (to_sna(scrn)->flags & SNA_IS_HOSTED)
-+		return NULL;
-+
- 	/* If we do not own the VT, we do not own the CRTC either */
- 	if (!scrn->vtSema)
- 		return NULL;
-commit c197dbe099d7fb8697091e65ac7e21df8622ba6b
-Author: Christopher James Halse Rogers <raof@ubuntu.com>
-Date:   Sun Aug 25 12:19:27 2013 +1000
-
-    Unconditionally set sna->front in sna_set_screen_pixmap
-
-diff --git a/src/sna/sna_accel.c b/src/sna/sna_accel.c
-index 04b063c..051207c 100644
---- a/src/sna/sna_accel.c
-+++ b/src/sna/sna_accel.c
-@@ -15252,7 +15252,7 @@ sna_set_screen_pixmap(PixmapPtr pixmap)
- 	PixmapPtr old_front = pixmap->drawable.pScreen->devPrivate;
- 	WindowPtr root;
- 
--	assert(pixmap == to_sna_from_pixmap(pixmap)->front);
-+	to_sna_from_pixmap(pixmap)->front = pixmap;
- 
- 	if (old_front)
- 		migrate_dirty_tracking(old_front, pixmap);
-commit 599096c45cd9ce3b72a1941ecd24bb0f8efe2c22
-Author: Christopher James Halse Rogers <raof@ubuntu.com>
-Date:   Sun Aug 25 15:17:28 2013 +1000
-
-    Call xf86_cursors_init with 0,0 max HW cursor size even when nested
-
-diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
-index 026d5c4..58af3d2 100644
---- a/src/sna/sna_driver.c
-+++ b/src/sna/sna_driver.c
-@@ -932,6 +932,12 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
- 			       HARDWARE_CURSOR_UPDATE_UNHIDDEN |
- 			       HARDWARE_CURSOR_ARGB))
- 		xf86DrvMsg(scrn->scrnIndex, X_INFO, "HW Cursor enabled\n");
-+	else {
-+		if (xf86_cursors_init(screen, 0, 0, 0))
-+			xf86DrvMsg(scrn->scrnIndex, X_INFO, "xf86Cursors enabled, HW Cursor disabled\n");
-+		else
-+			xf86DrvMsg(scrn->scrnIndex, X_WARNING, "xf86Cursor initialisation failed\n");
-+	}
- 
- 	/* Must force it before EnterVT, so we are in control of VT and
- 	 * later memory should be bound when allocating, e.g rotate_mem */
-commit 9922021dcc7a665bb8df833ee76814a9d047edae
-Author: Christopher James Halse Rogers <raof@ubuntu.com>
-Date:   Sun Aug 25 20:38:04 2013 +1000
-
-    Fixups
-
-diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
-index 58af3d2..f90c5ef 100644
---- a/src/sna/sna_driver.c
-+++ b/src/sna/sna_driver.c
-@@ -912,8 +912,6 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
- 		return FALSE;
- 	}
- 
--	sna_xmir_init(sna, screen);
--
- 	xf86SetBlackWhitePixels(screen);
- 
- 	xf86SetBackingStore(screen);
-@@ -921,6 +919,8 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
- 	if (!miDCInitialize(screen, xf86GetPointerScreenFuncs()))
- 		return FALSE;
- 
-+	sna_xmir_init(sna, screen);
-+
- 	if ((sna->flags & SNA_IS_HOSTED) == 0 &&
- 	    xf86_cursors_init(screen, SNA_CURSOR_X, SNA_CURSOR_Y,
- 			       HARDWARE_CURSOR_TRUECOLOR_AT_8BPP |
-@@ -932,12 +932,6 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
- 			       HARDWARE_CURSOR_UPDATE_UNHIDDEN |
- 			       HARDWARE_CURSOR_ARGB))
- 		xf86DrvMsg(scrn->scrnIndex, X_INFO, "HW Cursor enabled\n");
--	else {
--		if (xf86_cursors_init(screen, 0, 0, 0))
--			xf86DrvMsg(scrn->scrnIndex, X_INFO, "xf86Cursors enabled, HW Cursor disabled\n");
--		else
--			xf86DrvMsg(scrn->scrnIndex, X_WARNING, "xf86Cursor initialisation failed\n");
--	}
- 
- 	/* Must force it before EnterVT, so we are in control of VT and
- 	 * later memory should be bound when allocating, e.g rotate_mem */
-diff --git a/src/sna/sna_xmir.c b/src/sna/sna_xmir.c
-index 9bdd619..c532b95 100644
---- a/src/sna/sna_xmir.c
-+++ b/src/sna/sna_xmir.c
-@@ -78,15 +78,7 @@ sna_xmir_copy_to_mir(xmir_window *xmir_win, RegionPtr region)
- 	if (bo == NULL)
- 		return;
- 
--	kgem_surface_size(&sna->kgem, FALSE,
--			  KGEM_CAN_CREATE_GPU | KGEM_CAN_CREATE_GTT,
--			  dst_box->x2 - dst_box->x1,
--			  dst_box->y2 - dst_box->y1,
--			  src->drawable.bitsPerPixel,
--			  bo->tiling,
--			  &pitch);
--
--	bo->pitch = pitch;
-+	bo->pitch = xmir_window_get_stride(xmir_win);
- 
- 	if (FORCE_FULL_REDRAW || region == NULL) {
- 		box.x1 = box.y1 = 0;

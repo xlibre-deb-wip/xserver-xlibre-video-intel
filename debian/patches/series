@@ -1,4 +1,13 @@
 Check-for-struct-sysinfo-as-well-as-sys-sysinfo.h.patch
 Link-the-driver-against-pixman.patch
 0001-sna-Make-sure-the-frontbuffer-exists-before-doing-pi.patch
+
+# XMir series
+
+disable-unneeded-functions-when-hosted.patch
+unwrap-legacy-modesetting-when-hosted.patch
+check-hosted-initialisation-succeeds.patch
+fix-spelling-of-caching.patch
+dont-copy-fbcon-if-hosted.patch
+more-modesetting-disablement-when-hosted.patch
 xmir.patch
