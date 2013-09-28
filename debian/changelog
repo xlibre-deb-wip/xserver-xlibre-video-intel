@@ -1,3 +1,10 @@
+xserver-xorg-video-intel (2:2.21.6-0ubuntu4.2) raring-proposed; urgency=low
+
+  * Add hsw-green-xv.patch, backport from 2.21.10 to fix green screens when using XV
+    on Haswell generation GPUs. (LP: #1220645)
+
+ -- Robert Hooker <sarvatt@ubuntu.com>  Fri, 27 Sep 2013 16:25:34 -0400
+
 xserver-xorg-video-intel (2:2.21.6-0ubuntu4.1) raring-proposed; urgency=low
 
   * Added patches to add/fix Haswell pci-id's (LP: #1175533)
