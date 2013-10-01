@@ -108,8 +108,10 @@ static const struct formatinfo {
 	{PICT_x8r8g8b8, 0, MAPSURF_32BIT | MT_32BIT_XRGB8888, false},
 	{PICT_a8b8g8r8, 0, MAPSURF_32BIT | MT_32BIT_ABGR8888, false},
 	{PICT_x8b8g8r8, 0, MAPSURF_32BIT | MT_32BIT_XBGR8888, false},
+#ifdef PICT_a2r10g10b10
 	{PICT_a2r10g10b10, PICT_x2r10g10b10, MAPSURF_32BIT | MT_32BIT_ARGB2101010, false},
 	{PICT_a2b10g10r10, PICT_x2b10g10r10, MAPSURF_32BIT | MT_32BIT_ABGR2101010, false},
+#endif
 	{PICT_r5g6b5, 0, MAPSURF_16BIT | MT_16BIT_RGB565, false},
 	{PICT_b5g6r5, 0, MAPSURF_16BIT | MT_16BIT_RGB565, true},
 	{PICT_a1r5g5b5, PICT_x1r5g5b5, MAPSURF_16BIT | MT_16BIT_ARGB1555, false},
@@ -206,10 +208,12 @@ static bool gen3_check_dst_format(uint32_t format)
 	case PICT_x1r5g5b5:
 	case PICT_a1b5g5r5:
 	case PICT_x1b5g5r5:
+#ifdef PICT_a2r10g10b10
 	case PICT_a2r10g10b10:
 	case PICT_x2r10g10b10:
 	case PICT_a2b10g10r10:
 	case PICT_x2b10g10r10:
+#endif
 	case PICT_a8:
 	case PICT_a4r4g4b4:
 	case PICT_x4r4g4b4:
@@ -229,8 +233,10 @@ static bool gen3_dst_rb_reversed(uint32_t format)
 	case PICT_r5g6b5:
 	case PICT_a1r5g5b5:
 	case PICT_x1r5g5b5:
+#ifdef PICT_a2r10g10b10
 	case PICT_a2r10g10b10:
 	case PICT_x2r10g10b10:
+#endif
 	case PICT_a8:
 	case PICT_a4r4g4b4:
 	case PICT_x4r4g4b4:
@@ -261,11 +267,13 @@ static uint32_t gen3_get_dst_format(uint32_t format)
 	case PICT_a1b5g5r5:
 	case PICT_x1b5g5r5:
 		return BIAS | COLR_BUF_ARGB1555;
+#ifdef PICT_a2r10g10b10
 	case PICT_a2r10g10b10:
 	case PICT_x2r10g10b10:
 	case PICT_a2b10g10r10:
 	case PICT_x2b10g10r10:
 		return BIAS | COLR_BUF_ARGB2AAA;
+#endif
 	case PICT_a8:
 		return BIAS | COLR_BUF_8BIT;
 	case PICT_a4r4g4b4:
@@ -285,8 +293,10 @@ static bool gen3_check_format(PicturePtr p)
 	case PICT_x8r8g8b8:
 	case PICT_a8b8g8r8:
 	case PICT_x8b8g8r8:
+#ifdef PICT_a2r10g10b10
 	case PICT_a2r10g10b10:
 	case PICT_a2b10g10r10:
+#endif
 	case PICT_r5g6b5:
 	case PICT_b5g6r5:
 	case PICT_a1r5g5b5:
@@ -312,10 +322,12 @@ static bool gen3_check_xformat(PicturePtr p)
 	case PICT_x1r5g5b5:
 	case PICT_a1b5g5r5:
 	case PICT_x1b5g5r5:
+#ifdef PICT_a2r10g10b10
 	case PICT_a2r10g10b10:
 	case PICT_x2r10g10b10:
 	case PICT_a2b10g10r10:
 	case PICT_x2b10g10r10:
+#endif
 	case PICT_a8:
 	case PICT_a4r4g4b4:
 	case PICT_x4r4g4b4:
@@ -2293,7 +2305,7 @@ static void gen3_vertex_close(struct sna *sna)
 			sna->render.vertices = sna->render.vertex_data;
 			sna->render.vertex_size = ARRAY_SIZE(sna->render.vertex_data);
 			free_bo = bo;
-		} else if (IS_CPU_MAP(bo->map)) {
+		} else if (sna->render.vertices == MAP(bo->map__cpu)) {
 			DBG(("%s: converting CPU map to GTT\n", __FUNCTION__));
 			sna->render.vertices = kgem_bo_map__gtt(&sna->kgem, bo);
 			if (sna->render.vertices == NULL) {
@@ -3107,52 +3119,6 @@ gen3_composite_picture(struct sna *sna,
 				    x, y, w, h, dst_x, dst_y);
 }
 
-static inline bool
-source_use_blt(struct sna *sna, PicturePtr picture)
-{
-	/* If it is a solid, try to use the BLT paths */
-	if (!picture->pDrawable)
-		return picture->pSourcePict->type == SourcePictTypeSolidFill;
-
-	if (picture->pDrawable->width  == 1 &&
-	    picture->pDrawable->height == 1 &&
-	    picture->repeat)
-		return true;
-
-	if (too_large(picture->pDrawable->width, picture->pDrawable->height))
-		return true;
-
-	return !is_gpu(sna, picture->pDrawable, PREFER_GPU_RENDER);
-}
-
-static bool
-try_blt(struct sna *sna,
-	PicturePtr dst,
-	PicturePtr src,
-	int width, int height)
-{
-	if (sna->kgem.mode != KGEM_RENDER) {
-		DBG(("%s: already performing BLT\n", __FUNCTION__));
-		return true;
-	}
-
-	if (too_large(width, height)) {
-		DBG(("%s: operation too large for 3D pipe (%d, %d)\n",
-		     __FUNCTION__, width, height));
-		return true;
-	}
-
-	if (too_large(dst->pDrawable->width, dst->pDrawable->height)) {
-		DBG(("%s: target too large for 3D pipe (%d, %d)\n",
-		     __FUNCTION__,
-		     dst->pDrawable->width, dst->pDrawable->height));
-		return true;
-	}
-
-	/* is the source picture only in cpu memory e.g. a shm pixmap? */
-	return source_use_blt(sna, src);
-}
-
 static void
 gen3_align_vertex(struct sna *sna,
 		  const struct sna_composite_op *op)
@@ -3518,7 +3484,6 @@ gen3_render_composite(struct sna *sna,
 	 * 3D -> 2D context switch.
 	 */
 	if (mask == NULL &&
-	    try_blt(sna, dst, src, width, height) &&
 	    sna_blt_composite(sna,
 			      op, src, dst,
 			      src_x, src_y,

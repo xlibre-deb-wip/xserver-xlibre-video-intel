@@ -25,6 +25,10 @@
  *
  */
 
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #include "sna.h"
 
 #include <unistd.h>
@@ -208,7 +212,10 @@ int sna_use_threads(int width, int height, int threshold)
 	if (max_threads <= 0)
 		return 1;
 
-	num_threads = height / (128/width + 1) / threshold-1;
+	if (width < 128)
+		height /= 128/width;
+
+	num_threads = height * max_threads / threshold - 1;
 	if (num_threads <= 0)
 		return 1;
 
@@ -251,7 +258,7 @@ void sna_image_composite(pixman_op_t        op,
 {
 	int num_threads;
 
-	num_threads = sna_use_threads(width, height, 16);
+	num_threads = sna_use_threads(width, height, 32);
 	if (num_threads <= 1) {
 		pixman_image_composite(op, src, mask, dst,
 				       src_x, src_y,

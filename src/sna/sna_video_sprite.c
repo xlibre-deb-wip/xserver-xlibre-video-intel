@@ -48,12 +48,13 @@
 
 #define MAKE_ATOM(a) MakeAtom(a, sizeof(a) - 1, true)
 
-static Atom xvColorKey;
+static Atom xvColorKey, xvAlwaysOnTop;
 
 static XvFormatRec formats[] = { {15}, {16}, {24} };
-static const XvImageRec images[] = { XVIMAGE_YUY2, XVIMAGE_UYVY, XVMC_YUV };
+static const XvImageRec images[] = { XVIMAGE_YUY2, XVIMAGE_UYVY, XVMC_RGB888, XVMC_RGB565 };
 static const XvAttributeRec attribs[] = {
 	{ XvSettable | XvGettable, 0, 0xffffff, (char *)"XV_COLORKEY" },
+	{ XvSettable | XvGettable, 0, 1, (char *)"XV_ALWAYS_ON_TOP" },
 };
 
 static int sna_video_sprite_stop(ClientPtr client,
@@ -72,8 +73,13 @@ static int sna_video_sprite_stop(ClientPtr client,
 		xf86DrvMsg(video->sna->scrn->scrnIndex, X_ERROR,
 			   "failed to disable plane\n");
 
+	if (video->bo)
+		kgem_bo_destroy(&video->sna->kgem, video->bo);
+	video->bo = NULL;
+
 	video->plane = 0;
 	sna_window_set_port((WindowPtr)draw, NULL);
+
 	return Success;
 }
 
@@ -87,7 +93,12 @@ static int sna_video_sprite_set_attr(ClientPtr client,
 	if (attribute == xvColorKey) {
 		video->color_key_changed = true;
 		video->color_key = value;
-		DBG(("COLORKEY = %d\n", value));
+		DBG(("COLORKEY = %ld\n", (long)value));
+	} else if (attribute == xvAlwaysOnTop) {
+		DBG(("%s: ALWAYS_ON_TOP: %d -> %d\n", __FUNCTION__,
+		     video->AlwaysOnTop, !!value));
+		video->color_key_changed = true;
+		video->AlwaysOnTop = !!value;
 	} else
 		return BadMatch;
 
@@ -103,6 +114,8 @@ static int sna_video_sprite_get_attr(ClientPtr client,
 
 	if (attribute == xvColorKey)
 		*value = video->color_key;
+	else if (attribute == xvAlwaysOnTop)
+		*value = video->AlwaysOnTop;
 	else
 		return BadMatch;
 
@@ -189,6 +202,8 @@ sna_video_sprite_show(struct sna *sna,
 {
 	struct drm_mode_set_plane s;
 
+	/* XXX handle video spanning multiple CRTC */
+
 	VG_CLEAR(s);
 	s.plane_id = sna_crtc_to_plane(crtc);
 
@@ -199,18 +214,23 @@ sna_video_sprite_show(struct sna *sna,
 		frame->height = tmp;
 	}
 
-#if defined(DRM_I915_SET_SPRITE_DESTKEY)
+#if defined(DRM_I915_SET_SPRITE_COLORKEY)
 	if (video->color_key_changed || video->plane != s.plane_id) {
-		struct drm_intel_set_sprite_destkey set;
+		struct drm_intel_sprite_colorkey set;
 
 		DBG(("%s: updating color key: %x\n",
 		     __FUNCTION__, video->color_key));
 
 		set.plane_id = s.plane_id;
-		set.value = video->color_key;
+		set.min_value = video->color_key;
+		set.max_value = video->color_key; /* not used for destkey */
+		set.channel_mask = 0x7 << 24 | 0xff << 16 | 0xff << 8 | 0xff << 0;
+		set.flags = 0;
+		if (!video->AlwaysOnTop)
+			set.flags = I915_SET_COLORKEY_DESTINATION;
 
 		if (drmIoctl(sna->kgem.fd,
-			     DRM_IOCTL_I915_SET_SPRITE_DESTKEY,
+			     DRM_IOCTL_I915_SET_SPRITE_COLORKEY,
 			     &set))
 			xf86DrvMsg(sna->scrn->scrnIndex, X_ERROR,
 				   "failed to update color key\n");
@@ -223,7 +243,17 @@ sna_video_sprite_show(struct sna *sna,
 		uint32_t offsets[4], pitches[4], handles[4];
 		uint32_t pixel_format;
 
+		handles[0] = frame->bo->handle;
+		pitches[0] = frame->pitch[0];
+		offsets[0] = 0;
+
 		switch (frame->id) {
+		case FOURCC_RGB565:
+			pixel_format = DRM_FORMAT_RGB565;
+			break;
+		case FOURCC_RGB888:
+			pixel_format = DRM_FORMAT_XRGB8888;
+			break;
 		case FOURCC_UYVY:
 			pixel_format = DRM_FORMAT_UYVY;
 			break;
@@ -233,13 +263,9 @@ sna_video_sprite_show(struct sna *sna,
 			break;
 		}
 
-		handles[0] = frame->bo->handle;
-		pitches[0] = frame->pitch[0];
-		offsets[0] = 0;
-
 		DBG(("%s: creating new fb for handle=%d, width=%d, height=%d, stride=%d\n",
 		     __FUNCTION__, frame->bo->handle,
-		     frame->width, frame->height, frame->pitch[0]));
+		     frame->width, frame->height, pitches[0]));
 
 		if (drmModeAddFB2(sna->kgem.fd,
 				  frame->width, frame->height, pixel_format,
@@ -279,7 +305,21 @@ sna_video_sprite_show(struct sna *sna,
 	}
 
 	frame->bo->domain = DOMAIN_NONE;
-	video->plane = s.plane_id;
+
+	if (video->plane != s.plane_id) {
+		if (video->plane) {
+			memset(&s, 0, sizeof(s));
+			s.plane_id = video->plane;
+			drmIoctl(video->sna->kgem.fd, DRM_IOCTL_MODE_SETPLANE, &s);
+		}
+		video->plane = s.plane_id;
+	}
+
+	if (video->bo != frame->bo) {
+		if (video->bo)
+			kgem_bo_destroy(&sna->kgem, video->bo);
+		video->bo = kgem_bo_reference(frame->bo);
+	}
 	return true;
 }
 
@@ -310,8 +350,10 @@ static int sna_video_sprite_put_image(ClientPtr client,
 	clip.extents.y2 = clip.extents.y1 + drw_h;
 	clip.data = NULL;
 
-	RegionIntersect(&clip, &clip, gc->pCompositeClip);
-	if (!RegionNotEmpty(&clip))
+	DBG(("%s: always_on_top=%d\n", __FUNCTION__, video->AlwaysOnTop));
+	if (!video->AlwaysOnTop)
+		RegionIntersect(&clip, &clip, gc->pCompositeClip);
+	if (box_empty(&clip.extents))
 		goto invisible;
 
 	DBG(("%s: src=(%d, %d),(%d, %d), dst=(%d, %d),(%d, %d), id=%d, sizep=%dx%d, sync?=%d\n",
@@ -327,8 +369,7 @@ static int sna_video_sprite_put_image(ClientPtr client,
 
 	sna_video_frame_init(video, format->id, width, height, &frame);
 
-	if (!sna_video_clip_helper(sna->scrn, video, &frame,
-				   &crtc, &dst_box,
+	if (!sna_video_clip_helper(video, &frame, &crtc, &dst_box,
 				   src_x, src_y, draw->x + drw_x, draw->y + drw_y,
 				   src_w, src_h, drw_w, drw_h,
 				   &clip))
@@ -344,11 +385,20 @@ static int sna_video_sprite_put_image(ClientPtr client,
 		DBG(("%s: using passthough, name=%d\n",
 		     __FUNCTION__, *(uint32_t *)buf));
 
+		if (*(uint32_t*)buf == 0)
+			goto invisible;
+
 		frame.bo = kgem_create_for_name(&sna->kgem, *(uint32_t*)buf);
 		if (frame.bo == NULL)
 			return BadAlloc;
 
-		assert(kgem_bo_size(frame.bo) >= frame.size);
+		if (kgem_bo_size(frame.bo) < frame.size) {
+			DBG(("%s: bo size=%d, expected=%d\n",
+			     __FUNCTION__, kgem_bo_size(frame.bo), frame.size));
+			kgem_bo_destroy(&sna->kgem, frame.bo);
+			return BadAlloc;
+		}
+
 		frame.image.x1 = 0;
 		frame.image.y1 = 0;
 		frame.image.x2 = frame.width;
@@ -371,10 +421,15 @@ static int sna_video_sprite_put_image(ClientPtr client,
 		DBG(("%s: failed to show video frame\n", __FUNCTION__));
 		ret = BadAlloc;
 	} else {
-		if (!RegionEqual(&video->clip, &clip)) {
+		//xf86XVFillKeyHelperDrawable(draw, video->color_key, &clip);
+		if (!video->AlwaysOnTop && !RegionEqual(&video->clip, &clip) &&
+		    sna_blt_fill_boxes(sna, GXcopy,
+				       __sna_pixmap_get_bo(sna->front),
+				       sna->front->drawable.bitsPerPixel,
+				       video->color_key,
+				       RegionRects(&clip),
+				       RegionNumRects(&clip)))
 			RegionCopy(&video->clip, &clip);
-			xf86XVFillKeyHelperDrawable(draw, video->color_key, &clip);
-		}
 		sna_window_set_port((WindowPtr)draw, port);
 	}
 
@@ -399,6 +454,8 @@ static int sna_video_sprite_query(ClientPtr client,
 				  int *pitches,
 				  int *offsets)
 {
+	struct sna_video *video = port->devPriv.ptr;
+	struct sna_video_frame frame;
 	int size;
 
 	if (*w > IMAGE_MAX_WIDTH)
@@ -406,20 +463,22 @@ static int sna_video_sprite_query(ClientPtr client,
 	if (*h > IMAGE_MAX_HEIGHT)
 		*h = IMAGE_MAX_HEIGHT;
 
-	*w = (*w + 1) & ~1;
 	if (offsets)
 		offsets[0] = 0;
 
 	switch (format->id) {
-	case FOURCC_XVMC:
-		*h = (*h + 1) & ~1;
-		size = sizeof(uint32_t);
+	case FOURCC_RGB888:
+	case FOURCC_RGB565:
+		sna_video_frame_init(video, format->id, *w, *h, &frame);
 		if (pitches)
-			pitches[0] = size;
+			pitches[0] = frame.pitch[0];
+		size = 4;
 		break;
 
-	case FOURCC_YUY2:
 	default:
+		*w = (*w + 1) & ~1;
+		*h = (*h + 1) & ~1;
+
 		size = *w << 1;
 		if (pitches)
 			pitches[0] = size;
@@ -455,6 +514,9 @@ void sna_video_sprite_setup(struct sna *sna, ScreenPtr screen)
 	struct drm_mode_get_plane_res r;
 	struct sna_video *video;
 	XvPortPtr port;
+
+	if (sna->flags & SNA_IS_HOSTED)
+		return;
 
 	memset(&r, 0, sizeof(struct drm_mode_get_plane_res));
 	if (drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_GETPLANERESOURCES, &r))
@@ -494,8 +556,11 @@ void sna_video_sprite_setup(struct sna *sna, ScreenPtr screen)
 						 ARRAY_SIZE(formats));
 	adaptor->nAttributes = ARRAY_SIZE(attribs);
 	adaptor->pAttributes = (XvAttributeRec *)attribs;
-	adaptor->nImages = ARRAY_SIZE(images);
 	adaptor->pImages = (XvImageRec *)images;
+	adaptor->nImages = 3;
+	if (sna->kgem.gen == 071)
+		adaptor->nImages = 4;
+
 	adaptor->ddAllocatePort = sna_xv_alloc_port;
 	adaptor->ddFreePort = sna_xv_free_port;
 	adaptor->ddPutVideo = NULL;
@@ -540,6 +605,7 @@ void sna_video_sprite_setup(struct sna *sna, ScreenPtr screen)
 	RegionNull(&video->clip);
 
 	xvColorKey = MAKE_ATOM("XV_COLORKEY");
+	xvAlwaysOnTop = MAKE_ATOM("XV_ALWAYS_ON_TOP");
 }
 #else
 void sna_video_sprite_setup(struct sna *sna, ScreenPtr screen)

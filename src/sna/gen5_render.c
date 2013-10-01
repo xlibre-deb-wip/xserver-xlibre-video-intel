@@ -282,10 +282,12 @@ static uint32_t gen5_get_card_format(PictFormat format)
 		return GEN5_SURFACEFORMAT_R8G8B8A8_UNORM;
 	case PICT_x8b8g8r8:
 		return GEN5_SURFACEFORMAT_R8G8B8X8_UNORM;
+#ifdef PICT_a2r10g10b10
 	case PICT_a2r10g10b10:
 		return GEN5_SURFACEFORMAT_B10G10R10A2_UNORM;
 	case PICT_x2r10g10b10:
 		return GEN5_SURFACEFORMAT_B10G10R10X2_UNORM;
+#endif
 	case PICT_r8g8b8:
 		return GEN5_SURFACEFORMAT_R8G8B8_UNORM;
 	case PICT_r5g6b5:
@@ -310,9 +312,11 @@ static uint32_t gen5_get_dest_format(PictFormat format)
 	case PICT_a8b8g8r8:
 	case PICT_x8b8g8r8:
 		return GEN5_SURFACEFORMAT_R8G8B8A8_UNORM;
+#ifdef PICT_a2r10g10b10
 	case PICT_a2r10g10b10:
 	case PICT_x2r10g10b10:
 		return GEN5_SURFACEFORMAT_B10G10R10A2_UNORM;
+#endif
 	case PICT_r5g6b5:
 		return GEN5_SURFACEFORMAT_B5G6R5_UNORM;
 	case PICT_x1r5g5b5:
@@ -1607,33 +1611,6 @@ gen5_composite_set_target(struct sna *sna,
 }
 
 static bool
-try_blt(struct sna *sna,
-	PicturePtr dst, PicturePtr src,
-	int width, int height)
-{
-	if (sna->kgem.mode != KGEM_RENDER) {
-		DBG(("%s: already performing BLT\n", __FUNCTION__));
-		return true;
-	}
-
-	if (too_large(width, height)) {
-		DBG(("%s: operation too large for 3D pipe (%d, %d)\n",
-		     __FUNCTION__, width, height));
-		return true;
-	}
-
-	if (too_large(dst->pDrawable->width, dst->pDrawable->height))
-		return true;
-
-	/* The blitter is much faster for solids */
-	if (sna_picture_is_solid(src, NULL))
-		return true;
-
-	/* is the source picture only in cpu memory e.g. a shm pixmap? */
-	return picture_is_cpu(sna, src);
-}
-
-static bool
 is_gradient(PicturePtr picture, bool precise)
 {
 	if (picture->pDrawable)
@@ -1864,7 +1841,6 @@ gen5_render_composite(struct sna *sna,
 	}
 
 	if (mask == NULL &&
-	    try_blt(sna, dst, src, width, height) &&
 	    sna_blt_composite(sna, op,
 			      src, dst,
 			      src_x, src_y,
@@ -2394,7 +2370,10 @@ fallback_blt:
 		kgem_submit(&sna->kgem);
 		if (!kgem_check_bo(&sna->kgem, dst_bo, src_bo, NULL)) {
 			DBG(("%s: aperture check failed\n", __FUNCTION__));
-			goto fallback_tiled_src;
+			kgem_bo_destroy(&sna->kgem, tmp.src.bo);
+			if (tmp.redirect.real_bo)
+				kgem_bo_destroy(&sna->kgem, tmp.dst.bo);
+			goto fallback_blt;
 		}
 	}
 
@@ -2441,8 +2420,6 @@ fallback_blt:
 	kgem_bo_destroy(&sna->kgem, tmp.src.bo);
 	return true;
 
-fallback_tiled_src:
-	kgem_bo_destroy(&sna->kgem, tmp.src.bo);
 fallback_tiled_dst:
 	if (tmp.redirect.real_bo)
 		kgem_bo_destroy(&sna->kgem, tmp.dst.bo);

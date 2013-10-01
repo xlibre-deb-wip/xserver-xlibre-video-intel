@@ -37,22 +37,16 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #ifndef _SNA_H_
 #define _SNA_H_
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
-
 #include <stdint.h>
 
-#include "compiler.h"
-
 #include <xorg-server.h>
+#include <xf86str.h>
 
 #include <xf86Crtc.h>
 #if XF86_CRTC_VERSION >= 5
 #define HAS_PIXMAP_SHARING 1
 #endif
 
-#include <xf86str.h>
 #include <windowstr.h>
 #include <glyphstr.h>
 #include <picturestr.h>
@@ -74,6 +68,11 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #if HAVE_UDEV
 #include <libudev.h>
 #endif
+
+#include <signal.h>
+#include <setjmp.h>
+
+#include "compiler.h"
 
 #if HAS_DEBUG_FULL
 #define DBG(x) ErrorF x
@@ -155,9 +154,9 @@ struct sna_pixmap {
 
 struct sna_glyph {
 	PicturePtr atlas;
-	pixman_image_t *image;
 	struct sna_coordinate coordinate;
 	uint16_t size, pos;
+	pixman_image_t *image;
 };
 
 static inline WindowPtr get_root_window(ScreenPtr screen)
@@ -176,6 +175,7 @@ static inline PixmapPtr get_window_pixmap(WindowPtr window)
 
 static inline PixmapPtr get_drawable_pixmap(DrawablePtr drawable)
 {
+	assert(drawable);
 	if (drawable->type == DRAWABLE_PIXMAP)
 		return (PixmapPtr)drawable;
 	else
@@ -225,10 +225,14 @@ struct sna {
 	unsigned flags;
 #define SNA_NO_WAIT		0x1
 #define SNA_NO_FLIP		0x2
-#define SNA_TRIPLE_BUFFER	0x4
+#define SNA_NO_VSYNC		0x4
+#define SNA_TRIPLE_BUFFER	0x8
 #define SNA_TEAR_FREE		0x10
 #define SNA_FORCE_SHADOW	0x20
 #define SNA_FLUSH_GTT		0x40
+#define SNA_IS_HOSTED		0x80
+#define SNA_PERFORMANCE		0x100
+#define SNA_POWERSAVE		0x200
 #define SNA_REPROBE		0x80000000
 
 	unsigned cpu_features;
@@ -263,6 +267,10 @@ struct sna {
 		DamagePtr shadow_damage;
 		struct kgem_bo *shadow;
 		int shadow_flip;
+
+		unsigned num_real_crtc;
+		unsigned num_real_output;
+		unsigned num_fake;
 	} mode;
 
 	struct sna_dri {
@@ -316,6 +324,13 @@ struct sna {
 	InputHandlerProc uevent_handler;
 #endif
 
+	struct {
+		int fd;
+		uint8_t offset;
+		uint8_t remain;
+		char event[256];
+	} acpi;
+
 	struct sna_render render;
 
 #if DEBUG_MEMORY
@@ -329,9 +344,10 @@ struct sna {
 };
 
 bool sna_mode_pre_init(ScrnInfoPtr scrn, struct sna *sna);
-bool sna_mode_fake_init(struct sna *sna);
+bool sna_mode_fake_init(struct sna *sna, int num_fake);
 void sna_mode_adjust_frame(struct sna *sna, int x, int y);
 extern void sna_mode_update(struct sna *sna);
+extern void sna_mode_reset(struct sna *sna);
 extern void sna_mode_wakeup(struct sna *sna);
 extern void sna_mode_redisplay(struct sna *sna);
 extern void sna_mode_close(struct sna *sna);
@@ -388,7 +404,7 @@ to_sna_from_kgem(struct kgem *kgem)
 #define MAX(a,b)	((a) >= (b) ? (a) : (b))
 #endif
 
-extern xf86CrtcPtr sna_covering_crtc(ScrnInfoPtr scrn,
+extern xf86CrtcPtr sna_covering_crtc(struct sna *sna,
 				     const BoxRec *box,
 				     xf86CrtcPtr desired);
 
@@ -420,14 +436,24 @@ CARD32 sna_render_format_for_depth(int depth);
 void sna_debug_flush(struct sna *sna);
 
 static inline bool
+get_window_deltas(PixmapPtr pixmap, int16_t *x, int16_t *y)
+{
+#ifdef COMPOSITE
+	*x = -pixmap->screen_x;
+	*y = -pixmap->screen_y;
+	return pixmap->screen_x | pixmap->screen_y;
+#else
+	*x = *y = 0;
+	return false;
+#endif
+}
+
+static inline bool
 get_drawable_deltas(DrawablePtr drawable, PixmapPtr pixmap, int16_t *x, int16_t *y)
 {
 #ifdef COMPOSITE
-	if (drawable->type == DRAWABLE_WINDOW) {
-		*x = -pixmap->screen_x;
-		*y = -pixmap->screen_y;
-		return pixmap->screen_x | pixmap->screen_y;
-	}
+	if (drawable->type == DRAWABLE_WINDOW)
+		return get_window_deltas(pixmap, x, y);
 #endif
 	*x = *y = 0;
 	return false;
@@ -480,7 +506,7 @@ sna_pixmap_undo_cow(struct sna *sna, struct sna_pixmap *priv, unsigned flags);
 #define __MOVE_FORCE 0x40
 #define __MOVE_DRI 0x80
 
-bool
+struct sna_pixmap *
 sna_pixmap_move_area_to_gpu(PixmapPtr pixmap, const BoxRec *box, unsigned int flags);
 
 struct sna_pixmap *sna_pixmap_move_to_gpu(PixmapPtr pixmap, unsigned flags);
@@ -547,6 +573,11 @@ inline static int16_t clamp(int16_t a, int16_t b)
 	return v;
 }
 
+static inline bool box_empty(const BoxRec *box)
+{
+	return box->x2 <= box->x1 || box->y2 <= box->y1;
+}
+
 static inline bool
 box_inplace(PixmapPtr pixmap, const BoxRec *box)
 {
@@ -606,9 +637,15 @@ sna_drawable_is_clear(DrawablePtr d)
 	return priv && priv->clear && priv->clear_color == 0;
 }
 
-static inline struct kgem_bo *sna_pixmap_get_bo(PixmapPtr pixmap)
+static inline struct kgem_bo *__sna_pixmap_get_bo(PixmapPtr pixmap)
 {
 	return sna_pixmap(pixmap)->gpu_bo;
+}
+
+static inline struct kgem_bo *__sna_drawable_peek_bo(DrawablePtr d)
+{
+	struct sna_pixmap *priv = sna_pixmap(get_drawable_pixmap(d));
+	return priv ? priv->gpu_bo : NULL;
 }
 
 static inline struct kgem_bo *sna_pixmap_pin(PixmapPtr pixmap, unsigned flags)
@@ -873,7 +910,6 @@ memcpy_xor(const void *src, void *dst, int bpp,
 
 #define SNA_CREATE_FB 0x10
 #define SNA_CREATE_SCRATCH 0x11
-#define SNA_CREATE_GLYPHS 0x12
 
 inline static bool is_power_of_two(unsigned x)
 {
@@ -895,16 +931,32 @@ box_intersect(BoxPtr a, const BoxRec *b)
 		a->x1 = b->x1;
 	if (a->x2 > b->x2)
 		a->x2 = b->x2;
+	if (a->x1 >= a->x2)
+		return false;
+
 	if (a->y1 < b->y1)
 		a->y1 = b->y1;
 	if (a->y2 > b->y2)
 		a->y2 = b->y2;
+	if (a->y1 >= a->y2)
+		return false;
 
-	return a->x1 < a->x2 && a->y1 < a->y2;
+	return true;
 }
 
 unsigned sna_cpu_detect(void);
 char *sna_cpu_features_to_string(unsigned features, char *line);
+
+/* sna_acpi.c */
+int sna_acpi_open(void);
+void sna_acpi_init(struct sna *sna);
+void _sna_acpi_wakeup(struct sna *sna);
+static inline void sna_acpi_wakeup(struct sna *sna, void *read_mask)
+{
+	if (sna->acpi.fd >= 0 && FD_ISSET(sna->acpi.fd, (fd_set*)read_mask))
+		_sna_acpi_wakeup(sna);
+}
+void sna_acpi_fini(struct sna *sna);
 
 void sna_threads_init(void);
 int sna_use_threads (int width, int height, int threshold);
@@ -923,5 +975,17 @@ void sna_image_composite(pixman_op_t        op,
 			 int16_t            dst_y,
 			 uint16_t           width,
 			 uint16_t           height);
+
+extern jmp_buf sigjmp;
+extern volatile sig_atomic_t sigtrap;
+
+#define sigtrap_assert() assert(sigtrap == 0)
+#define sigtrap_get() sigsetjmp(sigjmp, ++sigtrap)
+
+static inline void sigtrap_put(void)
+{
+	--sigtrap;
+	sigtrap_assert();
+}
 
 #endif /* _SNA_H */

@@ -1,3 +1,22 @@
+xserver-xorg-video-intel (2:2.99.903-1) UNRELEASED; urgency=low
+
+  * New upstream prerelease.
+
+ -- Timo Aaltonen <tjaalton@ubuntu.com>  Tue, 01 Oct 2013 14:07:22 +0300
+
+xserver-xorg-video-intel (2:2.21.15-1) unstable; urgency=low
+
+  * New upstream release.
+  * Drop patches Check-for-struct-sysinfo-as-well-as-sys-sysinfo.h.patch and
+    Link-the-driver-against-pixman.patch, they were applied upstream.
+  * Add myself to Uploaders to prevent lintian NMU warnings
+  * Bump Standards-Version to 3.9.4 (no changes necessary)
+  * Canonicalize Vcs-* fields
+  * Explicitly set source format to '3.0 (quilt)'
+  * Move homepage from description to homepage: field
+
+ -- Michael Stapelberg <stapelberg@debian.org>  Wed, 28 Aug 2013 19:39:47 +0200
+
 xserver-xorg-video-intel (2:2.21.14-4ubuntu4) saucy; urgency=low
 
   * XMir: Make a conservative guess as to whether the Mir buffer will be used

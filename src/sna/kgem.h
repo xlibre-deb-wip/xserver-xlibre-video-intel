@@ -55,9 +55,8 @@ struct kgem_bo {
 	struct list request;
 	struct list vma;
 
-	void *map;
-#define IS_CPU_MAP(ptr) ((uintptr_t)(ptr) & 1)
-#define IS_GTT_MAP(ptr) (ptr && ((uintptr_t)(ptr) & 1) == 0)
+	void *map__cpu;
+	void *map__gtt;
 #define MAP(ptr) ((void*)((uintptr_t)(ptr) & ~3))
 
 	struct kgem_bo_binding {
@@ -177,13 +176,14 @@ struct kgem {
 	uint32_t has_semaphores :1;
 	uint32_t has_secure_batches :1;
 	uint32_t has_pinned_batches :1;
-	uint32_t has_cacheing :1;
+	uint32_t has_caching :1;
 	uint32_t has_llc :1;
 	uint32_t has_wt :1;
 	uint32_t has_no_reloc :1;
 	uint32_t has_handle_lut :1;
 
 	uint32_t can_blt_cpu :1;
+	uint32_t can_render_y :1;
 
 	uint16_t fence_max;
 	uint16_t half_cpu_cache_pages;
@@ -461,8 +461,6 @@ void *kgem_bo_map__debug(struct kgem *kgem, struct kgem_bo *bo);
 void *kgem_bo_map__cpu(struct kgem *kgem, struct kgem_bo *bo);
 void kgem_bo_sync__cpu(struct kgem *kgem, struct kgem_bo *bo);
 void kgem_bo_sync__cpu_full(struct kgem *kgem, struct kgem_bo *bo, bool write);
-void *__kgem_bo_map__cpu(struct kgem *kgem, struct kgem_bo *bo);
-void __kgem_bo_unmap__cpu(struct kgem *kgem, struct kgem_bo *bo, void *ptr);
 uint32_t kgem_bo_flink(struct kgem *kgem, struct kgem_bo *bo);
 
 bool kgem_bo_write(struct kgem *kgem, struct kgem_bo *bo,
@@ -552,14 +550,14 @@ static inline bool kgem_bo_is_mappable(struct kgem *kgem,
 
 static inline bool kgem_bo_mapped(struct kgem *kgem, struct kgem_bo *bo)
 {
-	DBG(("%s: map=%p, tiling=%d, domain=%d\n",
-	     __FUNCTION__, bo->map, bo->tiling, bo->domain));
+	DBG(("%s: map=%p:%p, tiling=%d, domain=%d\n",
+	     __FUNCTION__, bo->map__gtt, bo->map__cpu, bo->tiling, bo->domain));
 	assert(bo->refcnt);
 
-	if (bo->map == NULL)
-		return bo->tiling == I915_TILING_NONE && bo->domain == DOMAIN_CPU;
+	if (bo->tiling == I915_TILING_NONE && (bo->domain == DOMAIN_CPU || kgem->has_llc))
+		return bo->map__cpu != NULL;
 
-	return IS_CPU_MAP(bo->map) == !bo->tiling;
+	return bo->map__gtt != NULL;
 }
 
 static inline bool kgem_bo_can_map(struct kgem *kgem, struct kgem_bo *bo)
@@ -580,7 +578,7 @@ static inline bool kgem_bo_can_map__cpu(struct kgem *kgem,
 					struct kgem_bo *bo,
 					bool write)
 {
-	if (bo->scanout && (write || bo->purged))
+	if (bo->purged || (bo->scanout && write))
 		return false;
 
 	if (kgem->has_llc)
@@ -643,6 +641,14 @@ static inline bool __kgem_bo_is_busy(struct kgem *kgem, struct kgem_bo *bo)
 		__kgem_bo_clear_busy(bo);
 
 	return kgem_bo_is_busy(bo);
+}
+
+static inline bool kgem_bo_is_render(struct kgem_bo *bo)
+{
+	DBG(("%s: handle=%d, rq? %d [%d]\n", __FUNCTION__,
+	     bo->handle, bo->rq != NULL, (int)RQ_RING(bo->rq)));
+	assert(bo->refcnt);
+	return bo->rq && RQ_RING(bo->rq) == I915_EXEC_RENDER;
 }
 
 static inline void kgem_bo_mark_unreusable(struct kgem_bo *bo)
