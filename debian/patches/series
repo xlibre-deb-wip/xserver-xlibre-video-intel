@@ -1,9 +1,3 @@
 # XMir series
 
-disable-unneeded-functions-when-hosted.patch
-unwrap-legacy-modesetting-when-hosted.patch
-check-hosted-initialisation-succeeds.patch
-fix-spelling-of-caching.patch
-dont-copy-fbcon-if-hosted.patch
-more-modesetting-disablement-when-hosted.patch
 xmir.patch
