@@ -26,10 +26,10 @@ index b0781ca..126bde2 100644
  	$(NULL)
  
 diff --git a/src/intel_device.c b/src/intel_device.c
-index b3926df..710348e 100644
+index 92472c5..2dd1625 100644
 --- a/src/intel_device.c
 +++ b/src/intel_device.c
-@@ -144,10 +144,34 @@ static int fd_set_nonblock(int fd)
+@@ -146,10 +146,34 @@ static int fd_set_nonblock(int fd)
  	return fd;
  }
  
@@ -107,10 +107,10 @@ index 0000000..2e3c85a
 +
 +#endif /* INTEL_XMIR_H */
 diff --git a/src/sna/Makefile.am b/src/sna/Makefile.am
-index 5d5417e..1c5dda0 100644
+index 030869d..5cf1cbf 100644
 --- a/src/sna/Makefile.am
 +++ b/src/sna/Makefile.am
-@@ -75,6 +75,7 @@ libsna_la_SOURCES = \
+@@ -76,6 +76,7 @@ libsna_la_SOURCES = \
  	sna_video_overlay.c \
  	sna_video_sprite.c \
  	sna_video_textured.c \
@@ -118,56 +118,11 @@ index 5d5417e..1c5dda0 100644
  	gen2_render.c \
  	gen2_render.h \
  	gen3_render.c \
-diff --git a/src/sna/kgem.c b/src/sna/kgem.c
-index e001b01..323fe39 100644
---- a/src/sna/kgem.c
-+++ b/src/sna/kgem.c
-@@ -168,7 +168,9 @@ struct local_i915_gem_caching {
- };
- 
- #define LOCAL_I915_GEM_SET_CACHING	0x2f
-+#define LOCAL_I915_GEM_GET_CACHING	0x30
- #define LOCAL_IOCTL_I915_GEM_SET_CACHING DRM_IOW(DRM_COMMAND_BASE + LOCAL_I915_GEM_SET_CACHING, struct local_i915_gem_caching)
-+#define LOCAL_IOCTL_I915_GEM_GET_CACHING DRM_IOWR(DRM_COMMAND_BASE + LOCAL_I915_GEM_GET_CACHING, struct local_i915_gem_caching)
- 
- struct kgem_buffer {
- 	struct kgem_bo base;
-@@ -454,6 +456,18 @@ bool __kgem_busy(struct kgem *kgem, int handle)
- 	return busy.busy;
- }
- 
-+int __kgem_bo_get_caching(struct kgem *kgem, struct kgem_bo *bo)
-+{
-+	struct local_i915_gem_caching arg;
-+
-+	VG_CLEAR(arg);
-+	arg.handle = bo->handle;
-+	arg.caching = kgem->has_llc;
-+	(void)drmIoctl(kgem->fd, LOCAL_IOCTL_I915_GEM_GET_CACHING, &arg);
-+
-+	return arg.caching;
-+}
-+
- static void kgem_bo_retire(struct kgem *kgem, struct kgem_bo *bo)
- {
- 	DBG(("%s: retiring bo handle=%d (needed flush? %d), rq? %d [busy?=%d]\n",
-diff --git a/src/sna/kgem.h b/src/sna/kgem.h
-index f29f81a..44da0dc 100644
---- a/src/sna/kgem.h
-+++ b/src/sna/kgem.h
-@@ -602,6 +602,7 @@ static inline bool kgem_bo_is_snoop(struct kgem_bo *bo)
- 
- void kgem_bo_undo(struct kgem *kgem, struct kgem_bo *bo);
- 
-+int __kgem_bo_get_caching(struct kgem *kgem, struct kgem_bo *bo);
- bool __kgem_busy(struct kgem *kgem, int handle);
- 
- static inline void kgem_bo_mark_busy(struct kgem_bo *bo, int ring)
 diff --git a/src/sna/sna.h b/src/sna/sna.h
-index c47a8ab..1e74d3b 100644
+index f7c5315..494baa8 100644
 --- a/src/sna/sna.h
 +++ b/src/sna/sna.h
-@@ -288,6 +288,7 @@ struct sna {
+@@ -290,6 +290,7 @@ struct sna {
  	EntityInfoPtr pEnt;
  	struct pci_device *PciInfo;
  	const struct intel_device_info *info;
@@ -175,27 +130,9 @@ index c47a8ab..1e74d3b 100644
  
  	ScreenBlockHandlerProcPtr BlockHandler;
  	ScreenWakeupHandlerProcPtr WakeupHandler;
-@@ -425,6 +426,17 @@ CARD32 sna_render_format_for_depth(int depth);
- 
- void sna_debug_flush(struct sna *sna);
- 
-+static inline void
-+get_window_deltas(PixmapPtr pixmap, int16_t *x, int16_t *y)
-+{
-+#ifdef COMPOSITE
-+	*x = -pixmap->screen_x;
-+	*y = -pixmap->screen_y;
-+#else
-+	*x = *y = 0;
-+#endif
-+}
-+
- static inline bool
- get_drawable_deltas(DrawablePtr drawable, PixmapPtr pixmap, int16_t *x, int16_t *y)
- {
-@@ -946,4 +958,18 @@ void sna_image_composite(pixman_op_t        op,
- 			 uint16_t           width,
- 			 uint16_t           height);
+@@ -988,4 +989,18 @@ static inline void sigtrap_put(void)
+ 	sigtrap_assert();
+ }
  
 +/* sna_xmir.c */
 +
@@ -213,11 +150,11 @@ index c47a8ab..1e74d3b 100644
 +
  #endif /* _SNA_H */
 diff --git a/src/sna/sna_dri.c b/src/sna/sna_dri.c
-index 0405186..ddb321c 100644
+index 00a65a9..88d0869 100644
 --- a/src/sna/sna_dri.c
 +++ b/src/sna/sna_dri.c
-@@ -2276,6 +2276,13 @@ out_complete:
- }
+@@ -2322,6 +2322,13 @@ out_complete:
+ void sna_dri_destroy_window(WindowPtr win) { }
  #endif
  
 +#if DRI2INFOREC_VERSION >= 8 && XMIR
@@ -230,7 +167,7 @@ index 0405186..ddb321c 100644
  static bool has_i830_dri(void)
  {
  	return access(DRI_DRIVER_PATH "/i830_dri.so", R_OK) == 0;
-@@ -2351,6 +2358,13 @@ bool sna_dri_open(struct sna *sna, ScreenPtr screen)
+@@ -2471,6 +2478,13 @@ bool sna_dri_open(struct sna *sna, ScreenPtr screen)
  	info.ReuseBufferNotify = NULL;
  #endif
  
@@ -243,12 +180,12 @@ index 0405186..ddb321c 100644
 +
  #if USE_ASYNC_SWAP
  	info.version = 10;
- 	info.AsyncSwap = sna_dri_async_swap;
+ 	info.scheduleSwap0 = 1;
 diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
-index 2a4a830..44eea33 100644
+index 6d4420f..5cc52d3 100644
 --- a/src/sna/sna_driver.c
 +++ b/src/sna/sna_driver.c
-@@ -442,6 +442,9 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
+@@ -514,6 +514,9 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
  		goto cleanup;
  	}
  
@@ -258,7 +195,7 @@ index 2a4a830..44eea33 100644
  	/* Sanity check */
  	if (hosted() && (sna->flags & SNA_IS_HOSTED) == 0) {
  		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
-@@ -449,9 +452,14 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
+@@ -521,9 +524,14 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
  		goto cleanup;
  	}
  
@@ -275,7 +212,7 @@ index 2a4a830..44eea33 100644
  
  	if (!xf86SetDepthBpp(scrn, preferred_depth, 0, 0,
  			     Support32bppFb |
-@@ -488,6 +496,9 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
+@@ -560,6 +568,9 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
  
  	intel_detect_chipset(scrn, sna->pEnt, sna->PciInfo);
  
@@ -285,7 +222,7 @@ index 2a4a830..44eea33 100644
  	kgem_init(&sna->kgem, fd, sna->PciInfo, sna->info->gen);
  	if (xf86ReturnOptValBool(sna->Options, OPTION_ACCEL_DISABLE, FALSE) ||
  	    !sna_option_cast_to_bool(sna, OPTION_ACCEL_METHOD, TRUE)) {
-@@ -571,6 +582,8 @@ sna_block_handler(BLOCKHANDLER_ARGS_DECL)
+@@ -659,6 +670,8 @@ sna_block_handler(BLOCKHANDLER_ARGS_DECL)
  
  	if (*tv == NULL || ((*tv)->tv_usec | (*tv)->tv_sec))
  		sna_accel_block_handler(sna, tv);
@@ -294,7 +231,7 @@ index 2a4a830..44eea33 100644
  }
  
  static void
-@@ -918,6 +931,8 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
+@@ -1010,6 +1023,8 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
  	if (!miDCInitialize(screen, xf86GetPointerScreenFuncs()))
  		return FALSE;
  
@@ -305,10 +242,10 @@ index 2a4a830..44eea33 100644
  			       HARDWARE_CURSOR_TRUECOLOR_AT_8BPP |
 diff --git a/src/sna/sna_xmir.c b/src/sna/sna_xmir.c
 new file mode 100644
-index 0000000..1e38a41
+index 0000000..edfe298
 --- /dev/null
 +++ b/src/sna/sna_xmir.c
-@@ -0,0 +1,187 @@
+@@ -0,0 +1,186 @@
 +/***************************************************************************
 +
 + Copyright 2013 Intel Corporation.  All Rights Reserved.
@@ -335,7 +272,9 @@ index 0000000..1e38a41
 +
 + **************************************************************************/
 +
-+#include <assert.h>
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
 +
 +#include "sna.h"
 +
@@ -363,18 +302,17 @@ index 0000000..1e38a41
 +static void
 +sna_xmir_copy_to_mir(xmir_window *xmir_win, RegionPtr region)
 +{
-+	PixmapPtr src = get_window_pixmap(xmir_window_to_windowptr(xmir_win));
-+	struct sna *sna = to_sna_from_pixmap(src);
-+	BoxPtr dst_box = xmir_window_get_drawable_region(xmir_win);
-+	struct sna_pixmap *priv;
-+	struct kgem_bo *bo;
++	PixmapPtr pixmap = get_window_pixmap(xmir_window_to_windowptr(xmir_win));
++	struct sna *sna = to_sna_from_pixmap(pixmap);
++	const BoxRec *dst_box = xmir_window_get_drawable_region(xmir_win);
++	struct kgem_bo *src, *dst;
 +	BoxRec *box;
-+	int16_t sx, sy;
-+	int pitch = xmir_window_get_stride(xmir_win);
-+	int nbox;
++	const int pitch = xmir_window_get_stride(xmir_win);
++	int16_t sx, sy, dx, dy;
++	int n;
 +
 +#if FORCE_FULL_REDRAW
-+	RegionRec whole = { { 0, 0, src->drawable.width, src->drawable.height } };
++	RegionRec whole = { { 0, 0, pixmap->drawable.width, pixmap->drawable.height } };
 +	region = &whole;
 +#endif
 +
@@ -390,69 +328,67 @@ index 0000000..1e38a41
 +	     pitch, xmir_window_get_fd(xmir_win)));
 +
 +	box = REGION_RECTS(region);
-+	nbox = REGION_NUM_RECTS(region);
-+	if (nbox == 0)
++	n = REGION_NUM_RECTS(region);
++	if (n == 0)
 +		return;
 +
 +	/* XXX size is bogus, but only used for sanity checks */
-+	bo = kgem_create_for_prime(&sna->kgem,
-+				   xmir_window_get_fd(xmir_win),
-+				   pitch * (dst_box->y2 - dst_box->y1));
-+	if (bo == NULL)
++	dst = kgem_create_for_prime(&sna->kgem,
++				    xmir_window_get_fd(xmir_win),
++				    pitch * (dst_box->y2 - dst_box->y1));
++	if (dst == NULL)
 +		return;
 +
-+	bo->pitch = pitch;
-+	if (__kgem_bo_get_caching(&sna->kgem, bo) != 1)
-+		bo->scanout = true; /* presume the worst */
++	dst->pitch = pitch;
++	dst->scanout = true; /* presume the worst (almost always true) */
 +
-+	get_window_deltas(src, &sx, &sy);
++	if (get_window_deltas(pixmap, &sx, &sy))
++		RegionTranslate(region, sx, sy);
 +
-+	priv = sna_pixmap_move_to_gpu(src, MOVE_READ);
-+	if (priv &&
-+	    sna->render.copy_boxes(sna, GXcopy,
-+				   src, priv->gpu_bo, sx, sy,
-+				   src, bo, -dst_box->x1, -dst_box->y1,
-+				   box, nbox, COPY_LAST)) {
++	dx = sx + dst_box->x1;
++	dy = sy + dst_box->y1;
++
++	src = NULL;
++	if (!wedged(sna))
++		src = __sna_render_pixmap_bo(sna, pixmap, &region->extents, true);
++	if (src && sna->render.copy_boxes(sna, GXcopy,
++					  pixmap, src, 0, 0,
++					  pixmap, dst, -dx, -dy,
++					  box, n, COPY_LAST)) {
 +		kgem_submit(&sna->kgem);
-+		nbox = 0;
++		n = 0;
 +	} else {
-+		void *dst;
-+
-+		DBG(("%s: fallback\n", __FUNCTION__));
-+
-+		if (sx | sy)
-+			RegionTranslate(region, sx, sy);
-+
-+		dst = kgem_bo_map__gtt(&sna->kgem, bo);
-+		if (dst &&
-+		    sna_drawable_move_region_to_cpu(&src->drawable,
-+						    region, MOVE_READ)) {
-+			int16_t dx = sx + dst_box->x1;
-+			int16_t dy = sy + dst_box->y1;
-+			kgem_bo_sync__gtt(&sna->kgem, bo);
-+			do {
-+				memcpy_blt(src->devPrivate.ptr, dst,
-+					   src->drawable.bitsPerPixel,
-+					   src->devKind, bo->pitch,
-+					   box->x1, box->y1,
-+					   box->x1 - dx, box->y1 - dy,
-+					   box->x2 - box->x1,
-+					   box->y2 - box->y1);
-+			} while (--nbox);
++		void *ptr = kgem_bo_map__gtt(&sna->kgem, dst);
++		if (ptr && sna_drawable_move_region_to_cpu(&pixmap->drawable,
++							   region, MOVE_READ)) {
++			kgem_bo_sync__gtt(&sna->kgem, dst);
++			if (sigtrap_get() == 0) {
++				do {
++					memcpy_blt(pixmap->devPrivate.ptr, ptr,
++						   pixmap->drawable.bitsPerPixel,
++						   pixmap->devKind, dst->pitch,
++						   box->x1, box->y1,
++						   box->x1 - dx, box->y1 - dy,
++						   box->x2 - box->x1,
++						   box->y2 - box->y1);
++					box++;
++				} while (--n);
++				sigtrap_put();
++			}
 +		}
-+
-+		if (sx | sy)
-+			RegionTranslate(region, -sx, -sy);
 +	}
 +
-+	if (nbox == 0)
++	if (sx | sy)
++		RegionTranslate(region, -sx, -sy);
++
++	if (n == 0)
 +		xmir_submit_rendering_for_window(xmir_win, region);
 +
-+	bo->scanout = false; /* but don't confuse our caching! */
-+	kgem_bo_destroy(&sna->kgem, bo);
++	dst->scanout = false; /* but don't confuse our caching! */
++	kgem_bo_destroy(&sna->kgem, dst);
 +}
 +
-+static const xmir_driver sna_xmir_driver = {
++static xmir_driver sna_xmir_driver = {
 +	XMIR_DRIVER_VERSION,
 +	sna_xmir_copy_to_mir
 +};
