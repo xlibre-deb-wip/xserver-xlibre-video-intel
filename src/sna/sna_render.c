@@ -25,6 +25,10 @@
  *
  */
 
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #include "sna.h"
 #include "sna_render.h"
 #include "sna_render_inline.h"
@@ -56,7 +60,9 @@ sna_format_for_depth(int depth)
 	case 16: return PICT_r5g6b5;
 	default: assert(0);
 	case 24: return PICT_x8r8g8b8;
+#ifdef PICT_x2r10g10b10
 	case 30: return PICT_x2r10g10b10;
+#endif
 	case 32: return PICT_a8r8g8b8;
 	}
 }
@@ -757,21 +763,27 @@ static int sna_render_picture_downsample(struct sna *sna,
 	DBG(("%s: creating temporary GPU bo %dx%d\n",
 	     __FUNCTION__, width, height));
 
-	if (!sna_pixmap_force_to_gpu(pixmap, MOVE_SOURCE_HINT | MOVE_READ))
-		return sna_render_picture_fixup(sna, picture, channel,
-						x, y, w, h,
-						dst_x, dst_y);
-
 	tmp = screen->CreatePixmap(screen,
 				   width, height,
 				   pixmap->drawable.depth,
 				   SNA_CREATE_SCRATCH);
-	if (!tmp)
-		return 0;
+	if (tmp == NULL)
+		goto fixup;
 
 	priv = sna_pixmap(tmp);
-	if (!priv)
-		goto cleanup_tmp;
+	if (priv == NULL) {
+		screen->DestroyPixmap(tmp);
+		goto fixup;
+	}
+
+	if (!sna_pixmap_force_to_gpu(pixmap, MOVE_SOURCE_HINT | MOVE_READ)) {
+fixup:
+		DBG(("%s: unable to create GPU bo for target or temporary pixmaps\n",
+		     __FUNCTION__));
+		return sna_render_picture_fixup(sna, picture, channel,
+						x, y, w, h,
+						dst_x, dst_y);
+	}
 
 	format = PictureMatchFormat(screen,
 				    pixmap->drawable.depth,
@@ -885,8 +897,10 @@ sna_render_pixmap_partial(struct sna *sna,
 	DBG(("%s (%d, %d)x(%d, %d), pitch %d, max %d\n",
 	     __FUNCTION__, x, y, w, h, bo->pitch, sna->render.max_3d_pitch));
 
-	if (bo->pitch > sna->render.max_3d_pitch)
+	if (bo->pitch > sna->render.max_3d_pitch) {
+		DBG(("%s: pitch too great %d > %d\n", __FUNCTION__, bo->pitch, sna->render.max_3d_pitch));
 		return false;
+	}
 
 	box.x1 = x;
 	box.y1 = y;
@@ -952,8 +966,11 @@ sna_render_pixmap_partial(struct sna *sna,
 	channel->bo = kgem_create_proxy(&sna->kgem, bo,
 					box.y1 * bo->pitch + offset,
 					h * bo->pitch);
-	if (channel->bo == NULL)
+	if (channel->bo == NULL) {
+		DBG(("%s: failed to create proxy for partial (offset=%d, size=%d)\n",
+		     __FUNCTION__, box.y1 * bo->pitch + offset, h * bo->pitch));
 		return false;
+	}
 
 	channel->bo->pitch = bo->pitch;
 
@@ -966,7 +983,7 @@ sna_render_pixmap_partial(struct sna *sna,
 	return true;
 }
 
-static int
+static bool
 sna_render_picture_partial(struct sna *sna,
 			   PicturePtr picture,
 			   struct sna_composite_channel *channel,
@@ -1018,13 +1035,15 @@ sna_render_picture_partial(struct sna *sna,
 		priv = sna_pixmap_force_to_gpu(pixmap,
 					       MOVE_READ | MOVE_SOURCE_HINT);
 		if (priv == NULL)
-			return 0;
+			return false;
 
 		bo = priv->gpu_bo;
 	}
 
-	if (bo->pitch > sna->render.max_3d_pitch)
-		return 0;
+	if (bo->pitch > sna->render.max_3d_pitch) {
+		DBG(("%s: pitch too great %d > %d\n", __FUNCTION__, bo->pitch, sna->render.max_3d_pitch));
+		return false;
+	}
 
 	if (bo->tiling) {
 		int tile_width, tile_height, tile_size;
@@ -1059,14 +1078,14 @@ sna_render_picture_partial(struct sna *sna,
 	if (w <= 0 || h <= 0 ||
 	    w > sna->render.max_3d_size ||
 	    h > sna->render.max_3d_size)
-		return 0;
+		return false;
 
 	/* How many tiles across are we? */
 	channel->bo = kgem_create_proxy(&sna->kgem, bo,
 					box.y1 * bo->pitch + offset,
 					h * bo->pitch);
 	if (channel->bo == NULL)
-		return 0;
+		return false;
 
 	if (channel->transform) {
 		memset(&channel->embedded_transform,
@@ -1092,7 +1111,7 @@ sna_render_picture_partial(struct sna *sna,
 	channel->scale[1] = 1.f/h;
 	channel->width  = w;
 	channel->height = h;
-	return 1;
+	return true;
 }
 
 int
@@ -1324,15 +1343,17 @@ sna_render_picture_convolve(struct sna *sna,
 	}
 
 	pixmap = screen->CreatePixmap(screen, w, h, depth, SNA_CREATE_SCRATCH);
-	if (pixmap == NullPixmap)
-		return 0;
+	if (pixmap == NullPixmap) {
+		DBG(("%s: pixmap allocation failed\n", __FUNCTION__));
+		return -1;
+	}
 
 	tmp = CreatePicture(0, &pixmap->drawable,
 			    PictureMatchFormat(screen, depth, channel->pict_format),
 			    0, NULL, serverClient, &error);
 	screen->DestroyPixmap(pixmap);
 	if (tmp == NULL)
-		return 0;
+		return -1;
 
 	ValidatePicture(tmp);
 
@@ -1407,15 +1428,17 @@ sna_render_picture_flatten(struct sna *sna,
 	DBG(("%s: %dx%d\n", __FUNCTION__, w, h));
 
 	pixmap = screen->CreatePixmap(screen, w, h, 32, SNA_CREATE_SCRATCH);
-	if (pixmap == NullPixmap)
-		return 0;
+	if (pixmap == NullPixmap) {
+		DBG(("%s: pixmap allocation failed\n", __FUNCTION__));
+		return -1;
+	}
 
 	tmp = CreatePicture(0, &pixmap->drawable,
 			    PictureMatchFormat(screen, 32, PICT_a8r8g8b8),
 			    0, NULL, serverClient, &error);
 	screen->DestroyPixmap(pixmap);
 	if (tmp == NULL)
-		return 0;
+		return -1;
 
 	ValidatePicture(tmp);
 
@@ -1655,11 +1678,14 @@ do_fixup:
 
 	DBG(("%s: compositing tmp=(%d+%d, %d+%d)x(%d, %d)\n",
 	     __FUNCTION__, x, dx, y, dy, w, h));
-	sna_image_composite(PictOpSrc, src, NULL, dst,
-			    x + dx, y + dy,
-			    0, 0,
-			    0, 0,
-			    w, h);
+	if (sigtrap_get() == 0) {
+		sna_image_composite(PictOpSrc, src, NULL, dst,
+				    x + dx, y + dy,
+				    0, 0,
+				    0, 0,
+				    w, h);
+		sigtrap_put();
+	}
 	free_pixman_pict(picture, src);
 
 	/* Then convert to card format */
@@ -1783,7 +1809,7 @@ sna_render_picture_convert(struct sna *sna,
 
 		tmp = screen->CreatePixmap(screen, w, h, pixmap->drawable.bitsPerPixel, 0);
 		if (tmp == NULL)
-			return 0;
+			return -1;
 
 		dst = CreatePicture(0, &tmp->drawable,
 				    PictureMatchFormat(screen,
@@ -1862,11 +1888,14 @@ sna_render_picture_convert(struct sna *sna,
 			return 0;
 		}
 
-		pixman_image_composite(PictOpSrc, src, NULL, dst,
-				       box.x1, box.y1,
-				       0, 0,
-				       0, 0,
-				       w, h);
+		if (sigtrap_get() == 0) {
+			pixman_image_composite(PictOpSrc, src, NULL, dst,
+					       box.x1, box.y1,
+					       0, 0,
+					       0, 0,
+					       w, h);
+			sigtrap_put();
+		}
 		pixman_image_unref(dst);
 		pixman_image_unref(src);
 	}

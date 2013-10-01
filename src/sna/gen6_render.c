@@ -77,6 +77,7 @@ struct gt_info {
 		int max_vs_entries;
 		int max_gs_entries;
 	} urb;
+	int gt;
 };
 
 static const struct gt_info gt1_info = {
@@ -85,6 +86,7 @@ static const struct gt_info gt1_info = {
 	.max_gs_threads = 21,
 	.max_wm_threads = 40,
 	.urb = { 32, 256, 256 },
+	.gt = 1,
 };
 
 static const struct gt_info gt2_info = {
@@ -93,6 +95,7 @@ static const struct gt_info gt2_info = {
 	.max_gs_threads = 60,
 	.max_wm_threads = 80,
 	.urb = { 64, 256, 256 },
+	.gt = 2,
 };
 
 static const uint32_t ps_kernel_packed[][4] = {
@@ -255,10 +258,12 @@ static uint32_t gen6_get_card_format(PictFormat format)
 		return GEN6_SURFACEFORMAT_R8G8B8A8_UNORM;
 	case PICT_x8b8g8r8:
 		return GEN6_SURFACEFORMAT_R8G8B8X8_UNORM;
+#ifdef PICT_a2r10g10b10
 	case PICT_a2r10g10b10:
 		return GEN6_SURFACEFORMAT_B10G10R10A2_UNORM;
 	case PICT_x2r10g10b10:
 		return GEN6_SURFACEFORMAT_B10G10R10X2_UNORM;
+#endif
 	case PICT_r8g8b8:
 		return GEN6_SURFACEFORMAT_R8G8B8_UNORM;
 	case PICT_r5g6b5:
@@ -283,9 +288,11 @@ static uint32_t gen6_get_dest_format(PictFormat format)
 	case PICT_a8b8g8r8:
 	case PICT_x8b8g8r8:
 		return GEN6_SURFACEFORMAT_R8G8B8A8_UNORM;
+#ifdef PICT_a2r10g10b10
 	case PICT_a2r10g10b10:
 	case PICT_x2r10g10b10:
 		return GEN6_SURFACEFORMAT_B10G10R10A2_UNORM;
+#endif
 	case PICT_r5g6b5:
 		return GEN6_SURFACEFORMAT_B5G6R5_UNORM;
 	case PICT_x1r5g5b5:
@@ -1068,7 +1075,7 @@ gen6_bind_bo(struct sna *sna,
 	ss[3] = (gen6_tiling_bits(bo->tiling) |
 		 (bo->pitch - 1) << GEN6_SURFACE_PITCH_SHIFT);
 	ss[4] = 0;
-	ss[5] = is_scanout ? 0 : 3 << 16;
+	ss[5] = (is_scanout || bo->io) ? 0 : 3 << 16;
 
 	kgem_bo_set_binding(bo, format | is_dst << 30 | is_scanout << 31, offset);
 
@@ -1889,24 +1896,77 @@ inline static bool can_switch_to_blt(struct sna *sna,
 	return kgem_ring_is_idle(&sna->kgem, KGEM_BLT);
 }
 
+inline static bool can_switch_to_render(struct sna *sna,
+					struct kgem_bo *bo)
+{
+	if (sna->kgem.ring == KGEM_RENDER)
+		return true;
+
+	if (NO_RING_SWITCH)
+		return false;
+
+	if (!sna->kgem.has_semaphores)
+		return false;
+
+	if (bo && !RQ_IS_BLT(bo->rq) && !bo->scanout)
+		return true;
+
+	return !kgem_ring_is_idle(&sna->kgem, KGEM_RENDER);
+}
+
 static inline bool untiled_tlb_miss(struct kgem_bo *bo)
 {
+	if (kgem_bo_is_render(bo))
+		return false;
+
 	return bo->tiling == I915_TILING_NONE && bo->pitch >= 4096;
 }
 
 static int prefer_blt_bo(struct sna *sna, struct kgem_bo *bo)
 {
-	if (RQ_IS_BLT(bo->rq))
+	if (bo->rq)
+		return RQ_IS_BLT(bo->rq);
+
+	if (sna->flags & SNA_POWERSAVE)
 		return true;
 
 	return bo->tiling == I915_TILING_NONE || bo->scanout;
+}
+
+inline static bool force_blt_ring(struct sna *sna)
+{
+	if (sna->flags & SNA_POWERSAVE)
+		return true;
+
+	if (sna->kgem.mode == KGEM_RENDER)
+		return false;
+
+	if (sna->render_state.gen6.info->gt < 2)
+		return true;
+
+	return false;
 }
 
 inline static bool prefer_blt_ring(struct sna *sna,
 				   struct kgem_bo *bo,
 				   unsigned flags)
 {
+	assert(!force_blt_ring(sna));
+	assert(!kgem_bo_is_render(bo));
+
 	return can_switch_to_blt(sna, bo, flags);
+}
+
+inline static bool prefer_render_ring(struct sna *sna,
+				      struct kgem_bo *bo)
+{
+	if (sna->flags & SNA_POWERSAVE)
+		return false;
+
+	if (sna->render_state.gen6.info->gt < 2)
+		return false;
+
+	return can_switch_to_render(sna, bo);
 }
 
 static bool
@@ -1916,14 +1976,7 @@ try_blt(struct sna *sna,
 {
 	struct kgem_bo *bo;
 
-	bo = __sna_drawable_peek_bo(dst->pDrawable);
-	if (bo == NULL)
-		return true;
-
-	if (bo->rq)
-		return RQ_IS_BLT(bo->rq);
-
-	if (sna->kgem.ring == KGEM_BLT) {
+	if (sna->kgem.mode == KGEM_BLT) {
 		DBG(("%s: already performing BLT\n", __FUNCTION__));
 		return true;
 	}
@@ -1934,8 +1987,23 @@ try_blt(struct sna *sna,
 		return true;
 	}
 
+	bo = __sna_drawable_peek_bo(dst->pDrawable);
+	if (bo && bo->rq)
+		return RQ_IS_BLT(bo->rq);
+
 	if (sna_picture_is_solid(src, NULL) && can_switch_to_blt(sna, NULL, 0))
 		return true;
+
+	if (src->pDrawable) {
+		bo = __sna_drawable_peek_bo(src->pDrawable);
+		if (bo && bo->rq)
+			return RQ_IS_BLT(bo->rq);
+	}
+
+	if (sna->kgem.ring == KGEM_BLT) {
+		DBG(("%s: already performing BLT\n", __FUNCTION__));
+		return true;
+	}
 
 	return false;
 }
@@ -2154,8 +2222,14 @@ prefer_blt_composite(struct sna *sna, struct sna_composite_op *tmp)
 	    untiled_tlb_miss(tmp->src.bo))
 		return true;
 
+	if (force_blt_ring(sna))
+		return true;
+
 	if (kgem_bo_is_render(tmp->dst.bo) ||
 	    kgem_bo_is_render(tmp->src.bo))
+		return false;
+
+	if (prefer_render_ring(sna, tmp->dst.bo))
 		return false;
 
 	if (!prefer_blt_ring(sna, tmp->dst.bo, 0))
@@ -2193,7 +2267,13 @@ gen6_render_composite(struct sna *sna,
 		return true;
 
 	if (gen6_composite_fallback(sna, src, mask, dst))
-		return false;
+		return (mask == NULL &&
+			sna_blt_composite(sna, op,
+					  src, dst,
+					  src_x, src_y,
+					  dst_x, dst_y,
+					  width, height,
+					  tmp, true));
 
 	if (need_tiling(sna, width, height))
 		return sna_tiling_composite(op, src, mask, dst,
@@ -2619,8 +2699,14 @@ static inline bool prefer_blt_copy(struct sna *sna,
 	    untiled_tlb_miss(dst_bo))
 		return true;
 
+	if (force_blt_ring(sna))
+		return true;
+
 	if (kgem_bo_is_render(dst_bo) ||
 	    kgem_bo_is_render(src_bo))
+		return false;
+
+	if (prefer_render_ring(sna, dst_bo))
 		return false;
 
 	if (!prefer_blt_ring(sna, dst_bo, flags))
@@ -2821,7 +2907,11 @@ fallback_blt:
 		if (!kgem_check_bo(&sna->kgem, tmp.dst.bo, tmp.src.bo, NULL)) {
 			DBG(("%s: too large for a single operation\n",
 			     __FUNCTION__));
-			goto fallback_tiled_src;
+			if (tmp.src.bo != src_bo)
+				kgem_bo_destroy(&sna->kgem, tmp.src.bo);
+			if (tmp.redirect.real_bo)
+				kgem_bo_destroy(&sna->kgem, tmp.dst.bo);
+			goto fallback_blt;
 		}
 		_kgem_set_mode(&sna->kgem, KGEM_RENDER);
 	}
@@ -2864,9 +2954,6 @@ fallback_blt:
 		kgem_bo_destroy(&sna->kgem, tmp.src.bo);
 	return true;
 
-fallback_tiled_src:
-	if (tmp.src.bo != src_bo)
-		kgem_bo_destroy(&sna->kgem, tmp.src.bo);
 fallback_tiled_dst:
 	if (tmp.redirect.real_bo)
 		kgem_bo_destroy(&sna->kgem, tmp.dst.bo);
@@ -3034,11 +3121,17 @@ static inline bool prefer_blt_fill(struct sna *sna,
 	if (PREFER_RENDER)
 		return PREFER_RENDER < 0;
 
+	if (untiled_tlb_miss(bo))
+		return true;
+
+	if (force_blt_ring(sna))
+		return true;
+
 	if (kgem_bo_is_render(bo))
 		return false;
 
-	if (untiled_tlb_miss(bo))
-		return true;
+	if (prefer_render_ring(sna, bo))
+		return false;
 
 	if (!prefer_blt_ring(sna, bo, 0))
 		return false;
@@ -3142,6 +3235,7 @@ gen6_render_fill_boxes(struct sna *sna,
 	assert(GEN6_SAMPLER(tmp.u.gen6.flags) == FILL_SAMPLER);
 	assert(GEN6_VERTEX(tmp.u.gen6.flags) == FILL_VERTEX);
 
+	kgem_set_mode(&sna->kgem, KGEM_RENDER, dst_bo);
 	if (!kgem_check_bo(&sna->kgem, dst_bo, NULL)) {
 		kgem_submit(&sna->kgem);
 		assert(kgem_check_bo(&sna->kgem, dst_bo, NULL));
@@ -3321,6 +3415,7 @@ gen6_render_fill(struct sna *sna, uint8_t alu,
 	assert(GEN6_SAMPLER(op->base.u.gen6.flags) == FILL_SAMPLER);
 	assert(GEN6_VERTEX(op->base.u.gen6.flags) == FILL_VERTEX);
 
+	kgem_set_mode(&sna->kgem, KGEM_RENDER, dst_bo);
 	if (!kgem_check_bo(&sna->kgem, dst_bo, NULL)) {
 		kgem_submit(&sna->kgem);
 		assert(kgem_check_bo(&sna->kgem, dst_bo, NULL));
@@ -3401,6 +3496,7 @@ gen6_render_fill_one(struct sna *sna, PixmapPtr dst, struct kgem_bo *bo,
 	assert(GEN6_SAMPLER(tmp.u.gen6.flags) == FILL_SAMPLER);
 	assert(GEN6_VERTEX(tmp.u.gen6.flags) == FILL_VERTEX);
 
+	kgem_set_mode(&sna->kgem, KGEM_RENDER, bo);
 	if (!kgem_check_bo(&sna->kgem, bo, NULL)) {
 		kgem_submit(&sna->kgem);
 		if (!kgem_check_bo(&sna->kgem, bo, NULL)) {
@@ -3487,6 +3583,7 @@ gen6_render_clear(struct sna *sna, PixmapPtr dst, struct kgem_bo *bo)
 	assert(GEN6_SAMPLER(tmp.u.gen6.flags) == FILL_SAMPLER);
 	assert(GEN6_VERTEX(tmp.u.gen6.flags) == FILL_VERTEX);
 
+	kgem_set_mode(&sna->kgem, KGEM_RENDER, bo);
 	if (!kgem_check_bo(&sna->kgem, bo, NULL)) {
 		kgem_submit(&sna->kgem);
 		if (!kgem_check_bo(&sna->kgem, bo, NULL)) {

@@ -16,9 +16,15 @@ stress_TESTS = \
 	render-copyarea-size \
 	render-copy-alphaless \
 	mixed-stress \
-	dri2-swap \
-	dri2-race \
 	$(NULL)
+
+if DRI2
+stress_TESTS += \
+	dri2-race \
+	dri2-swap \
+	dri2-test \
+	$(NULL)
+endif
 
 check_PROGRAMS = $(stress_TESTS)
 
@@ -34,9 +40,14 @@ libtest_la_SOURCES = \
 	test_image.c \
 	test_log.c \
 	test_render.c \
+	$(NULL)
+
+if DRI2
+libtest_la_SOURCES += \
 	dri2.c \
 	dri2.h \
 	$(NULL)
+endif
 
 vsync.avi: mkvsync.sh
 	./mkvsync.sh $@
@@ -44,5 +55,5 @@ vsync.avi: mkvsync.sh
 clean-vsync-avi:
 	rm -rf vsync.avi .build.tmp
 
-EXTRA_DIST = README mkvsync.sh tearing.mp4
+EXTRA_DIST = README mkvsync.sh tearing.mp4 virtual.conf
 clean-local: clean-vsync-avi

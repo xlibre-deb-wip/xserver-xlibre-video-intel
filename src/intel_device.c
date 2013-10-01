@@ -24,6 +24,12 @@
 
  **************************************************************************/
 
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <assert.h>
 #include <string.h>
 #include <unistd.h>
@@ -34,6 +40,8 @@
 #include <sys/ioctl.h>
 
 #include <pciaccess.h>
+
+#include <xorg-server.h>
 #include <xf86.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -43,7 +51,8 @@
 #include "intel_driver.h"
 
 struct intel_device {
-	char *path;
+	char *master_node;
+	char *render_node;
 	int fd;
 	int open_count;
 	int master_count;
@@ -121,6 +130,22 @@ static int fd_set_cloexec(int fd)
 	return fd;
 }
 
+static int fd_set_nonblock(int fd)
+{
+	int flags;
+
+	if (fd == -1)
+		return fd;
+
+	flags = fcntl(fd, F_GETFD);
+	if (flags != -1) {
+		flags |= O_NONBLOCK;
+		fcntl(fd, F_SETFD, flags);
+	}
+
+	return fd;
+}
+
 static int __intel_open_device(const struct pci_device *pci, char **path)
 {
 	int fd;
@@ -151,17 +176,44 @@ static int __intel_open_device(const struct pci_device *pci, char **path)
 				fd = -1;
 			}
 		}
+		fd = fd_set_nonblock(fd);
 	} else {
 #ifdef O_CLOEXEC
-		fd = open(*path, O_RDWR | O_CLOEXEC);
+		fd = open(*path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
 #else
 		fd = -1;
 #endif
 		if (fd == -1)
-			fd = fd_set_cloexec(open(*path, O_RDWR));
+			fd = fd_set_cloexec(open(*path, O_RDWR | O_NONBLOCK));
 	}
 
 	return fd;
+}
+
+static char *find_render_node(int fd)
+{
+#if defined(USE_RENDERNODE)
+	struct stat master, render;
+	char buf[128];
+
+	if (fstat(fd, &master))
+		return NULL;
+
+	if (!S_ISCHR(master.st_mode))
+		return NULL;
+
+	/* Are we a render-node ourselves? */
+	if (master.st_rdev & 0x80)
+		return NULL;
+
+	sprintf(buf, "/dev/dri/renderD%d", (int)((master.st_rdev | 0x80) & 0xff));
+	if (stat(buf, &render) == 0 &&
+	    master.st_mode == render.st_mode &&
+	    render.st_rdev == (master.st_rdev | 0x80))
+		return strdup(buf);
+#endif
+
+	return NULL;
 }
 
 int intel_open_device(int entity_num,
@@ -194,10 +246,13 @@ int intel_open_device(int entity_num,
 	if (dev == NULL)
 		goto err_close;
 
-	dev->path = local_path;
 	dev->fd = fd;
 	dev->open_count = 0;
 	dev->master_count = 0;
+	dev->master_node = local_path;
+	dev->render_node = find_render_node(fd);
+	if (dev->render_node == NULL)
+		dev->render_node = dev->master_node;
 
 	/* If hosted under a system compositor, just pretend to be master */
 	if (hosted()) {
@@ -257,11 +312,11 @@ int intel_get_device(ScrnInfoPtr scrn)
 	return dev->fd;
 }
 
-const char *intel_get_device_name(ScrnInfoPtr scrn)
+const char *intel_get_client_name(ScrnInfoPtr scrn)
 {
 	struct intel_device *dev = intel_device(scrn);
-	assert(dev && dev->path);
-	return dev->path;
+	assert(dev && dev->render_node);
+	return dev->render_node;
 }
 
 int intel_get_master(ScrnInfoPtr scrn)
@@ -312,7 +367,9 @@ void __intel_uxa_release_device(ScrnInfoPtr scrn)
 		intel_set_device(scrn, NULL);
 
 		drmClose(dev->fd);
-		free(dev->path);
+		if (dev->render_node != dev->master_node)
+			free(dev->render_node);
+		free(dev->master_node);
 		free(dev);
 	}
 }
@@ -331,6 +388,8 @@ void intel_put_device(ScrnInfoPtr scrn)
 	intel_set_device(scrn, NULL);
 
 	drmClose(dev->fd);
-	free(dev->path);
+	if (dev->render_node != dev->master_node)
+		free(dev->render_node);
+	free(dev->master_node);
 	free(dev);
 }

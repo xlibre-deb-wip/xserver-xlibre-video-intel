@@ -54,6 +54,7 @@ static XvFormatRec formats[] = { {15}, {16}, {24} };
 static const XvImageRec images[] = { XVIMAGE_YUY2, XVIMAGE_UYVY, XVMC_RGB888, XVMC_RGB565 };
 static const XvAttributeRec attribs[] = {
 	{ XvSettable | XvGettable, 0, 0xffffff, (char *)"XV_COLORKEY" },
+	{ XvSettable | XvGettable, 0, 1, (char *)"XV_ALWAYS_ON_TOP" },
 };
 
 static int sna_video_sprite_stop(ClientPtr client,
@@ -201,6 +202,8 @@ sna_video_sprite_show(struct sna *sna,
 {
 	struct drm_mode_set_plane s;
 
+	/* XXX handle video spanning multiple CRTC */
+
 	VG_CLEAR(s);
 	s.plane_id = sna_crtc_to_plane(crtc);
 
@@ -211,21 +214,23 @@ sna_video_sprite_show(struct sna *sna,
 		frame->height = tmp;
 	}
 
-#if defined(DRM_I915_SET_SPRITE_DESTKEY)
+#if defined(DRM_I915_SET_SPRITE_COLORKEY)
 	if (video->color_key_changed || video->plane != s.plane_id) {
-		struct drm_intel_set_sprite_destkey set;
+		struct drm_intel_sprite_colorkey set;
 
 		DBG(("%s: updating color key: %x\n",
 		     __FUNCTION__, video->color_key));
 
 		set.plane_id = s.plane_id;
-		set.value = video->color_key;
+		set.min_value = video->color_key;
+		set.max_value = video->color_key; /* not used for destkey */
+		set.channel_mask = 0x7 << 24 | 0xff << 16 | 0xff << 8 | 0xff << 0;
 		set.flags = 0;
 		if (!video->AlwaysOnTop)
 			set.flags = I915_SET_COLORKEY_DESTINATION;
 
 		if (drmIoctl(sna->kgem.fd,
-			     DRM_IOCTL_I915_SET_SPRITE_DESTKEY,
+			     DRM_IOCTL_I915_SET_SPRITE_COLORKEY,
 			     &set))
 			xf86DrvMsg(sna->scrn->scrnIndex, X_ERROR,
 				   "failed to update color key\n");
@@ -300,7 +305,15 @@ sna_video_sprite_show(struct sna *sna,
 	}
 
 	frame->bo->domain = DOMAIN_NONE;
-	video->plane = s.plane_id;
+
+	if (video->plane != s.plane_id) {
+		if (video->plane) {
+			memset(&s, 0, sizeof(s));
+			s.plane_id = video->plane;
+			drmIoctl(video->sna->kgem.fd, DRM_IOCTL_MODE_SETPLANE, &s);
+		}
+		video->plane = s.plane_id;
+	}
 
 	if (video->bo != frame->bo) {
 		if (video->bo)
@@ -356,8 +369,7 @@ static int sna_video_sprite_put_image(ClientPtr client,
 
 	sna_video_frame_init(video, format->id, width, height, &frame);
 
-	if (!sna_video_clip_helper(sna->scrn, video, &frame,
-				   &crtc, &dst_box,
+	if (!sna_video_clip_helper(video, &frame, &crtc, &dst_box,
 				   src_x, src_y, draw->x + drw_x, draw->y + drw_y,
 				   src_w, src_h, drw_w, drw_h,
 				   &clip))
@@ -417,6 +429,7 @@ static int sna_video_sprite_put_image(ClientPtr client,
 				       video->color_key,
 				       RegionRects(&clip),
 				       RegionNumRects(&clip)))
+			RegionCopy(&video->clip, &clip);
 		sna_window_set_port((WindowPtr)draw, port);
 	}
 

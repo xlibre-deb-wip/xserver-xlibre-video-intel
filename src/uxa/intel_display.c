@@ -38,6 +38,7 @@
 #include <poll.h>
 #include <sys/ioctl.h>
 
+#include "xorg-server.h"
 #include "xorgVersion.h"
 
 #include "intel.h"
@@ -46,7 +47,12 @@
 #include "xf86drm.h"
 #include "xf86drmMode.h"
 #include "X11/Xatom.h"
-#include "X11/extensions/dpmsconst.h"
+#if defined(HAVE_X11_EXTENSIONS_DPMSCONST_H)
+#include <X11/extensions/dpmsconst.h>
+#else
+#define DPMSModeOn 0
+#define DPMSModeOff 3
+#endif
 #include "xf86DDC.h"
 #include "fb.h"
 #include "uxa.h"
@@ -1117,10 +1123,13 @@ intel_output_dpms(xf86OutputPtr output, int dpms)
 				intel_output_dpms_backlight(output,
 							    intel_output->dpms_mode,
 							    dpms);
-			drmModeConnectorSetProperty(mode->fd,
-						    intel_output->output_id,
-						    props->prop_id,
-						    dpms);
+
+			if (output->crtc)
+				drmModeConnectorSetProperty(mode->fd,
+							    intel_output->output_id,
+							    props->prop_id,
+							    dpms);
+
 			if (dpms != DPMSModeOff)
 				intel_output_dpms_backlight(output,
 							    intel_output->dpms_mode,
