@@ -1,3 +1,10 @@
+xserver-xorg-video-intel (2:2.20.9-0ubuntu2.3) quantal-proposed; urgency=low
+
+  * Add fix-possible-clones-computation.patch: Backport from 2.20.10 to fix
+    clone mode on haswell laptops. (LP: #1202524)
+
+ -- Robert Hooker <sarvatt@ubuntu.com>  Thu, 01 Aug 2013 09:24:13 -0400
+
 xserver-xorg-video-intel (2:2.20.9-0ubuntu2.2) quantal-proposed; urgency=low
 
   * Added patches to add/fix Haswell pci-id's (LP: #1175533)

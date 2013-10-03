@@ -6,3 +6,4 @@ fix-hsw-gt3-names.diff
 add-more-reserved-hsw-ids.diff
 add-known-hsw-names.diff
 add-more-correct-hsw-names.diff
+fix-possible-clones-computation.patch

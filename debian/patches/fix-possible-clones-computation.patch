@@ -1,0 +1,126 @@
+--- a/src/intel_display.c
++++ b/src/intel_display.c
+@@ -1435,7 +1435,6 @@
+ 		intel_output_backlight_init(output);
+ 
+ 	output->possible_crtcs = kencoder->possible_crtcs;
+-	output->possible_clones = kencoder->possible_clones;
+ 	output->interlaceAllowed = TRUE;
+ 
+ 	intel_output->output = output;
+@@ -1680,6 +1679,60 @@
+ 		drmHandleEvent(mode->fd, &mode->event_context);
+ }
+ 
++static drmModeEncoderPtr
++intel_get_kencoder(struct intel_mode *mode, int num)
++{
++	struct intel_output *iterator;
++	int id = mode->mode_res->encoders[num];
++
++	list_for_each_entry(iterator, &mode->outputs, link)
++		if (iterator->mode_encoder->encoder_id == id)
++			return iterator->mode_encoder;
++
++	return NULL;
++}
++
++/*
++ * Libdrm's possible_clones is a mask of encoders, Xorg's possible_clones is a
++ * mask of outputs. This function sets Xorg's possible_clones based on the
++ * values read from libdrm.
++ */
++static void
++intel_compute_possible_clones(ScrnInfoPtr scrn, struct intel_mode *mode)
++{
++	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(scrn);
++	struct intel_output *intel_output, *clone;
++	drmModeEncoderPtr cloned_encoder;
++	uint32_t mask;
++	int i, j, k;
++	CARD32 possible_clones;
++
++	for (i = 0; i < config->num_output; i++) {
++		possible_clones = 0;
++		intel_output = config->output[i]->driver_private;
++
++		mask = intel_output->mode_encoder->possible_clones;
++		for (j = 0; mask != 0; j++, mask >>= 1) {
++
++			if ((mask & 1) == 0)
++				continue;
++
++			cloned_encoder = intel_get_kencoder(mode, j);
++			if (!cloned_encoder)
++				continue;
++
++			for (k = 0; k < config->num_output; k++) {
++				clone = config->output[k]->driver_private;
++				if (clone->mode_encoder->encoder_id ==
++					cloned_encoder->encoder_id)
++					possible_clones |= (1 << k);
++			}
++		}
++
++		config->output[i]->possible_clones = possible_clones;
++	}
++}
++
+ Bool intel_mode_pre_init(ScrnInfoPtr scrn, int fd, int cpp)
+ {
+ 	intel_screen_private *intel = intel_get_screen_private(scrn);
+@@ -1715,6 +1768,7 @@
+ 
+ 	for (i = 0; i < mode->mode_res->count_connectors; i++)
+ 		intel_output_init(scrn, mode, i);
++		intel_compute_possible_clones(scrn, mode);
+ 
+ #ifdef INTEL_PIXMAP_SHARING
+ 	xf86ProviderSetup(scrn, NULL, "Intel");
+--- a/src/sna/sna_display.c
++++ b/src/sna/sna_display.c
+@@ -2291,6 +2291,35 @@
+ 	drmModeFreeConnector(koutput);
+ }
+ 
++/* The kernel reports possible encoder clones, whereas X uses a list of
++ * possible connector clones. This is works when we have a 1:1 mapping
++ * between encoders and connectors, but breaks for Haswell which has a pair
++ * of DP/HDMI connectors hanging off a single encoder.
++ */
++static void
++sna_mode_compute_possible_clones(ScrnInfoPtr scrn)
++{
++	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(scrn);
++	unsigned clones[32] = { 0 };
++	int i, j;
++
++	assert(config->num_output <= 32);
++
++	/* Convert from encoder numbering to output numbering */
++	for (i = 0; i < config->num_output; i++) {
++		unsigned mask = config->output[i]->possible_clones;
++		for (j = 0; mask != 0; j++, mask >>= 1) {
++			if ((mask & 1) == 0)
++				continue;
++
++			clones[j] |= 1 << i;
++		}
++	}
++
++	for (i = 0; i < config->num_output; i++)
++		config->output[i]->possible_clones = clones[i];
++}
++
+ struct sna_visit_set_pixmap_window {
+ 	PixmapPtr old, new;
+ };
+@@ -2573,6 +2602,8 @@
+ 
+ 	for (i = 0; i < mode->kmode->count_connectors; i++)
+ 		sna_output_init(scrn, mode, i);
++	if (!xf86IsEntityShared(scrn->entityList[0]))
++		sna_mode_compute_possible_clones(scrn);
+ 
+ #if HAS_PIXMAP_SHARING
+ 	xf86ProviderSetup(scrn, NULL, "Intel");
