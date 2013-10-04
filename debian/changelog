@@ -1,4 +1,4 @@
-xserver-xorg-video-intel (2:2.21.6-0ubuntu4.3) UNRELEASED; urgency=low
+xserver-xorg-video-intel (2:2.21.6-0ubuntu4.3) raring-proposed; urgency=low
 
   * sna-fixup-possible-clones.diff: Backport from 2.21.9 to fix
     clone mode on haswell laptops. (LP: #1202524)
