@@ -6,3 +6,4 @@ add-more-reserved-hsw-ids.diff
 add-known-hsw-names.diff
 add-more-correct-hsw-names.diff
 hsw-green-xv.patch
+sna-fixup-possible-clones.diff

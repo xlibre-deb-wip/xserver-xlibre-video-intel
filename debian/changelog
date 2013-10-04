@@ -1,3 +1,10 @@
+xserver-xorg-video-intel (2:2.21.6-0ubuntu4.3) UNRELEASED; urgency=low
+
+  * sna-fixup-possible-clones.diff: Backport from 2.21.9 to fix
+    clone mode on haswell laptops. (LP: #1202524)
+
+ -- Timo Aaltonen <tjaalton@ubuntu.com>  Fri, 04 Oct 2013 11:39:07 +0300
+
 xserver-xorg-video-intel (2:2.21.6-0ubuntu4.2) raring-proposed; urgency=low
 
   * Add hsw-green-xv.patch, backport from 2.21.10 to fix green screens when using XV
