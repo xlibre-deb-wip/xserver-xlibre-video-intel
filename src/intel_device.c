@@ -48,6 +48,10 @@
 #include <xf86_OSproc.h>
 #include <i915_drm.h>
 
+#ifdef XSERVER_PLATFORM_BUS
+#include <xf86platformBus.h>
+#endif
+
 #include "intel_driver.h"
 
 struct intel_device {
@@ -59,6 +63,31 @@ struct intel_device {
 };
 
 static int intel_device_key = -1;
+
+static int __intel_get_device_id(int fd)
+{
+	struct drm_i915_getparam gp;
+	int devid;
+
+	gp.param = I915_PARAM_CHIPSET_ID;
+	gp.value = &devid;
+
+	if (ioctl(fd, DRM_IOCTL_I915_GETPARAM, &gp, sizeof(gp)))
+		return 0;
+
+	return devid;
+}
+
+int intel_entity_get_devid(int index)
+{
+	struct intel_device *dev;
+
+	dev = xf86GetEntityPrivate(index, intel_device_key)->ptr;
+	if (dev == NULL)
+		return 0;
+
+	return __intel_get_device_id(dev->fd);
+}
 
 static inline struct intel_device *intel_device(ScrnInfoPtr scrn)
 {
@@ -154,6 +183,9 @@ static int __intel_open_device(const struct pci_device *pci, char **path)
 		char id[20];
 		int ret;
 
+		if (pci == NULL)
+			return -1;
+
 		snprintf(id, sizeof(id),
 			 "pci:%04x:%02x:%02x.%d",
 			 pci->domain, pci->bus, pci->dev, pci->func);
@@ -206,19 +238,67 @@ static char *find_render_node(int fd)
 	if (master.st_rdev & 0x80)
 		return NULL;
 
-	sprintf(buf, "/dev/dri/renderD%d", (int)((master.st_rdev | 0x80) & 0xff));
+	sprintf(buf, "/dev/dri/renderD%d", (int)((master.st_rdev | 0x80) & 0xbf));
 	if (stat(buf, &render) == 0 &&
 	    master.st_mode == render.st_mode &&
-	    render.st_rdev == (master.st_rdev | 0x80))
+	    render.st_rdev == ((master.st_rdev | 0x80) & 0xbf))
 		return strdup(buf);
 #endif
 
 	return NULL;
 }
 
+#if defined(ODEV_ATTRIB_PATH)
+static char *get_path(struct xf86_platform_device *dev)
+{
+	const char *path;
+
+	if (dev == NULL)
+		return NULL;
+
+	path = xf86_get_platform_device_attrib(dev, ODEV_ATTRIB_PATH);
+	if (path == NULL)
+		return NULL;
+
+	return strdup(path);
+}
+
+#else
+
+static char *get_path(struct xf86_platform_device *dev)
+{
+	return NULL;
+}
+#endif
+
+
+#if defined(ODEV_ATTRIB_FD) && 0
+static int get_fd(struct xf86_platform_device *dev)
+{
+	const char *str;
+
+	if (dev == NULL)
+		return -1;
+
+	str = xf86_get_platform_device_attrib(dev, ODEV_ATTRIB_FD);
+	if (str == NULL)
+		return -1;
+
+	return atoi(str);
+}
+
+#else
+
+static int get_fd(struct xf86_platform_device *dev)
+{
+	return -1;
+}
+
+#endif
+
 int intel_open_device(int entity_num,
 		      const struct pci_device *pci,
-		      const char *path)
+		      struct xf86_platform_device *platform)
 {
 	struct intel_device *dev;
 	char *local_path;
@@ -233,9 +313,11 @@ int intel_open_device(int entity_num,
 	if (dev)
 		return dev->fd;
 
-	local_path = path ? strdup(path) : NULL;
+	local_path = get_path(platform);
 
-	fd = __intel_open_device(pci, &local_path);
+	fd = get_fd(platform);
+	if (fd == -1)
+		fd = __intel_open_device(pci, &local_path);
 	if (fd == -1)
 		goto err_path;
 
@@ -317,6 +399,13 @@ const char *intel_get_client_name(ScrnInfoPtr scrn)
 	struct intel_device *dev = intel_device(scrn);
 	assert(dev && dev->render_node);
 	return dev->render_node;
+}
+
+int intel_get_device_id(ScrnInfoPtr scrn)
+{
+	struct intel_device *dev = intel_device(scrn);
+	assert(dev && dev->fd != -1);
+	return __intel_get_device_id(dev->fd);
 }
 
 int intel_get_master(ScrnInfoPtr scrn)

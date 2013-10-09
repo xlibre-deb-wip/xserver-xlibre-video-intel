@@ -488,6 +488,9 @@ static void set_bo(PixmapPtr pixmap, struct kgem_bo *bo)
 	struct sna_pixmap *priv = sna_pixmap(pixmap);
 	RegionRec region;
 
+	DBG(("%s: pixmap=%ld, handle=%d\n",
+	     __FUNCTION__, pixmap->drawable.serialNumber, bo->handle));
+
 	assert(pixmap->drawable.width * pixmap->drawable.bitsPerPixel <= 8*bo->pitch);
 	assert(pixmap->drawable.height * bo->pitch <= kgem_bo_size(bo));
 	assert(bo->proxy == NULL);
@@ -1620,14 +1623,14 @@ static void sna_dri_flip_event(struct sna *sna,
 	if (flip->scanout[1].bo) {
 		struct dri_bo *c = NULL;
 
-		DBG(("%s: retiring previous scanout handle=%d,name=%d\n",
+		DBG(("%s: retiring previous scanout handle=%d, name=%d, refcnt=%d\n",
 		     __FUNCTION__,
 		     flip->scanout[1].bo->handle,
-		     flip->scanout[1].name));
+		     flip->scanout[1].name,
+		     flip->scanout[1].bo->refcnt));
 
-		if (flip->scanout[1].bo != flip->scanout[0].bo) {
-			assert(flip->scanout[1].bo->refcnt == 1);
-
+		if (flip->scanout[1].bo != flip->scanout[0].bo &&
+		    flip->scanout[1].bo->refcnt == 1) {
 			if (!list_is_empty(&flip->cache))
 				c = list_last_entry(&flip->cache, struct dri_bo, link);
 			if (c) {

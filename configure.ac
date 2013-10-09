@@ -23,7 +23,7 @@
 # Initialize Autoconf
 AC_PREREQ([2.60])
 AC_INIT([xf86-video-intel],
-        [2.99.903],
+        [2.99.904],
         [https://bugs.freedesktop.org/enter_bug.cgi?product=xorg],
         [xf86-video-intel])
 AC_CONFIG_SRCDIR([Makefile.am])
@@ -167,14 +167,13 @@ PKG_CHECK_MODULES(X11, [x11 xrender xrandr xext pixman-1], [x11="yes"], [x11="no
 AM_CONDITIONAL(HAVE_X11, test "x$x11" = "xyes")
 
 PKG_CHECK_MODULES(TOOL, [xinerama xrandr xdamage xfixes xcursor xtst xrender xext x11 pixman-1], [tools="yes"], [tools="no"])
-AM_CONDITIONAL(BUILD_TOOLS, test "x$tools" = "xyes")
 
 if test "x$tools" = "xyes"; then
-  AC_CHECK_HEADER(sys/ipc.h)
-  AC_CHECK_HEADER(sys/shm.h)
+  AC_CHECK_HEADER([sys/ipc.h], [], [tools=no])
+  AC_CHECK_HEADER([sys/shm.h], [], [tools=no])
 
   if test "$ac_cv_header_sys_ipc_h" = "yes" -a "$ac_cv_header_sys_shm_h" = "yes"; then
-      AC_MSG_CHECKING(whether shmctl IPC_RMID allowes subsequent attaches)
+      AC_MSG_CHECKING(whether shmctl IPC_RMID allows subsequent attaches)
       AC_TRY_RUN([
 		  #include <sys/types.h>
 		  #include <sys/ipc.h>
@@ -202,10 +201,12 @@ if test "x$tools" = "xyes"; then
 		  AC_MSG_RESULT(assuming no))
       fi
 
-      AC_CHECK_HEADERS([X11/extensions/XShm.h X11/extensions/shmproto.h X11/extensions/shmstr.h], [], [],
+      AC_CHECK_HEADERS([X11/extensions/XShm.h X11/extensions/shmproto.h X11/extensions/shmstr.h], [], [tools=no],
 		       [#include <X11/Xlibint.h>
 			#include <X11/Xproto.h>])
 fi
+
+AM_CONDITIONAL(BUILD_TOOLS, test "x$tools" = "xyes")
 
 # Define a configure option for an alternate module directory
 AC_ARG_WITH(xorg-module-dir,
@@ -304,6 +305,9 @@ AC_ARG_ENABLE(glamor,
 	      [GLAMOR="$enableval"],
 	      [GLAMOR="no"])
 if test "x$GLAMOR" != "xno"; then
+	if test "x$UXA" != "xyes"; then
+		AC_MSG_ERROR([Glamor acceleration requested but UXA is not enabled])
+	fi
 	PKG_CHECK_MODULES(LIBGLAMOR, [glamor >= 0.3.1])
 	PKG_CHECK_MODULES(LIBGLAMOR_EGL, [glamor-egl])
 	AC_DEFINE(USE_GLAMOR, 1, [Enable glamor acceleration])

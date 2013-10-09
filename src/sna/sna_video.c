@@ -96,6 +96,13 @@ sna_video_buffer(struct sna_video *video,
 	if (video->buf && __kgem_bo_size(video->buf) < frame->size)
 		sna_video_free_buffers(video);
 
+	if (video->buf && video->buf->scanout) {
+		if (frame->width != video->width ||
+		    frame->height != video->height ||
+		    frame->id != video->format)
+			sna_video_free_buffers(video);
+	}
+
 	if (video->buf == NULL) {
 		if (video->tiled) {
 			video->buf = kgem_create_2d(&video->sna->kgem,
@@ -106,6 +113,10 @@ sna_video_buffer(struct sna_video *video,
 							CREATE_GTT_MAP);
 		}
 	}
+
+	video->width  = frame->width;
+	video->height = frame->height;
+	video->format = frame->id;
 
 	return video->buf;
 }
