@@ -3123,20 +3123,29 @@ static void
 gen3_align_vertex(struct sna *sna,
 		  const struct sna_composite_op *op)
 {
-	if (op->floats_per_vertex != sna->render_state.gen3.last_floats_per_vertex) {
-		if (sna->render.vertex_size - sna->render.vertex_used < 2*op->floats_per_rect)
-			gen3_vertex_finish(sna);
+	int vertex_index;
 
-		DBG(("aligning vertex: was %d, now %d floats per vertex, %d->%d\n",
-		     sna->render_state.gen3.last_floats_per_vertex,
-		     op->floats_per_vertex,
-		     sna->render.vertex_index,
-		     (sna->render.vertex_used + op->floats_per_vertex - 1) / op->floats_per_vertex));
-		sna->render.vertex_index = (sna->render.vertex_used + op->floats_per_vertex - 1) / op->floats_per_vertex;
-		sna->render.vertex_used = sna->render.vertex_index * op->floats_per_vertex;
-		assert(sna->render.vertex_used < sna->render.vertex_size - op->floats_per_rect);
-		sna->render_state.gen3.last_floats_per_vertex = op->floats_per_vertex;
+	if (op->floats_per_vertex == sna->render_state.gen3.last_floats_per_vertex)
+		return;
+
+	DBG(("aligning vertex: was %d, now %d floats per vertex\n",
+	     sna->render_state.gen3.last_floats_per_vertex,
+	     op->floats_per_vertex));
+
+	assert(op->floats_per_rect == 3*op->floats_per_vertex);
+
+	vertex_index = (sna->render.vertex_used + op->floats_per_vertex - 1) / op->floats_per_vertex;
+	if ((int)sna->render.vertex_size - vertex_index * op->floats_per_vertex < 2*op->floats_per_rect) {
+		DBG(("%s: flushing vertex buffer: new index=%d, max=%d\n",
+		     __FUNCTION__, vertex_index, sna->render.vertex_size / op->floats_per_vertex));
+		if (gen3_vertex_finish(sna) < op->floats_per_vertex)
+			kgem_submit(&sna->kgem);
+
+		vertex_index = (sna->render.vertex_used + op->floats_per_vertex - 1) / op->floats_per_vertex;
 	}
+
+	sna->render.vertex_index = vertex_index;
+	sna->render.vertex_used = vertex_index * op->floats_per_vertex;
 }
 
 static bool
@@ -3160,9 +3169,9 @@ gen3_composite_set_target(struct sna *sna,
 	} else
 		sna_render_picture_extents(dst, &box);
 
-	op->dst.bo = sna_drawable_use_bo (dst->pDrawable,
-					  PREFER_GPU | FORCE_GPU | RENDER_GPU,
-					  &box, &op->damage);
+	op->dst.bo = sna_drawable_use_bo(dst->pDrawable,
+					 PREFER_GPU | FORCE_GPU | RENDER_GPU,
+					 &box, &op->damage);
 	if (op->dst.bo == NULL)
 		return false;
 
@@ -3493,7 +3502,7 @@ gen3_render_composite(struct sna *sna,
 		return true;
 
 	if (gen3_composite_fallback(sna, op, src, mask, dst))
-		return false;
+		goto fallback;
 
 	if (need_tiling(sna, width, height))
 		return sna_tiling_composite(op, src, mask, dst,
@@ -3517,7 +3526,7 @@ gen3_render_composite(struct sna *sna,
 		if (!sna_render_composite_redirect(sna, tmp,
 						   dst_x, dst_y, width, height,
 						   op > PictOpSrc || dst->pCompositeClip->data))
-			return false;
+			goto fallback;
 	}
 
 	tmp->u.gen3.num_constants = 0;
@@ -3806,8 +3815,8 @@ gen3_render_composite(struct sna *sna,
 			goto cleanup_mask;
 	}
 
-	gen3_emit_composite_state(sna, tmp);
 	gen3_align_vertex(sna, tmp);
+	gen3_emit_composite_state(sna, tmp);
 	return true;
 
 cleanup_mask:
@@ -3819,7 +3828,14 @@ cleanup_src:
 cleanup_dst:
 	if (tmp->redirect.real_bo)
 		kgem_bo_destroy(&sna->kgem, tmp->dst.bo);
-	return false;
+fallback:
+	return (mask == NULL &&
+		sna_blt_composite(sna,
+				  op, src, dst,
+				  src_x, src_y,
+				  dst_x, dst_y,
+				  width, height,
+				  tmp, true));
 }
 
 static void
@@ -5014,8 +5030,8 @@ gen3_render_composite_spans(struct sna *sna,
 			goto cleanup_src;
 	}
 
-	gen3_emit_composite_state(sna, &tmp->base);
 	gen3_align_vertex(sna, &tmp->base);
+	gen3_emit_composite_state(sna, &tmp->base);
 	return true;
 
 cleanup_src:
@@ -5658,8 +5674,8 @@ fallback_blt:
 	dst_dy += tmp.dst.y;
 	tmp.dst.x = tmp.dst.y = 0;
 
-	gen3_emit_composite_state(sna, &tmp);
 	gen3_align_vertex(sna, &tmp);
+	gen3_emit_composite_state(sna, &tmp);
 
 	do {
 		int n_this_time;
@@ -5796,8 +5812,8 @@ fallback:
 	tmp->blt  = gen3_render_copy_blt;
 	tmp->done = gen3_render_copy_done;
 
-	gen3_emit_composite_state(sna, &tmp->base);
 	gen3_align_vertex(sna, &tmp->base);
+	gen3_emit_composite_state(sna, &tmp->base);
 	return true;
 }
 
@@ -5910,7 +5926,7 @@ gen3_render_fill_boxes(struct sna *sna,
 			return false;
 		}
 	}
-	DBG(("%s: using shader for op=%d, format=%x, pixel=%x\n",
+	DBG(("%s: using shader for op=%d, format=%08x, pixel=%08x\n",
 	     __FUNCTION__, op, (int)format, pixel));
 
 	tmp.op = op;
@@ -5936,8 +5952,8 @@ gen3_render_fill_boxes(struct sna *sna,
 		assert(kgem_check_bo(&sna->kgem, dst_bo, NULL));
 	}
 
-	gen3_emit_composite_state(sna, &tmp);
 	gen3_align_vertex(sna, &tmp);
+	gen3_emit_composite_state(sna, &tmp);
 
 	do {
 		int n_this_time;
@@ -6087,8 +6103,8 @@ gen3_render_fill(struct sna *sna, uint8_t alu,
 	tmp->boxes = gen3_render_fill_op_boxes;
 	tmp->done  = gen3_render_fill_op_done;
 
-	gen3_emit_composite_state(sna, &tmp->base);
 	gen3_align_vertex(sna, &tmp->base);
+	gen3_emit_composite_state(sna, &tmp->base);
 	return true;
 }
 
@@ -6165,8 +6181,8 @@ gen3_render_fill_one(struct sna *sna, PixmapPtr dst, struct kgem_bo *bo,
 			return true;
 	}
 
-	gen3_emit_composite_state(sna, &tmp);
 	gen3_align_vertex(sna, &tmp);
+	gen3_emit_composite_state(sna, &tmp);
 	gen3_get_rectangles(sna, &tmp, 1);
 	DBG(("	(%d, %d), (%d, %d): %x\n", x1, y1, x2, y2, color));
 	OUT_VERTEX(x2);

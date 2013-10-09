@@ -155,6 +155,14 @@ static bool sna_mode_has_pending_events(struct sna *sna)
 	return poll(&pfd, 1, 0) == 1;
 }
 
+static bool sna_mode_wait_for_event(struct sna *sna)
+{
+	struct pollfd pfd;
+	pfd.fd = sna->kgem.fd;
+	pfd.events = POLLIN;
+	return poll(&pfd, 1, -1) == 1;
+}
+
 #define BACKLIGHT_CLASS "/sys/class/backlight"
 
 /* Enough for 10 digits of backlight + '\n' + '\0' */
@@ -476,11 +484,15 @@ has_device_backlight(xf86OutputPtr output, int *best_type)
 {
 	struct sna_output *sna_output = output->driver_private;
 	struct sna *sna = to_sna(output->scrn);
-	struct pci_device *pci = sna->PciInfo;
+	struct pci_device *pci;
 	char path[1024];
 	char *best_iface = NULL;
 	DIR *dir;
 	struct dirent *de;
+
+	pci = xf86GetPciInfoForEntity(sna->pEnt->index);
+	if (pci == NULL)
+		return NULL;
 
 	snprintf(path, sizeof(path),
 		 "/sys/bus/pci/devices/%04x:%02x:%02x.%d/backlight",
@@ -2027,21 +2039,46 @@ sna_output_get_modes(xf86OutputPtr output)
 {
 	struct sna_output *sna_output = output->driver_private;
 	DisplayModePtr Modes = NULL;
+	DisplayModeRec current;
+	bool has_current = false;
 	int i;
 
-	DBG(("%s\n", __FUNCTION__));
+	DBG(("%s(%s)\n", __FUNCTION__, output->name));
 
 	sna_output_attach_edid(output);
+
+	memset(&current, 0, sizeof(current));
+	if (output->crtc) {
+		struct drm_mode_crtc mode;
+
+		VG_CLEAR(mode);
+		mode.crtc_id = to_sna_crtc(output->crtc)->id;
+
+		if (drmIoctl(to_sna(output->scrn)->kgem.fd, DRM_IOCTL_MODE_GETCRTC, &mode) == 0) {
+			DBG(("%s: CRTC:%d, pipe=%d: has mode?=%d\n", __FUNCTION__,
+			     to_sna_crtc(output->crtc)->id,
+			     to_sna_crtc(output->crtc)->pipe,
+			     mode.mode_valid && mode.mode.clock));
+
+			if (mode.mode_valid && mode.mode.clock)
+				mode_from_kmode(output->scrn, &mode.mode, &current);
+		}
+	}
 
 	for (i = 0; i < sna_output->num_modes; i++) {
 		DisplayModePtr Mode;
 
 		Mode = calloc(1, sizeof(DisplayModeRec));
-		if (Mode)
-			Modes = xf86ModesAdd(Modes,
-					     mode_from_kmode(output->scrn,
-							     &sna_output->modes[i],
-							     Mode));
+		if (Mode) {
+			Mode = mode_from_kmode(output->scrn,
+					       &sna_output->modes[i],
+					       Mode);
+
+			if (!has_current && xf86ModesEqual(Mode, &current))
+				has_current = true;
+
+			Modes = xf86ModesAdd(Modes, Mode);
+		}
 	}
 
 	/*
@@ -2068,6 +2105,20 @@ sna_output_get_modes(xf86OutputPtr output)
 
 		Modes = sna_output_panel_edid(output, Modes);
 	}
+
+	if (!has_current && current.Clock) {
+		DisplayModePtr Mode;
+
+		Mode = calloc(1, sizeof(DisplayModeRec));
+		if (Mode) {
+			*Mode = current;
+			current.name = NULL;
+
+			output->probed_modes =
+				xf86ModesAdd(output->probed_modes, Mode);
+		}
+	}
+	free(current.name);
 
 	return Modes;
 }
@@ -3115,8 +3166,10 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 
 	assert((sna->flags & SNA_IS_HOSTED) == 0);
 
-	if (xf86ReturnOptValBool(sna->Options, OPTION_REPROBE, FALSE))
+	if (xf86ReturnOptValBool(sna->Options, OPTION_REPROBE, FALSE)) {
+		DBG(("%s: user requests reprobing\n", __FUNCTION__));
 		return false;
+	}
 
 	/* First scan through all outputs and look for user overrides */
 	for (i = 0; i < config->num_output; i++) {
@@ -3227,6 +3280,8 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 
 		if (j == config->num_crtc) {
 			/* Can not find the earlier associated CRTC, bail */
+			DBG(("%s: existing setup conflicts with output assignment (Zaphod), reprobing\n",
+			     __FUNCTION__));
 			return false;
 		}
 	}
@@ -3261,6 +3316,7 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 	scrn->virtualY = height;
 
 	xf86SetScrnInfoModes(sna->scrn);
+	DBG(("%s: SetScrnInfoModes = %p\n", __FUNCTION__, scrn->modes));
 	return scrn->modes != NULL;
 }
 
@@ -4224,7 +4280,8 @@ disable:
 		}
 
 		if (sna->mode.shadow) {
-			while (sna->mode.shadow_flip)
+			while (sna->mode.shadow_flip &&
+			       sna_mode_wait_for_event(sna))
 				sna_mode_wakeup(sna);
 			(void)sna->render.copy_boxes(sna, GXcopy,
 						     sna->front, new, 0, 0,

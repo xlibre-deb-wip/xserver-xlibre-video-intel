@@ -713,7 +713,7 @@ total_ram_size(void)
 static unsigned
 cpu_cache_size__cpuid4(void)
 {
-	/* Deterministic Cache Parmaeters (Function 04h)":
+	/* Deterministic Cache Parameters (Function 04h)":
 	 *    When EAX is initialized to a value of 4, the CPUID instruction
 	 *    returns deterministic cache information in the EAX, EBX, ECX
 	 *    and EDX registers.  This function requires ECX be initialized
@@ -891,7 +891,7 @@ static bool is_hw_supported(struct kgem *kgem,
 	 * hw acceleration.
 	 */
 
-	if (kgem->gen == 060 && dev->revision < 8) {
+	if (kgem->gen == 060 && dev && dev->revision < 8) {
 		/* pre-production SNB with dysfunctional BLT */
 		return false;
 	}
@@ -1283,7 +1283,9 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 	     kgem->aperture_low, kgem->aperture_low / (1024*1024),
 	     kgem->aperture_high, kgem->aperture_high / (1024*1024)));
 
-	kgem->aperture_mappable = agp_aperture_size(dev, gen);
+	kgem->aperture_mappable = 256 * 1024 * 1024;
+	if (dev != NULL)
+		kgem->aperture_mappable = agp_aperture_size(dev, gen);
 	if (kgem->aperture_mappable == 0 ||
 	    kgem->aperture_mappable > aperture.aper_size)
 		kgem->aperture_mappable = aperture.aper_size;
@@ -1404,7 +1406,7 @@ inline static uint32_t kgem_pitch_alignment(struct kgem *kgem, unsigned flags)
 	return kgem->min_alignment;
 }
 
-void kgem_get_tile_size(struct kgem *kgem, int tiling,
+void kgem_get_tile_size(struct kgem *kgem, int tiling, int pitch,
 			int *tile_width, int *tile_height, int *tile_size)
 {
 	if (kgem->gen <= 030) {
@@ -1441,6 +1443,10 @@ void kgem_get_tile_size(struct kgem *kgem, int tiling,
 		*tile_size = 4096;
 		break;
 	}
+
+	/* Force offset alignment to tile-row */
+	if (tiling && kgem->gen < 033)
+		*tile_width = pitch;
 }
 
 static uint32_t kgem_surface_size(struct kgem *kgem,
@@ -1516,7 +1522,7 @@ static uint32_t kgem_surface_size(struct kgem *kgem,
 	if (relaxed_fencing || tiling == I915_TILING_NONE)
 		return PAGE_ALIGN(size);
 
-	/*  We need to allocate a pot fence region for a tiled buffer. */
+	/* We need to allocate a pot fence region for a tiled buffer. */
 	if (kgem->gen < 030)
 		tile_width = 512 * 1024;
 	else
@@ -1627,7 +1633,7 @@ static void kgem_bo_binding_free(struct kgem *kgem, struct kgem_bo *bo)
 	b = bo->binding.next;
 	while (b) {
 		struct kgem_bo_binding *next = b->next;
-		free (b);
+		free(b);
 		b = next;
 	}
 }
@@ -1738,7 +1744,11 @@ static struct kgem_bo *kgem_bo_replace_io(struct kgem_bo *bo)
 		return bo;
 
 	assert(!bo->snoop);
-	base = malloc(sizeof(*base));
+	if (__kgem_freed_bo) {
+		base = __kgem_freed_bo;
+		__kgem_freed_bo = *(struct kgem_bo **)base;
+	} else
+		base = malloc(sizeof(*base));
 	if (base) {
 		DBG(("%s: transferring io handle=%d to bo\n",
 		     __FUNCTION__, bo->handle));
@@ -2399,7 +2409,7 @@ static void kgem_finish_buffers(struct kgem *kgem)
 		}
 
 		if (bo->mmapped) {
-			int used;
+			uint32_t used;
 
 			assert(!bo->need_io);
 
@@ -2409,6 +2419,7 @@ static void kgem_finish_buffers(struct kgem *kgem)
 			    (kgem->has_llc || bo->mmapped == MMAPPED_GTT || bo->base.snoop)) {
 				DBG(("%s: retaining upload buffer (%d/%d)\n",
 				     __FUNCTION__, bo->used, bytes(&bo->base)));
+				assert(used >= bo->used);
 				bo->used = used;
 				list_move(&bo->base.list,
 					  &kgem->active_buffers);
@@ -3913,7 +3924,7 @@ struct kgem_bo *kgem_create_2d(struct kgem *kgem,
 	bucket = cache_bucket(size);
 
 	if (flags & CREATE_SCANOUT) {
-		struct kgem_bo *last = NULL;
+		struct kgem_bo *last = NULL, *first = NULL;
 
 		list_for_each_entry_reverse(bo, &kgem->scanout, list) {
 			assert(bo->scanout);
@@ -3924,8 +3935,11 @@ struct kgem_bo *kgem_create_2d(struct kgem *kgem,
 			if (size > num_pages(bo) || num_pages(bo) > 2*size)
 				continue;
 
-			if (!check_scanout_size(kgem, bo, width, height))
+			if (!check_scanout_size(kgem, bo, width, height)) {
+				if (first == NULL)
+					first = bo;
 				continue;
+			}
 
 			if (bo->tiling != tiling ||
 			    (tiling != I915_TILING_NONE && bo->pitch != pitch)) {
@@ -3963,6 +3977,46 @@ struct kgem_bo *kgem_create_2d(struct kgem *kgem,
 			assert_tiling(kgem, last);
 			last->refcnt = 1;
 			return last;
+		}
+
+		if (first) {
+			ScrnInfoPtr scrn =
+				container_of(kgem, struct sna, kgem)->scrn;
+
+			if (scrn->vtSema) {
+				DBG(("%s: recreate fb %dx%d@%d/%d\n",
+				     __FUNCTION__, width, height, scrn->depth, scrn->bitsPerPixel));
+
+				if (bo->tiling != tiling ||
+				    (tiling != I915_TILING_NONE && bo->pitch != pitch)) {
+					if (gem_set_tiling(kgem->fd, bo->handle,
+							   tiling, pitch)) {
+						bo->tiling = tiling;
+						bo->pitch = pitch;
+					}
+				}
+
+				if (bo->tiling == tiling && bo->pitch == pitch) {
+					struct drm_mode_fb_cmd arg;
+
+					VG_CLEAR(arg);
+					arg.width = width;
+					arg.height = height;
+					arg.pitch = bo->pitch;
+					arg.bpp = scrn->bitsPerPixel;
+					arg.depth = scrn->depth;
+					arg.handle = bo->handle;
+
+					drmIoctl(kgem->fd, DRM_IOCTL_MODE_RMFB, &bo->delta);
+					if (drmIoctl(kgem->fd, DRM_IOCTL_MODE_ADDFB, &arg)) {
+						bo->scanout = false;
+						kgem_bo_free(kgem, bo);
+					} else {
+						bo->delta = arg.fb_id;
+						return bo;
+					}
+				}
+			}
 		}
 
 		bo = __kgem_bo_create_as_display(kgem, size, tiling, pitch);
@@ -4516,7 +4570,7 @@ void _kgem_bo_destroy(struct kgem *kgem, struct kgem_bo *bo)
 	if (bo->proxy) {
 		_list_del(&bo->vma);
 		_list_del(&bo->request);
-		if (bo->io && bo->exec == NULL)
+		if (bo->io && bo->exec == NULL && bo->domain == DOMAIN_CPU)
 			_kgem_bo_delete_buffer(kgem, bo);
 		kgem_bo_unref(kgem, bo->proxy);
 		kgem_bo_binding_free(kgem, bo);
@@ -5934,6 +5988,7 @@ init:
 
 done:
 	bo->used = ALIGN(bo->used, UPLOAD_ALIGNMENT);
+	assert(bo->used && bo->used <= bytes(&bo->base));
 	assert(bo->mem);
 	*ret = (char *)bo->mem + offset;
 	return kgem_create_proxy(kgem, &bo->base, offset, size);

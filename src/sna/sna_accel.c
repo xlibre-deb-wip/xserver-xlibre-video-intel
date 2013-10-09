@@ -1616,10 +1616,12 @@ sna_pixmap_undo_cow(struct sna *sna, struct sna_pixmap *priv, unsigned flags)
 {
 	struct sna_cow *cow = COW(priv->cow);
 
-	DBG(("%s: pixmap=%ld, handle=%d, flags=%x\n",
+	DBG(("%s: pixmap=%ld, handle=%d [refcnt=%d], cow refcnt=%d, flags=%x\n",
 	     __FUNCTION__,
 	     priv->pixmap->drawable.serialNumber,
 	     priv->gpu_bo->handle,
+	     priv->gpu_bo->refcnt,
+	     cow->refcnt,
 	     flags));
 
 	assert(priv->gpu_bo == cow->bo);
@@ -1628,6 +1630,7 @@ sna_pixmap_undo_cow(struct sna *sna, struct sna_pixmap *priv, unsigned flags)
 	list_del(&priv->cow_list);
 
 	if (!--cow->refcnt) {
+		DBG(("%s: freeing cow\n", __FUNCTION__));
 		assert(list_is_empty(&cow->list));
 		free(cow);
 	} else if (IS_COW_OWNER(priv->cow) && priv->pinned) {
@@ -1673,6 +1676,10 @@ sna_pixmap_undo_cow(struct sna *sna, struct sna_pixmap *priv, unsigned flags)
 			assert(clone->gpu_bo == cow->bo);
 			kgem_bo_destroy(&sna->kgem, clone->gpu_bo);
 			clone->gpu_bo = kgem_bo_reference(bo);
+			if (clone->mapped) {
+				clone->pixmap->devPrivate.ptr = NULL;
+				clone->mapped = false;
+			}
 		}
 		cow->bo = bo;
 		kgem_bo_destroy(&sna->kgem, bo);
@@ -15731,6 +15738,20 @@ static bool sna_picture_init(ScreenPtr screen)
 	return true;
 }
 
+static bool sna_option_accel_none(struct sna *sna)
+{
+	const char *s;
+
+	if (xf86ReturnOptValBool(sna->Options, OPTION_ACCEL_DISABLE, FALSE))
+		return true;
+
+	s = xf86GetOptValString(sna->Options, OPTION_ACCEL_METHOD);
+	if (s == NULL)
+		return false;
+
+	return strcasecmp(s, "none") == 0;
+}
+
 static bool sna_option_accel_blt(struct sna *sna)
 {
 	const char *s;
@@ -15819,7 +15840,10 @@ bool sna_accel_init(ScreenPtr screen, struct sna *sna)
 		return false;
 
 	backend = no_render_init(sna);
-	if (sna_option_accel_blt(sna) || sna->info->gen >= 0100)
+	if (sna_option_accel_none(sna)) {
+		backend = "disabled";
+		sna->kgem.wedged = true;
+	} else if (sna_option_accel_blt(sna) || sna->info->gen >= 0100)
 		(void)backend;
 	else if (sna->info->gen >= 070)
 		backend = gen7_render_init(sna, backend);
@@ -15925,6 +15949,7 @@ void sna_accel_block_handler(struct sna *sna, struct timeval **tv)
 		_kgem_submit(&sna->kgem);
 	}
 
+restart:
 	if (sna_accel_do_flush(sna))
 		sna_accel_flush(sna);
 	assert(sna_accel_scanout(sna) == NULL ||
@@ -15956,9 +15981,11 @@ void sna_accel_block_handler(struct sna *sna, struct timeval **tv)
 		DBG(("%s: evaluating timers, active=%x\n",
 		     __FUNCTION__, sna->timer_active));
 
-		timeout = sna->timer_expire[0] - TIME;
+		timeout = sna->timer_expire[FLUSH_TIMER] - TIME;
 		DBG(("%s: flush timer expires in %d [%d]\n",
-		     __FUNCTION__, timeout, sna->timer_expire[0]));
+		     __FUNCTION__, timeout, sna->timer_expire[FLUSH_TIMER]));
+		if (timeout < 3)
+			goto restart;
 
 		if (*tv == NULL) {
 			*tv = &sna->timer_tv;

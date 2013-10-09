@@ -1312,16 +1312,10 @@ gen6_align_vertex(struct sna *sna, const struct sna_composite_op *op)
 {
 	assert (sna->render.vertex_offset == 0);
 	if (op->floats_per_vertex != sna->render_state.gen6.floats_per_vertex) {
-		if (sna->render.vertex_size - sna->render.vertex_used < 2*op->floats_per_rect)
-			gen4_vertex_finish(sna);
-
-		DBG(("aligning vertex: was %d, now %d floats per vertex, %d->%d\n",
+		DBG(("aligning vertex: was %d, now %d floats per vertex\n",
 		     sna->render_state.gen6.floats_per_vertex,
-		     op->floats_per_vertex,
-		     sna->render.vertex_index,
-		     (sna->render.vertex_used + op->floats_per_vertex - 1) / op->floats_per_vertex));
-		sna->render.vertex_index = (sna->render.vertex_used + op->floats_per_vertex - 1) / op->floats_per_vertex;
-		sna->render.vertex_used = sna->render.vertex_index * op->floats_per_vertex;
+		     op->floats_per_vertex));
+		gen4_vertex_align(sna, op);
 		sna->render_state.gen6.floats_per_vertex = op->floats_per_vertex;
 	}
 	assert((sna->render.vertex_used % op->floats_per_vertex) == 0);
@@ -1649,8 +1643,8 @@ gen6_render_video(struct sna *sna,
 		_kgem_set_mode(&sna->kgem, KGEM_RENDER);
 	}
 
-	gen6_emit_video_state(sna, &tmp);
 	gen6_align_vertex(sna, &tmp);
+	gen6_emit_video_state(sna, &tmp);
 
 	/* Set up the offset for translating from the given region (in screen
 	 * coordinates) to the backing pixmap.
@@ -2399,8 +2393,8 @@ gen6_render_composite(struct sna *sna,
 		_kgem_set_mode(&sna->kgem, KGEM_RENDER);
 	}
 
-	gen6_emit_composite_state(sna, tmp);
 	gen6_align_vertex(sna, tmp);
+	gen6_emit_composite_state(sna, tmp);
 	return true;
 
 cleanup_mask:
@@ -2632,8 +2626,8 @@ gen6_render_composite_spans(struct sna *sna,
 		_kgem_set_mode(&sna->kgem, KGEM_RENDER);
 	}
 
-	gen6_emit_composite_state(sna, &tmp->base);
 	gen6_align_vertex(sna, &tmp->base);
+	gen6_emit_composite_state(sna, &tmp->base);
 	return true;
 
 cleanup_src:
@@ -2916,8 +2910,8 @@ fallback_blt:
 		_kgem_set_mode(&sna->kgem, KGEM_RENDER);
 	}
 
-	gen6_emit_copy_state(sna, &tmp);
 	gen6_align_vertex(sna, &tmp);
+	gen6_emit_copy_state(sna, &tmp);
 
 	do {
 		int16_t *v;
@@ -3075,8 +3069,8 @@ fallback:
 		_kgem_set_mode(&sna->kgem, KGEM_RENDER);
 	}
 
-	gen6_emit_copy_state(sna, &op->base);
 	gen6_align_vertex(sna, &op->base);
+	gen6_emit_copy_state(sna, &op->base);
 
 	op->blt  = gen6_render_copy_blt;
 	op->done = gen6_render_copy_done;
@@ -3241,8 +3235,8 @@ gen6_render_fill_boxes(struct sna *sna,
 		assert(kgem_check_bo(&sna->kgem, dst_bo, NULL));
 	}
 
-	gen6_emit_fill_state(sna, &tmp);
 	gen6_align_vertex(sna, &tmp);
+	gen6_emit_fill_state(sna, &tmp);
 
 	do {
 		int n_this_time;
@@ -3421,8 +3415,8 @@ gen6_render_fill(struct sna *sna, uint8_t alu,
 		assert(kgem_check_bo(&sna->kgem, dst_bo, NULL));
 	}
 
-	gen6_emit_fill_state(sna, &op->base);
 	gen6_align_vertex(sna, &op->base);
+	gen6_emit_fill_state(sna, &op->base);
 
 	op->blt  = gen6_render_op_fill_blt;
 	op->box  = gen6_render_op_fill_box;
@@ -3505,8 +3499,8 @@ gen6_render_fill_one(struct sna *sna, PixmapPtr dst, struct kgem_bo *bo,
 		}
 	}
 
-	gen6_emit_fill_state(sna, &tmp);
 	gen6_align_vertex(sna, &tmp);
+	gen6_emit_fill_state(sna, &tmp);
 
 	gen6_get_rectangles(sna, &tmp, 1, gen6_emit_fill_state);
 
@@ -3592,8 +3586,8 @@ gen6_render_clear(struct sna *sna, PixmapPtr dst, struct kgem_bo *bo)
 		}
 	}
 
-	gen6_emit_fill_state(sna, &tmp);
 	gen6_align_vertex(sna, &tmp);
+	gen6_emit_fill_state(sna, &tmp);
 
 	gen6_get_rectangles(sna, &tmp, 1, gen6_emit_fill_state);
 
@@ -3694,17 +3688,17 @@ static void gen6_render_fini(struct sna *sna)
 	kgem_bo_destroy(&sna->kgem, sna->render_state.gen6.general_bo);
 }
 
-static bool is_gt2(struct sna *sna)
+static bool is_gt2(struct sna *sna, int devid)
 {
-	return sna->PciInfo->device_id & 0x30;
+	return devid & 0x30;
 }
 
-static bool is_mobile(struct sna *sna)
+static bool is_mobile(struct sna *sna, int devid)
 {
-	return (sna->PciInfo->device_id & 0xf) == 0x6;
+	return (devid & 0xf) == 0x6;
 }
 
-static bool gen6_render_setup(struct sna *sna)
+static bool gen6_render_setup(struct sna *sna, int devid)
 {
 	struct gen6_render_state *state = &sna->render_state.gen6;
 	struct sna_static_stream general;
@@ -3712,7 +3706,7 @@ static bool gen6_render_setup(struct sna *sna)
 	int i, j, k, l, m;
 
 	state->info = &gt1_info;
-	if (is_gt2(sna))
+	if (is_gt2(sna, devid))
 		state->info = &gt2_info; /* XXX requires GT_MODE WiZ disabled */
 
 	sna_static_stream_init(&general);
@@ -3784,7 +3778,9 @@ static bool gen6_render_setup(struct sna *sna)
 
 const char *gen6_render_init(struct sna *sna, const char *backend)
 {
-	if (!gen6_render_setup(sna))
+	int devid = intel_get_device_id(sna->scrn);
+
+	if (!gen6_render_setup(sna, devid))
 		return backend;
 
 	sna->kgem.context_switch = gen6_render_context_switch;
@@ -3799,7 +3795,7 @@ const char *gen6_render_init(struct sna *sna, const char *backend)
 #if !NO_COMPOSITE_SPANS
 	sna->render.check_composite_spans = gen6_check_composite_spans;
 	sna->render.composite_spans = gen6_render_composite_spans;
-	if (is_mobile(sna))
+	if (is_mobile(sna, devid))
 		sna->render.prefer_gpu |= PREFER_GPU_SPANS;
 #endif
 	sna->render.video = gen6_render_video;
