@@ -13,8 +13,6 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
     Signed-off-by: Christopher James Halse Rogers <raof@ubuntu.com>
     Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
 
-diff --git a/src/Makefile.am b/src/Makefile.am
-index b0781ca..126bde2 100644
 --- a/src/Makefile.am
 +++ b/src/Makefile.am
 @@ -59,6 +59,7 @@ intel_drv_la_SOURCES = \
@@ -25,11 +23,9 @@ index b0781ca..126bde2 100644
  	compat-api.h \
  	$(NULL)
  
-diff --git a/src/intel_device.c b/src/intel_device.c
-index 92472c5..2dd1625 100644
 --- a/src/intel_device.c
 +++ b/src/intel_device.c
-@@ -146,10 +146,34 @@ static int fd_set_nonblock(int fd)
+@@ -175,10 +175,34 @@ static int fd_set_nonblock(int fd)
  	return fd;
  }
  
@@ -64,8 +60,6 @@ index 92472c5..2dd1625 100644
  	if (*path == NULL) {
  		char id[20];
  		int ret;
-diff --git a/src/intel_driver.h b/src/intel_driver.h
-index e54054f..0c5e4ae 100644
 --- a/src/intel_driver.h
 +++ b/src/intel_driver.h
 @@ -1,6 +1,8 @@
@@ -74,10 +68,10 @@ index e54054f..0c5e4ae 100644
  
 +#include "intel_xmir.h"
 +
+ struct xf86_platform_device;
+ 
  #define INTEL_VERSION 4000
- #define INTEL_NAME "intel"
- #define INTEL_DRIVER_NAME "intel"
-@@ -129,6 +131,6 @@ void intel_put_device(ScrnInfoPtr scrn);
+@@ -134,6 +136,6 @@ void intel_put_device(ScrnInfoPtr scrn);
  
  void __intel_uxa_release_device(ScrnInfoPtr scrn);
  
@@ -85,9 +79,6 @@ index e54054f..0c5e4ae 100644
 +#define hosted() (xorgMir)
  
  #endif /* INTEL_DRIVER_H */
-diff --git a/src/intel_xmir.h b/src/intel_xmir.h
-new file mode 100644
-index 0000000..2e3c85a
 --- /dev/null
 +++ b/src/intel_xmir.h
 @@ -0,0 +1,15 @@
@@ -106,11 +97,9 @@ index 0000000..2e3c85a
 +#endif
 +
 +#endif /* INTEL_XMIR_H */
-diff --git a/src/sna/Makefile.am b/src/sna/Makefile.am
-index 030869d..5cf1cbf 100644
 --- a/src/sna/Makefile.am
 +++ b/src/sna/Makefile.am
-@@ -76,6 +76,7 @@ libsna_la_SOURCES = \
+@@ -81,6 +81,7 @@ libsna_la_SOURCES = \
  	sna_video_overlay.c \
  	sna_video_sprite.c \
  	sna_video_textured.c \
@@ -118,19 +107,17 @@ index 030869d..5cf1cbf 100644
  	gen2_render.c \
  	gen2_render.h \
  	gen3_render.c \
-diff --git a/src/sna/sna.h b/src/sna/sna.h
-index f7c5315..494baa8 100644
 --- a/src/sna/sna.h
 +++ b/src/sna/sna.h
-@@ -290,6 +290,7 @@ struct sna {
+@@ -289,6 +289,7 @@ struct sna {
+ 
  	EntityInfoPtr pEnt;
- 	struct pci_device *PciInfo;
  	const struct intel_device_info *info;
 +	xmir_screen *xmir;
  
  	ScreenBlockHandlerProcPtr BlockHandler;
  	ScreenWakeupHandlerProcPtr WakeupHandler;
-@@ -988,4 +989,18 @@ static inline void sigtrap_put(void)
+@@ -987,4 +988,18 @@ static inline void sigtrap_put(void)
  	sigtrap_assert();
  }
  
@@ -149,11 +136,259 @@ index f7c5315..494baa8 100644
 +#endif
 +
  #endif /* _SNA_H */
-diff --git a/src/sna/sna_dri.c b/src/sna/sna_dri.c
-index 00a65a9..88d0869 100644
 --- a/src/sna/sna_dri.c
 +++ b/src/sna/sna_dri.c
-@@ -2322,6 +2322,13 @@ out_complete:
+@@ -596,7 +596,6 @@ static void sna_dri_select_mode(struct s
+ 	if (busy.busy & (1 << 17))
+ 		mode = KGEM_BLT;
+ 	kgem_bo_mark_busy(busy.handle == src->handle ? src : dst, mode);
+-	_kgem_set_mode(&sna->kgem, mode);
+ }
+ 
+ static void
+@@ -1107,10 +1106,10 @@ sna_dri_page_flip(struct sna *sna, struc
+ }
+ 
+ static bool
+-can_flip(struct sna * sna,
+-	 DrawablePtr draw,
+-	 DRI2BufferPtr front,
+-	 DRI2BufferPtr back)
++can_exchange(struct sna * sna,
++	     DrawablePtr draw,
++	     DRI2BufferPtr front,
++	     DRI2BufferPtr back)
+ {
+ 	WindowPtr win = (WindowPtr)draw;
+ 	PixmapPtr pixmap;
+@@ -1120,15 +1119,12 @@ can_flip(struct sna * sna,
+ 	if (draw->type == DRAWABLE_PIXMAP)
+ 		return false;
+ 
+-	if (!sna->scrn->vtSema) {
+-		DBG(("%s: no, not attached to VT\n", __FUNCTION__));
++	if ((sna->flags & SNA_IS_HOSTED) == 0) {
++		DBG(("%s: no, not hosted\n", __FUNCTION__));
+ 		return false;
+ 	}
+ 
+-	if (sna->flags & SNA_NO_FLIP) {
+-		DBG(("%s: no, pageflips disabled\n", __FUNCTION__));
+-		return false;
+-	}
++	assert(!sna->mode.shadow_active);
+ 
+ 	if (front->format != back->format) {
+ 		DBG(("%s: no, format mismatch, front = %d, back = %d\n",
+@@ -1144,11 +1140,6 @@ can_flip(struct sna * sna,
+ 		return false;
+ 	}
+ 
+-	if (sna->mode.shadow_active) {
+-		DBG(("%s: no, shadow enabled\n", __FUNCTION__));
+-		return false;
+-	}
+-
+ 	pixmap = get_window_pixmap(win);
+ 	if (pixmap != sna->front) {
+ 		DBG(("%s: no, window (pixmap=%ld) is not attached to the front buffer (pixmap=%ld)\n",
+@@ -1226,21 +1217,6 @@ can_flip(struct sna * sna,
+ 	return true;
+ }
+ 
+-inline static uint32_t pipe_select(int pipe)
+-{
+-	/* The third pipe was introduced with IvyBridge long after
+-	 * multiple pipe support was added to the kernel, hence
+-	 * we can safely ignore the capability check - if we have more
+-	 * than two pipes, we can assume that they are fully supported.
+-	 */
+-	if (pipe > 1)
+-		return pipe << DRM_VBLANK_HIGH_CRTC_SHIFT;
+-	else if (pipe > 0)
+-		return DRM_VBLANK_SECONDARY;
+-	else
+-		return 0;
+-}
+-
+ static void
+ sna_dri_exchange_buffers(DrawablePtr draw,
+ 			 DRI2BufferPtr front,
+@@ -1284,6 +1260,160 @@ sna_dri_exchange_buffers(DrawablePtr dra
+ 	back->name = tmp;
+ }
+ 
++static bool
++sna_dri_exchange_flip(ClientPtr client, DrawablePtr draw,
++		      DRI2BufferPtr front, DRI2BufferPtr back,
++		      CARD64 *target_msc, CARD64 divisor, CARD64 remainder,
++		      DRI2SwapEventPtr func, void *data)
++{
++	DBG(("%s: target_msc=%u, divisor=%u\n", __FUNCTION__,
++	     (uint32_t)*target_msc, (uint32_t)divisor));
++
++	/* XXX delay */
++
++	sna_dri_exchange_buffers(draw, front, back);
++
++	/* XXX ratelimit */
++
++	DRI2SwapComplete(client, draw, 0, 0, 0, DRI2_EXCHANGE_COMPLETE, func, data);
++	*target_msc = 0;
++
++	return true;
++}
++
++static bool
++can_flip(struct sna * sna,
++	 DrawablePtr draw,
++	 DRI2BufferPtr front,
++	 DRI2BufferPtr back)
++{
++	WindowPtr win = (WindowPtr)draw;
++	PixmapPtr pixmap;
++
++	if (draw->type == DRAWABLE_PIXMAP)
++		return false;
++
++	if (!sna->scrn->vtSema) {
++		DBG(("%s: no, not attached to VT\n", __FUNCTION__));
++		return false;
++	}
++
++	if (sna->flags & SNA_NO_FLIP) {
++		DBG(("%s: no, pageflips disabled\n", __FUNCTION__));
++		return false;
++	}
++
++	if (front->format != back->format) {
++		DBG(("%s: no, format mismatch, front = %d, back = %d\n",
++		     __FUNCTION__, front->format, back->format));
++		return false;
++	}
++
++	if (front->attachment != DRI2BufferFrontLeft) {
++		DBG(("%s: no, front attachment [%d] is not FrontLeft [%d]\n",
++		     __FUNCTION__,
++		     front->attachment,
++		     DRI2BufferFrontLeft));
++		return false;
++	}
++
++	if (sna->mode.shadow_active) {
++		DBG(("%s: no, shadow enabled\n", __FUNCTION__));
++		return false;
++	}
++
++	pixmap = get_window_pixmap(win);
++	if (pixmap != sna->front) {
++		DBG(("%s: no, window is not attached to the front buffer\n",
++		     __FUNCTION__));
++		return false;
++	}
++
++	if (sna_pixmap_get_buffer(pixmap) != front) {
++		DBG(("%s: no, DRI2 drawable is no longer attached (old name=%d, new name=%d) to pixmap=%ld\n",
++		     __FUNCTION__, front->name,
++		     sna_pixmap_get_buffer(pixmap) ? ((DRI2BufferPtr)sna_pixmap_get_buffer(pixmap))->name : 0,
++		     pixmap->drawable.serialNumber));
++		return false;
++	}
++
++	assert(get_private(front)->pixmap == sna->front);
++	assert(sna_pixmap(sna->front)->gpu_bo == get_private(front)->bo);
++
++	if (!get_private(back)->scanout) {
++		DBG(("%s: no, DRI2 drawable was too small at time of creation)\n",
++		     __FUNCTION__));
++		return false;
++	}
++
++	if (get_private(back)->size != get_private(front)->size) {
++		DBG(("%s: no, DRI2 drawable does not fit into scanout\n",
++		     __FUNCTION__));
++		return false;
++	}
++
++	DBG(("%s: window size: %dx%d, clip=(%d, %d), (%d, %d) x %d\n",
++	     __FUNCTION__,
++	     win->drawable.width, win->drawable.height,
++	     win->clipList.extents.x1, win->clipList.extents.y1,
++	     win->clipList.extents.x2, win->clipList.extents.y2,
++	     RegionNumRects(&win->clipList)));
++	if (!RegionEqual(&win->clipList, &draw->pScreen->root->winSize)) {
++		DBG(("%s: no, window is clipped: clip region=(%d, %d), (%d, %d), root size=(%d, %d), (%d, %d)\n",
++		     __FUNCTION__,
++		     win->clipList.extents.x1,
++		     win->clipList.extents.y1,
++		     win->clipList.extents.x2,
++		     win->clipList.extents.y2,
++		     draw->pScreen->root->winSize.extents.x1,
++		     draw->pScreen->root->winSize.extents.y1,
++		     draw->pScreen->root->winSize.extents.x2,
++		     draw->pScreen->root->winSize.extents.y2));
++		return false;
++	}
++
++	if (draw->x != 0 || draw->y != 0 ||
++#ifdef COMPOSITE
++	    draw->x != pixmap->screen_x ||
++	    draw->y != pixmap->screen_y ||
++#endif
++	    draw->width != pixmap->drawable.width ||
++	    draw->height != pixmap->drawable.height) {
++		DBG(("%s: no, window is not full size (%dx%d)!=(%dx%d)\n",
++		     __FUNCTION__,
++		     draw->width, draw->height,
++		     pixmap->drawable.width,
++		     pixmap->drawable.height));
++		return false;
++	}
++
++	/* prevent an implicit tiling mode change */
++	if (get_private(front)->bo->tiling != get_private(back)->bo->tiling) {
++		DBG(("%s -- no, tiling mismatch: front %d, back=%d\n",
++		     __FUNCTION__,
++		     get_private(front)->bo->tiling,
++		     get_private(back)->bo->tiling));
++		return false;
++	}
++
++	return true;
++}
++
++inline static uint32_t pipe_select(int pipe)
++{
++	/* The third pipe was introduced with IvyBridge long after
++	 * multiple pipe support was added to the kernel, hence
++	 * we can safely ignore the capability check - if we have more
++	 * than two pipes, we can assume that they are fully supported.
++	 */
++	if (pipe > 1)
++		return pipe << DRM_VBLANK_HIGH_CRTC_SHIFT;
++	else if (pipe > 0)
++		return DRM_VBLANK_SECONDARY;
++	else
++		return 0;
++}
++
+ static void chain_swap(struct sna *sna,
+ 		       DrawablePtr draw,
+ 		       int frame, unsigned int tv_sec, unsigned int tv_usec,
+@@ -2033,6 +2163,12 @@ sna_dri_schedule_swap(ClientPtr client,
+ 
+ 	assert(sna_pixmap_from_drawable(draw)->flush);
+ 
++	if (can_exchange(sna, draw, front, back) &&
++	    sna_dri_exchange_flip(client, draw, front, back,
++				  target_msc, divisor, remainder,
++				  func, data))
++		return TRUE;
++
+ 	/* Drawable not displayed... just complete the swap */
+ 	pipe = -1;
+ 	if ((sna->flags & SNA_NO_WAIT) == 0)
+@@ -2325,6 +2461,13 @@ out_complete:
  void sna_dri_destroy_window(WindowPtr win) { }
  #endif
  
@@ -167,7 +402,7 @@ index 00a65a9..88d0869 100644
  static bool has_i830_dri(void)
  {
  	return access(DRI_DRIVER_PATH "/i830_dri.so", R_OK) == 0;
-@@ -2471,6 +2478,13 @@ bool sna_dri_open(struct sna *sna, ScreenPtr screen)
+@@ -2474,6 +2617,13 @@ bool sna_dri_open(struct sna *sna, Scree
  	info.ReuseBufferNotify = NULL;
  #endif
  
@@ -181,11 +416,9 @@ index 00a65a9..88d0869 100644
  #if USE_ASYNC_SWAP
  	info.version = 10;
  	info.scheduleSwap0 = 1;
-diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
-index 6d4420f..5cc52d3 100644
 --- a/src/sna/sna_driver.c
 +++ b/src/sna/sna_driver.c
-@@ -514,6 +514,9 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
+@@ -512,6 +512,9 @@ static Bool sna_pre_init(ScrnInfoPtr scr
  		goto cleanup;
  	}
  
@@ -195,7 +428,7 @@ index 6d4420f..5cc52d3 100644
  	/* Sanity check */
  	if (hosted() && (sna->flags & SNA_IS_HOSTED) == 0) {
  		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
-@@ -521,9 +524,14 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
+@@ -519,9 +522,14 @@ static Bool sna_pre_init(ScrnInfoPtr scr
  		goto cleanup;
  	}
  
@@ -212,17 +445,21 @@ index 6d4420f..5cc52d3 100644
  
  	if (!xf86SetDepthBpp(scrn, preferred_depth, 0, 0,
  			     Support32bppFb |
-@@ -560,6 +568,9 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
+@@ -558,9 +566,13 @@ static Bool sna_pre_init(ScrnInfoPtr scr
  
- 	intel_detect_chipset(scrn, sna->pEnt, sna->PciInfo);
+ 	intel_detect_chipset(scrn, pEnt);
  
 +	if (!sna_xmir_pre_init(sna))
 +		goto cleanup;
 +
- 	kgem_init(&sna->kgem, fd, sna->PciInfo, sna->info->gen);
+ 	kgem_init(&sna->kgem, fd,
+ 		  xf86GetPciInfoForEntity(pEnt->index),
+ 		  sna->info->gen);
++
  	if (xf86ReturnOptValBool(sna->Options, OPTION_ACCEL_DISABLE, FALSE) ||
  	    !sna_option_cast_to_bool(sna, OPTION_ACCEL_METHOD, TRUE)) {
-@@ -659,6 +670,8 @@ sna_block_handler(BLOCKHANDLER_ARGS_DECL)
+ 		xf86DrvMsg(sna->scrn->scrnIndex, X_CONFIG,
+@@ -659,6 +671,8 @@ sna_block_handler(BLOCKHANDLER_ARGS_DECL
  
  	if (*tv == NULL || ((*tv)->tv_usec | (*tv)->tv_sec))
  		sna_accel_block_handler(sna, tv);
@@ -231,7 +468,7 @@ index 6d4420f..5cc52d3 100644
  }
  
  static void
-@@ -1010,6 +1023,8 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
+@@ -1015,6 +1029,8 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
  	if (!miDCInitialize(screen, xf86GetPointerScreenFuncs()))
  		return FALSE;
  
@@ -240,9 +477,6 @@ index 6d4420f..5cc52d3 100644
  	if ((sna->flags & SNA_IS_HOSTED) == 0 &&
  	    xf86_cursors_init(screen, SNA_CURSOR_X, SNA_CURSOR_Y,
  			       HARDWARE_CURSOR_TRUECOLOR_AT_8BPP |
-diff --git a/src/sna/sna_xmir.c b/src/sna/sna_xmir.c
-new file mode 100644
-index 0000000..edfe298
 --- /dev/null
 +++ b/src/sna/sna_xmir.c
 @@ -0,0 +1,186 @@
