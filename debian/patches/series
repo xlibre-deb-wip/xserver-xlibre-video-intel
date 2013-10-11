@@ -1,3 +1,4 @@
 # XMir series
 
 xmir.patch
+sna-sanitize-output-crtc.diff
