@@ -131,6 +131,9 @@ struct sna_pixmap {
 	void *ptr;
 #define PTR(ptr) ((void*)((uintptr_t)(ptr) & ~1))
 
+	bool (*move_to_gpu)(struct sna *, struct sna_pixmap *, unsigned);
+	void *move_to_gpu_data;
+
 	struct list flush_list;
 	struct list cow_list;
 
@@ -144,7 +147,10 @@ struct sna_pixmap {
 #define PIN_DRI 0x2
 #define PIN_PRIME 0x4
 	uint8_t create :4;
-	uint8_t mapped :1;
+	uint8_t mapped :2;
+#define MAPPED_NONE 0
+#define MAPPED_GTT 1
+#define MAPPED_CPU 2
 	uint8_t flush :1;
 	uint8_t shm :1;
 	uint8_t clear :1;
@@ -263,10 +269,11 @@ struct sna {
 	struct sna_mode {
 		drmModeResPtr kmode;
 
-		int shadow_active;
 		DamagePtr shadow_damage;
 		struct kgem_bo *shadow;
+		int shadow_active;
 		int shadow_flip;
+		int front_active;
 
 		unsigned num_real_crtc;
 		unsigned num_real_output;
@@ -301,6 +308,7 @@ struct sna {
 		uint32_t fill_alu;
 	} blt_state;
 	union {
+		unsigned gt;
 		struct gen2_render_state gen2;
 		struct gen3_render_state gen3;
 		struct gen4_render_state gen4;
@@ -492,6 +500,27 @@ PixmapPtr sna_pixmap_create_upload(ScreenPtr screen,
 PixmapPtr sna_pixmap_create_unattached(ScreenPtr screen,
 				       int width, int height, int depth);
 void sna_pixmap_destroy(PixmapPtr pixmap);
+
+#define assert_pixmap_map(pixmap, priv) \
+	assert(priv->mapped == false || pixmap->devPrivate.ptr == (priv->mapped == MAPPED_CPU ? MAP(priv->gpu_bo->map__cpu) : MAP(priv->gpu_bo->map__gtt)));
+
+static inline void sna_pixmap_unmap(PixmapPtr pixmap, struct sna_pixmap *priv)
+{
+	if (priv->mapped == MAPPED_NONE)
+		return;
+
+	DBG(("%s: pixmap=%ld dropping %s mapping\n",
+	     __FUNCTION__, pixmap->drawable.serialNumber,
+	     priv->mapped == MAPPED_CPU ? "cpu" : "gtt"));
+
+	assert_pixmap_map(pixmap, priv);
+	assert(priv->stride && priv->stride);
+
+	pixmap->devPrivate.ptr = PTR(priv->ptr);
+	pixmap->devKind = priv->stride;
+
+	priv->mapped = MAPPED_NONE;
+}
 
 bool
 sna_pixmap_undo_cow(struct sna *sna, struct sna_pixmap *priv, unsigned flags);
@@ -855,7 +884,7 @@ bool sna_write_boxes(struct sna *sna, PixmapPtr dst,
 		     struct kgem_bo *dst_bo, int16_t dst_dx, int16_t dst_dy,
 		     const void *src, int stride, int16_t src_dx, int16_t src_dy,
 		     const BoxRec *box, int n);
-void sna_write_boxes__xor(struct sna *sna, PixmapPtr dst,
+bool sna_write_boxes__xor(struct sna *sna, PixmapPtr dst,
 			  struct kgem_bo *dst_bo, int16_t dst_dx, int16_t dst_dy,
 			  const void *src, int stride, int16_t src_dx, int16_t src_dy,
 			  const BoxRec *box, int nbox,
@@ -863,13 +892,11 @@ void sna_write_boxes__xor(struct sna *sna, PixmapPtr dst,
 
 bool sna_replace(struct sna *sna,
 		 PixmapPtr pixmap,
-		 struct kgem_bo **bo,
 		 const void *src, int stride);
-struct kgem_bo *sna_replace__xor(struct sna *sna,
-				 PixmapPtr pixmap,
-				 struct kgem_bo *bo,
-				 const void *src, int stride,
-				 uint32_t and, uint32_t or);
+bool sna_replace__xor(struct sna *sna,
+		      PixmapPtr pixmap,
+		      const void *src, int stride,
+		      uint32_t and, uint32_t or);
 
 bool
 sna_compute_composite_extents(BoxPtr extents,
@@ -918,6 +945,12 @@ inline static bool is_power_of_two(unsigned x)
 inline static bool is_clipped(const RegionRec *r,
 			      const DrawableRec *d)
 {
+	DBG(("%s: region[%ld]x(%d, %d),(%d, %d) against drawable %dx%d\n",
+	     __FUNCTION__,
+	     (long)RegionNumRects(r),
+	     r->extents.x1, r->extents.y1,
+	     r->extents.x2, r->extents.y2,
+	     d->width, d->height));
 	return (r->data ||
 		r->extents.x2 - r->extents.x1 != d->width ||
 		r->extents.y2 - r->extents.y1 != d->height);
@@ -975,16 +1008,16 @@ void sna_image_composite(pixman_op_t        op,
 			 uint16_t           width,
 			 uint16_t           height);
 
-extern jmp_buf sigjmp;
+extern jmp_buf sigjmp[4];
 extern volatile sig_atomic_t sigtrap;
 
 #define sigtrap_assert() assert(sigtrap == 0)
-#define sigtrap_get() sigsetjmp(sigjmp, ++sigtrap)
+#define sigtrap_get() sigsetjmp(sigjmp[sigtrap++], 1)
 
 static inline void sigtrap_put(void)
 {
+	assert(sigtrap > 0);
 	--sigtrap;
-	sigtrap_assert();
 }
 
 #endif /* _SNA_H */

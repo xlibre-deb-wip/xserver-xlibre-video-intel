@@ -460,7 +460,7 @@ static void sna_dri_reference_buffer(DRI2BufferPtr buffer)
 	get_private(buffer)->refcnt++;
 }
 
-static void damage(PixmapPtr pixmap, struct sna_pixmap *priv, RegionPtr region)
+static inline void damage(PixmapPtr pixmap, struct sna_pixmap *priv, RegionPtr region)
 {
 	assert(priv->gpu_bo);
 	if (DAMAGE_IS_ALL(priv->gpu_damage))
@@ -472,6 +472,7 @@ damage_all:
 						   pixmap->drawable.width,
 						   pixmap->drawable.height);
 		sna_damage_destroy(&priv->cpu_damage);
+		list_del(&priv->flush_list);
 	} else {
 		sna_damage_subtract(&priv->cpu_damage, region);
 		if (priv->cpu_damage == NULL)
@@ -512,25 +513,15 @@ static void set_bo(PixmapPtr pixmap, struct kgem_bo *bo)
 	region.data = NULL;
 	DamageRegionAppend(&pixmap->drawable, &region);
 
-	sna_damage_all(&priv->gpu_damage,
-		       pixmap->drawable.width,
-		       pixmap->drawable.height);
-	sna_damage_destroy(&priv->cpu_damage);
-	list_del(&priv->flush_list);
-	priv->cpu = false;
-	priv->clear = false;
+	damage(pixmap, priv, NULL);
 
 	assert(bo->refcnt);
 	if (priv->gpu_bo != bo) {
-		if (priv->gpu_bo)
+		if (priv->gpu_bo) {
+			sna_pixmap_unmap(pixmap, priv);
 			kgem_bo_destroy(&sna->kgem, priv->gpu_bo);
-		priv->gpu_bo = ref(bo);
-		if (priv->mapped) {
-			assert(!priv->shm && priv->stride);
-			pixmap->devPrivate.ptr = PTR(priv->ptr);
-			pixmap->devKind = priv->stride;
-			priv->mapped = false;
 		}
+		priv->gpu_bo = ref(bo);
 	}
 	if (bo->domain != DOMAIN_GPU)
 		bo->domain = DOMAIN_NONE;

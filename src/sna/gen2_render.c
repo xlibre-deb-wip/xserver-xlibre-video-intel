@@ -1487,6 +1487,7 @@ gen2_composite_picture(struct sna *sna,
 	channel->is_opaque = false;
 	channel->is_affine = true;
 	channel->transform = NULL;
+	channel->card_format = -1;
 
 	if (sna_picture_is_solid(picture, &color))
 		return gen2_composite_solid_init(sna, channel, color);
@@ -2808,7 +2809,8 @@ gen2_render_fill_boxes(struct sna *sna,
 
 	if (!kgem_check_bo(&sna->kgem, dst_bo, NULL)) {
 		kgem_submit(&sna->kgem);
-		assert(kgem_check_bo(&sna->kgem, dst_bo, NULL));
+		if (!kgem_check_bo(&sna->kgem, dst_bo, NULL))
+			return false;
 	}
 
 	gen2_emit_fill_composite_state(sna, &tmp, pixel);
@@ -2943,7 +2945,7 @@ gen2_render_fill_op_done(struct sna *sna, const struct sna_fill_op *op)
 static bool
 gen2_render_fill(struct sna *sna, uint8_t alu,
 		 PixmapPtr dst, struct kgem_bo *dst_bo,
-		 uint32_t color,
+		 uint32_t color, unsigned flags,
 		 struct sna_fill_op *tmp)
 {
 #if NO_FILL
@@ -3039,10 +3041,13 @@ gen2_render_fill_one(struct sna *sna, PixmapPtr dst, struct kgem_bo *bo,
 
 	if (!kgem_check_bo(&sna->kgem, bo, NULL)) {
 		kgem_submit(&sna->kgem);
+
 		if (gen2_render_fill_one_try_blt(sna, dst, bo, color,
 						 x1, y1, x2, y2, alu))
 			return true;
-		assert(kgem_check_bo(&sna->kgem, bo, NULL));
+
+		if (!kgem_check_bo(&sna->kgem, bo, NULL))
+			return false;
 	}
 
 	tmp.op = alu;
