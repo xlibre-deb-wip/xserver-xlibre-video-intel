@@ -132,7 +132,24 @@ In addition, there are a pair of sub-options to limit the acceleration for
 debugging use. Specify \*qoff\*q to disable all acceleration, or \*qblt\*q to
 disable render acceleration and only use the BLT engine.
 .IP
-Default: use UXA (render acceleration)
+Default: use SNA (render acceleration)
+.TP
+.BI "Option \*qTearFree\*q \*q" boolean \*q
+Disable or enable TearFree updates. This option forces X to perform all
+rendering to a backbuffer prior to updating the actual display. It requires
+an extra memory allocation the same size as a framebuffer, the occasional extra
+copy, and requires Damage tracking. Thus enabling TearFree requires more
+memory and is slower (reduced throughput) and introduces a small amount of
+output latency, but it should not impact input latency. However, the update to
+the screen is then performed synchronously with the vertical refresh of the
+display so that the entire update is completed before the display starts its
+refresh. That is only one frame is ever visible, preventing an unsightly tear
+between two visible and differing frames. Note that this replicates what the
+compositing manager should be doing, so it is not advisable to enable both.
+However, some compositing managers do cause tearing, and if the outputs are
+rotated, there may will still be tearing without TearFree enabled.
+.IP
+Default: TearFree is disabled.
 .TP
 .BI "Option \*qReprobeOutputs\*q \*q" boolean \*q
 Disable or enable rediscovery of connected displays during server startup.

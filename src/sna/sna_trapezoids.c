@@ -547,7 +547,8 @@ sna_composite_trapezoids(CARD8 op,
 	PixmapPtr pixmap = get_drawable_pixmap(dst->pDrawable);
 	struct sna *sna = to_sna_from_pixmap(pixmap);
 	struct sna_pixmap *priv;
-	bool rectilinear, pixel_aligned, force_fallback;
+	bool force_fallback = false;
+	bool rectilinear, pixel_aligned;
 	unsigned flags;
 	int n;
 
@@ -560,26 +561,29 @@ sna_composite_trapezoids(CARD8 op,
 		return;
 
 	if (NO_ACCEL)
-		goto fallback;
+		goto force_fallback;
+
+	if (FORCE_FALLBACK > 0)
+		goto force_fallback;
 
 	if (wedged(sna)) {
 		DBG(("%s: fallback -- wedged\n", __FUNCTION__));
-		goto fallback;
+		goto force_fallback;
 	}
 
 	if (dst->alphaMap) {
 		DBG(("%s: fallback -- dst alpha map\n", __FUNCTION__));
-		goto fallback;
+		goto force_fallback;
 	}
 
 	priv = sna_pixmap(pixmap);
 	if (priv == NULL) {
 		DBG(("%s: fallback -- dst is unattached\n", __FUNCTION__));
-		goto fallback;
+		goto force_fallback;
 	}
 
-	force_fallback = FORCE_FALLBACK > 0;
-	if ((too_small(priv) || DAMAGE_IS_ALL(priv->cpu_damage)) &&
+	if (FORCE_FALLBACK == 0 &&
+	    (too_small(priv) || DAMAGE_IS_ALL(priv->cpu_damage)) &&
 	    !picture_is_gpu(sna, src) && untransformed(src)) {
 		DBG(("%s: force fallbacks --too small, %dx%d? %d, all-cpu? %d, src-is-cpu? %d\n",
 		     __FUNCTION__,
@@ -588,10 +592,10 @@ sna_composite_trapezoids(CARD8 op,
 		     too_small(priv),
 		     (int)DAMAGE_IS_ALL(priv->cpu_damage),
 		     !picture_is_gpu(sna, src)));
+
+force_fallback:
 		force_fallback = true;
 	}
-	if (FORCE_FALLBACK < 0)
-		force_fallback = false;
 
 	/* scan through for fast rectangles */
 	rectilinear = pixel_aligned = true;
@@ -630,6 +634,7 @@ sna_composite_trapezoids(CARD8 op,
 
 	DBG(("%s: rectilinear? %d, pixel-aligned? %d\n",
 	     __FUNCTION__, rectilinear, pixel_aligned));
+
 	flags = 0;
 	if (rectilinear) {
 		if (pixel_aligned) {

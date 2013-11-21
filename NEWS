@@ -1,3 +1,74 @@
+Snapshot 2.99.906 (2013-11-13)
+==============================
+Several stability fixes required after the recent tweaking of the core
+mechanics to handle the updated TearFree and attempting to make static
+analyzers happy.
+
+ * Fix damage handling when rendering to a partially damaged GPU surface.
+   Regression in 2.99.905
+   https://bugs.freedesktop.org/show_bug.cgi?id=70527
+
+ * Use asprintf() instead of sprintf()
+   Regression in 2.99.905
+   https://bugs.freedesktop.org/show_bug.cgi?id=70835
+
+ * Improve accounting for fence overallocation on older gen2/3, and
+   improve the tiling mechanism to fit into the same aperture constraints
+   https://bugs.freedesktop.org/show_bug.cgi?id=70924
+
+ * Add an extra GPU flush on Sandybridge to fix some rare font corruption
+
+ * Rasterise lines through all clip boxes
+   https://bugs.freedesktop.org/show_bug.cgi?id=70802
+
+ * Fix regression from stricter handling of failures to move a GC to the GPU
+   Regression in 2.99.905
+   https://bugs.freedesktop.org/show_bug.cgi?id=71415
+
+ * Fix various fail along the memcpy_xor paths, including inadequate error
+   handling and integer overflow
+   https://bugs.freedesktop.org/show_bug.cgi?id=70527
+
+ * Fix outside-of-target stipple uploads
+   https://bugs.launchpad.net/bugs/1247785
+
+ * Fix clip detection for long glyphs
+   Incomplete bug fix (causing a regression) in 2.99.905
+   https://bugs.freedesktop.org/show_bug.cgi?id=70527
+
+ * Fix VSync for the render engine (Xv) on Haswell
+   https://bugs.freedesktop.org/show_bug.cgi?id=70527
+
+
+Snapshot 2.99.905 (2013-10-23)
+==============================
+The highlight for this snapshot is the extension of TearFree to support
+transformed outputs, along with some polishing to eliminate its impact
+upon input and output latency. As always, thanks to everyone who have
+been testing, reporting bugs and helping to improve the stability before
+release.
+
+ * Prevent a crash when starting with a user specified mode or position
+
+ * Prevent some crashes in UXA after allocation failure
+
+ * Stop marking the user's preferred backlight value as 0 if the
+   backlight property is queried whilst the connector is disabled
+   https://bugs.freedesktop.org/show_bug.cgi?id=70406
+
+ * Pad GETCONNECTOR ioctl for compatability between 32/64-bit userspace
+   and kernel
+
+ * Handle long glyph runs correctly
+   https://bugs.freedesktop.org/show_bug.cgi?id=70541
+
+ * Fix clipping of stippled rectangles against clip regions
+   https://bugs.freedesktop.org/show_bug.cgi?id=67865
+
+ * Support TearFree rendering of rotated outputs
+   https://bugs.freedesktop.org/show_bug.cgi?id=22969
+
+
 Snapshot 2.99.904 (2013-10-09)
 ==============================
 There is one more feature planned to be completed for 3.0, so time for a

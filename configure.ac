@@ -23,7 +23,7 @@
 # Initialize Autoconf
 AC_PREREQ([2.60])
 AC_INIT([xf86-video-intel],
-        [2.99.904],
+        [2.99.906],
         [https://bugs.freedesktop.org/enter_bug.cgi?product=xorg],
         [xf86-video-intel])
 AC_CONFIG_SRCDIR([Makefile.am])
@@ -97,13 +97,26 @@ AC_ARG_ENABLE(gen4asm,
 
 gen4asm=no
 if test "x$ASM" != "xno"; then
-	PKG_CHECK_MODULES(GEN4ASM, [intel-gen4asm >= 1.2], [gen4asm=yes], [gen4asm=no])
-	if test "x$ASM" = "xyes" -a "x$gen4asm" != "xyes"; then
-		AC_MSG_ERROR([intel-gen4asm support requested but not found])
+	AC_ARG_WITH(gen4asm,
+		    AS_HELP_STRING([--with-gen4asm=PATH],
+				   [Path to intel-gen4asm binary]]]),
+		    [path="$withval"],
+		    [path=""])
+	if test -n "$path" ; then
+		gen4asm=yes
+	else
+		PKG_CHECK_MODULES(GEN4ASM, [intel-gen4asm >= 1.2], [gen4asm=yes], [gen4asm=no])
+		if test "x$ASM" = "xyes" -a "x$gen4asm" != "xyes"; then
+			AC_MSG_ERROR([intel-gen4asm support requested but not found])
+		fi
 	fi
 	if test "x$gen4asm" = "xyes"; then
 		AC_MSG_CHECKING([path to use for intel-gen4asm])
-		INTEL_GEN4ASM="`pkg-config intel-gen4asm --variable=exec_prefix`/bin/intel-gen4asm"
+		if test -n "$path" ; then
+			INTEL_GEN4ASM="$path"
+		else
+			INTEL_GEN4ASM="`pkg-config intel-gen4asm --variable=exec_prefix`/bin/intel-gen4asm"
+		fi
 		if ! test -e "$INTEL_GEN4ASM"; then
 			AC_MSG_ERROR([intel-gen4asm enabled, but not found. Tried '$INTEL_GEN4ASM'.])
 		fi
@@ -163,7 +176,7 @@ if test "x$UDEV" != "xno"; then
 	fi
 fi
 
-PKG_CHECK_MODULES(X11, [x11 xrender xrandr xext pixman-1], [x11="yes"], [x11="no"])
+PKG_CHECK_MODULES(X11, [x11 xrender xrandr xext xfixes pixman-1], [x11="yes"], [x11="no"])
 AM_CONDITIONAL(HAVE_X11, test "x$x11" = "xyes")
 
 PKG_CHECK_MODULES(TOOL, [xinerama xrandr xdamage xfixes xcursor xtst xrender xext x11 pixman-1], [tools="yes"], [tools="no"])
@@ -383,8 +396,8 @@ if test "x$enable_dri" != "xno" -a "x$UMS" = "xyes"; then
 	PKG_CHECK_MODULES(DRI1, [xf86driproto], [DRI1="yes"], [DRI1="no"])
         save_CFLAGS="$CFLAGS"
         save_CPPFLAGS="$CPPFLAGS"
-        CFLAGS="$CFLAGS $XORG_CFLAGS $DRI_CFLAGS $DRM_CFLAGS"
-        CPPFLAGS="$CPPFLAGS $XORG_CFLAGS $DRI_CFLAGS $DRM_CFLAGS"
+        CFLAGS="$CFLAGS $XORG_CFLAGS $DRI1_CFLAGS $DRM_CFLAGS"
+        CPPFLAGS="$CPPFLAGS $XORG_CFLAGS $DRI1_CFLAGS $DRM_CFLAGS"
         AC_CHECK_HEADERS([dri.h sarea.h dristruct.h], [DRI1="yes"], [DRI1="no"],
                 [/* for dri.h */
                  #include <xf86str.h>
@@ -427,7 +440,7 @@ if test "x$enable_dri" != "xno"; then
 	AC_DEFINE_DIR(DRI_DRIVER_PATH, dridriverdir, [Default DRI2 driver path])
 	if test "x$DRI2" != "xno"; then
 		save_CFLAGS=$CFLAGS
-		CFLAGS="$XORG_CFLAGS $DRM_CFLAGS $DRI_CFLAGS $DRI2_CFLAGS"
+		CFLAGS="$XORG_CFLAGS $DRM_CFLAGS $DRI1_CFLAGS $DRI2_CFLAGS"
 		AC_CHECK_HEADERS([dri2.h], DRI2="yes", DRI2="no", [
 #include <dixstruct.h>
 #include <drm.h>
