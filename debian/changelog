@@ -1,5 +1,9 @@
-xserver-xorg-video-intel (2:2.99.906-1) UNRELEASED; urgency=low
+xserver-xorg-video-intel (2:2.99.907-1) UNRELEASED; urgency=low
 
+  [ Timo Aaltonen ]
+  * New upstream prerelease.
+
+  [ Maarten Lankhorst ]
   * New upstream prerelease.
 
  -- Timo Aaltonen <tjaalton@ubuntu.com>  Tue, 01 Oct 2013 14:07:22 +0300
