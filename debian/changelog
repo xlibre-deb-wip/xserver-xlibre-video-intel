@@ -1,9 +1,10 @@
-xserver-xorg-video-intel (2:2.99.907-0ubuntu1) UNRELEASED; urgency=low
+xserver-xorg-video-intel (2:2.99.907-0ubuntu1) trusty; urgency=low
 
+  [ Timo Aaltonen ]
   * Merge from unreleased debian git. (LP: #1247785) (LP: #1231207)
   * Drop sna-sanitize-output-crtc.diff, upstream.
 
- -- Timo Aaltonen <tjaalton@ubuntu.com>  Thu, 21 Nov 2013 11:00:00 +0200
+ -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Mon, 06 Jan 2014 14:48:05 +0100
 
 xserver-xorg-video-intel (2:2.99.907-1) UNRELEASED; urgency=low
 
