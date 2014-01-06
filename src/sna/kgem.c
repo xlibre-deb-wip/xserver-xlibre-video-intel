@@ -1244,7 +1244,7 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 	if (gen == 022)
 		/* 865g cannot handle a batch spanning multiple pages */
 		kgem->batch_size = PAGE_SIZE / sizeof(uint32_t);
-	if ((gen >> 3) == 7)
+	if (gen >= 070)
 		kgem->batch_size = 16*1024;
 	if (!kgem->has_relaxed_delta && kgem->batch_size > 4*1024)
 		kgem->batch_size = 4*1024;
@@ -1257,10 +1257,6 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 
 	DBG(("%s: maximum batch size? %d\n", __FUNCTION__,
 	     kgem->batch_size));
-
-	kgem->min_alignment = 4;
-	if (gen < 040)
-		kgem->min_alignment = 64;
 
 	kgem->half_cpu_cache_pages = cpu_cache_size() >> 13;
 	DBG(("%s: last-level cache size: %d bytes, threshold in pages: %d\n",
@@ -1424,7 +1420,7 @@ inline static uint32_t kgem_pitch_alignment(struct kgem *kgem, unsigned flags)
 		return 256;
 	if (flags & CREATE_SCANOUT)
 		return 64;
-	return kgem->min_alignment;
+	return 8;
 }
 
 void kgem_get_tile_size(struct kgem *kgem, int tiling, int pitch,
@@ -2872,6 +2868,31 @@ out_16384:
 	return kgem_create_linear(kgem, size, CREATE_NO_THROTTLE);
 }
 
+#if !NDEBUG
+static void dump_gtt_info(void)
+{
+	int i;
+
+	for (i = 0; i < DRM_MAX_MINOR; i++) {
+		char path[80];
+		FILE *file;
+
+		sprintf(path, "/sys/kernel/debug/dri%d/i915_gem_gtt", i);
+		file = fopen(path, "r");
+		if (file) {
+			size_t len = 0;
+			char *line = NULL;
+
+			while (getline(&line, &len, file) != -1)
+				ErrorF("%s", line);
+			free(line);
+			fclose(file);
+			return;
+		}
+	}
+}
+#endif
+
 void _kgem_submit(struct kgem *kgem)
 {
 	struct kgem_request *rq;
@@ -3023,6 +3044,9 @@ void _kgem_submit(struct kgem *kgem)
 						       (long long)aperture.aper_size,
 						       (long long)aperture.aper_available_size);
 				}
+
+				if (ret == ENOSPC)
+					dump_gtt_info();
 
 				if (DEBUG_SYNC) {
 					int fd = open("/tmp/batchbuffer", O_WRONLY | O_CREAT | O_APPEND, 0666);
@@ -3909,13 +3933,6 @@ unsigned kgem_can_create_2d(struct kgem *kgem,
 			flags |= KGEM_CAN_CREATE_GPU;
 		if (size > kgem->max_gpu_size)
 			flags &= ~KGEM_CAN_CREATE_GPU;
-		if (kgem->gen < 033) {
-			int fence_size = 1024 * 1024;
-			while (fence_size < size)
-				fence_size <<= 1;
-			if (fence_size > kgem->max_gpu_size)
-				flags &= ~KGEM_CAN_CREATE_GPU;
-		}
 		if (size > 0 && size <= PAGE_SIZE*kgem->aperture_mappable/4)
 			flags |= KGEM_CAN_CREATE_GTT;
 		if (size > PAGE_SIZE*kgem->aperture_mappable/4)
@@ -3926,6 +3943,15 @@ unsigned kgem_can_create_2d(struct kgem *kgem,
 			DBG(("%s: too large (tiled) %d > %d\n",
 			     __FUNCTION__, size, kgem->max_object_size));
 			return 0;
+		}
+		if (kgem->gen < 040) {
+			int fence_size = 1024 * 1024;
+			while (fence_size < size)
+				fence_size <<= 1;
+			if (fence_size > kgem->max_gpu_size)
+				flags &= ~KGEM_CAN_CREATE_GPU;
+			if (fence_size > PAGE_SIZE*kgem->aperture_mappable/4)
+				flags &= ~KGEM_CAN_CREATE_GTT;
 		}
 	}
 
@@ -4804,6 +4830,7 @@ bool kgem_check_bo(struct kgem *kgem, ...)
 
 		if (needs_semaphore(kgem, bo)) {
 			DBG(("%s: flushing for required semaphore\n", __FUNCTION__));
+			va_end(ap);
 			return false;
 		}
 
@@ -4974,6 +5001,7 @@ bool kgem_check_many_bo_fenced(struct kgem *kgem, ...)
 
 		if (needs_semaphore(kgem, bo)) {
 			DBG(("%s: flushing for required semaphore\n", __FUNCTION__));
+			va_end(ap);
 			return false;
 		}
 
@@ -6352,13 +6380,21 @@ struct kgem_bo *kgem_upload_source_image(struct kgem *kgem,
 	bo = kgem_create_buffer_2d(kgem,
 				   width, height, bpp,
 				   KGEM_BUFFER_WRITE_INPLACE, &dst);
-	if (bo)
-		memcpy_blt(data, dst, bpp,
-			   stride, bo->pitch,
-			   box->x1, box->y1,
-			   0, 0,
-			   width, height);
+	if (bo == NULL)
+		return NULL;
 
+	if (sigtrap_get()) {
+		kgem_bo_destroy(kgem, bo);
+		return NULL;
+	}
+
+	memcpy_blt(data, dst, bpp,
+		   stride, bo->pitch,
+		   box->x1, box->y1,
+		   0, 0,
+		   width, height);
+
+	sigtrap_put();
 	return bo;
 }
 

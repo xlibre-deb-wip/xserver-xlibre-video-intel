@@ -142,10 +142,11 @@ struct sna_pixmap {
 
 #define SOURCE_BIAS 4
 	uint16_t source_count;
-	uint8_t pinned :3;
+	uint8_t pinned :4;
 #define PIN_SCANOUT 0x1
-#define PIN_DRI 0x2
-#define PIN_PRIME 0x4
+#define PIN_DRI2 0x2
+#define PIN_DRI3 0x4
+#define PIN_PRIME 0x8
 	uint8_t create :4;
 	uint8_t mapped :2;
 #define MAPPED_NONE 0
@@ -315,6 +316,7 @@ struct sna {
 		struct gen5_render_state gen5;
 		struct gen6_render_state gen6;
 		struct gen7_render_state gen7;
+		struct gen8_render_state gen8;
 	} render_state;
 
 	bool dri_available;
@@ -328,7 +330,7 @@ struct sna {
 
 #if HAVE_UDEV
 	struct udev_monitor *uevent_monitor;
-	InputHandlerProc uevent_handler;
+	pointer uevent_handler;
 #endif
 
 	struct {
@@ -514,7 +516,6 @@ static inline void sna_pixmap_unmap(PixmapPtr pixmap, struct sna_pixmap *priv)
 	     priv->mapped == MAPPED_CPU ? "cpu" : "gtt"));
 
 	assert_pixmap_map(pixmap, priv);
-	assert(priv->stride && priv->stride);
 
 	pixmap->devPrivate.ptr = PTR(priv->ptr);
 	pixmap->devKind = priv->stride;
@@ -1019,5 +1020,8 @@ static inline void sigtrap_put(void)
 	assert(sigtrap > 0);
 	--sigtrap;
 }
+
+#define RR_Rotate_All (RR_Rotate_0 | RR_Rotate_90 | RR_Rotate_180 | RR_Rotate_270)
+#define RR_Reflect_All (RR_Reflect_X | RR_Reflect_Y)
 
 #endif /* _SNA_H */

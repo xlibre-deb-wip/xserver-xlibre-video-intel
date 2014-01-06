@@ -97,10 +97,12 @@ struct intel_pixmap {
 	int8_t busy :2;
 	uint8_t dirty :1;
 	uint8_t offscreen :1;
-	uint8_t pinned :3;
+	uint8_t pinned :5;
 #define PIN_SCANOUT 0x1
-#define PIN_DRI 0x2
-#define PIN_GLAMOR 0x4
+#define PIN_DRI2 0x2
+#define PIN_DRI3 0x4
+#define PIN_PRIME 0x8
+#define PIN_GLAMOR 0x10
 };
 
 #if HAS_DEVPRIVATEKEYREC
@@ -349,7 +351,7 @@ typedef struct intel_screen_private {
 	unsigned debug_flush;
 #if HAVE_UDEV
 	struct udev_monitor *uevent_monitor;
-	InputHandlerProc uevent_handler;
+	pointer uevent_handler;
 #endif
 	Bool has_prime_vmap_flush;
 } intel_screen_private;

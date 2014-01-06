@@ -24,19 +24,18 @@ AM_CFLAGS = \
 	@CWARNFLAGS@ \
 	-I$(top_srcdir)/src \
 	-I$(top_srcdir)/src/render_program \
-	@XORG_CFLAGS@ \
-	@UDEV_CFLAGS@ \
-	@DRM_CFLAGS@ \
-	@NOWARNFLAGS@
+	$(XORG_CFLAGS) \
+	$(UDEV_CFLAGS) \
+	$(DRM_CFLAGS) \
 	$(NULL)
 
 if VALGRIND
-AM_CFLAGS += @VALGRIND_CFLAGS@
+AM_CFLAGS += $(VALGRIND_CFLAGS)
 endif
 
 noinst_LTLIBRARIES = libsna.la
 libsna_la_LDFLAGS = -pthread
-libsna_la_LIBADD = @UDEV_LIBS@ -lm @DRM_LIBS@ brw/libbrw.la fb/libfb.la
+libsna_la_LIBADD = $(UDEV_LIBS) -lm $(DRM_LIBS) brw/libbrw.la fb/libfb.la
 
 libsna_la_SOURCES = \
 	atomic.h \
@@ -101,6 +100,12 @@ libsna_la_SOURCES = \
 	gen6_render.h \
 	gen7_render.c \
 	gen7_render.h \
+	gen8_eu.c \
+	gen8_eu.h \
+	gen8_render.c \
+	gen8_render.h \
+	gen8_vertex.c \
+	gen8_vertex.h \
 	$(NULL)
 
 if DRI2
@@ -135,3 +140,5 @@ git_version.h: $(top_srcdir)/.git/HEAD $(shell sed -e '/ref:/!d' -e 's#ref: *#$(
 	@V=`git describe`; echo "static const char git_version[] = \"$$V\";" > git_version.h
 sna_driver.c: git_version.h
 endif
+
+AM_CFLAGS += @NOWARNFLAGS@

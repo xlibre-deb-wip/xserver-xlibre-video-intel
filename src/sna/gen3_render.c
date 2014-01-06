@@ -2669,8 +2669,8 @@ gen3_render_reset(struct sna *sna)
 	state->last_vertex_offset = 0;
 
 	if (sna->render.vbo && !kgem_bo_can_map(&sna->kgem, sna->render.vbo)) {
-		DBG(("%s: discarding vbo as next access will stall: %d\n",
-		     __FUNCTION__, sna->render.vbo->presumed_offset));
+		DBG(("%s: discarding vbo as next access will stall: %lx\n",
+		     __FUNCTION__, (long)sna->render.vbo->presumed_offset));
 		discard_vbo(sna);
 	}
 
@@ -3178,35 +3178,11 @@ gen3_composite_set_target(struct sna *sna,
 
 	/* For single-stream mode there should be no minimum alignment
 	 * required, except that the width must be at least 2 elements.
+	 * Furthermore, it appears that the pitch must be a multiple of
+	 * 2 elements.
 	 */
-	if (op->dst.bo->pitch < 2*op->dst.pixmap->drawable.bitsPerPixel) {
-		struct sna_pixmap *priv;
-
-		priv = sna_pixmap_move_to_gpu (op->dst.pixmap,
-					       MOVE_READ | MOVE_WRITE);
-		if (priv == NULL || priv->pinned)
-			return false;
-
-		if (priv->gpu_bo->pitch < 2*op->dst.pixmap->drawable.bitsPerPixel) {
-			struct kgem_bo *bo;
-
-			bo = kgem_replace_bo(&sna->kgem, priv->gpu_bo,
-					     op->dst.width, op->dst.height,
-					     2*op->dst.pixmap->drawable.bitsPerPixel,
-					     op->dst.pixmap->drawable.bitsPerPixel);
-			if (bo == NULL)
-				return false;
-
-			kgem_bo_destroy(&sna->kgem, priv->gpu_bo);
-			priv->gpu_bo = bo;
-		}
-
-		op->dst.bo = priv->gpu_bo;
-		op->damage = &priv->gpu_damage;
-		if (sna_damage_is_all(op->damage,
-				      op->dst.width, op->dst.height))
-			op->damage = NULL;
-	}
+	if (op->dst.bo->pitch & ((2*op->dst.pixmap->drawable.bitsPerPixel >> 3) - 1))
+		return false;
 
 	get_drawable_deltas(dst->pDrawable, op->dst.pixmap,
 			    &op->dst.x, &op->dst.y);
@@ -3515,7 +3491,7 @@ gen3_render_composite(struct sna *sna,
 				       dst_x, dst_y, width, height)) {
 		DBG(("%s: unable to set render target\n",
 		     __FUNCTION__));
-		return false;
+		goto fallback;
 	}
 
 	tmp->op = op;
@@ -3819,14 +3795,20 @@ gen3_render_composite(struct sna *sna,
 	return true;
 
 cleanup_mask:
-	if (tmp->mask.bo)
+	if (tmp->mask.bo) {
 		kgem_bo_destroy(&sna->kgem, tmp->mask.bo);
+		tmp->mask.bo = NULL;
+	}
 cleanup_src:
-	if (tmp->src.bo)
+	if (tmp->src.bo) {
 		kgem_bo_destroy(&sna->kgem, tmp->src.bo);
+		tmp->src.bo = NULL;
+	}
 cleanup_dst:
-	if (tmp->redirect.real_bo)
+	if (tmp->redirect.real_bo) {
 		kgem_bo_destroy(&sna->kgem, tmp->dst.bo);
+		tmp->redirect.real_bo = NULL;
+	}
 fallback:
 	return (mask == NULL &&
 		sna_blt_composite(sna,

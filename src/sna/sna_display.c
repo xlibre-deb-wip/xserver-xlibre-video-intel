@@ -1474,12 +1474,24 @@ static char *outputs_for_crtc(xf86CrtcPtr crtc, char *outputs, int max)
 
 static const char *rotation_to_str(Rotation rotation)
 {
-	switch (rotation) {
+	switch (rotation & RR_Rotate_All) {
+	case 0:
 	case RR_Rotate_0: return "normal";
-	case RR_Rotate_90: return "right";
+	case RR_Rotate_90: return "left";
 	case RR_Rotate_180: return "inverted";
-	case RR_Rotate_270: return "left";
+	case RR_Rotate_270: return "right";
 	default: return "unknown";
+	}
+}
+
+static const char *reflection_to_str(Rotation rotation)
+{
+	switch (rotation & RR_Reflect_All) {
+	case 0: return "none";
+	case RR_Reflect_X: return "X axis";
+	case RR_Reflect_Y: return "Y axis";
+	case RR_Reflect_X | RR_Reflect_Y: return "X and Y axes";
+	default: return "invalid";
 	}
 }
 
@@ -1499,11 +1511,10 @@ sna_crtc_set_mode_major(xf86CrtcPtr crtc, DisplayModePtr mode,
 		return FALSE;
 
 	xf86DrvMsg(crtc->scrn->scrnIndex, X_INFO,
-		   "switch to mode %dx%d@%.1f on pipe %d using %s, position (%d, %d), rotation %s\n",
+		   "switch to mode %dx%d@%.1f on %s using pipe %d, position (%d, %d), rotation %s, reflection %s\n",
 		   mode->HDisplay, mode->VDisplay, xf86ModeVRefresh(mode),
-		   sna_crtc->pipe,
-		   outputs_for_crtc(crtc, outputs, sizeof(outputs)),
-		   x, y, rotation_to_str(rotation));
+		   outputs_for_crtc(crtc, outputs, sizeof(outputs)), sna_crtc->pipe,
+		   x, y, rotation_to_str(rotation), reflection_to_str(rotation));
 
 	assert(mode->HDisplay <= sna->mode.kmode->max_width &&
 	       mode->VDisplay <= sna->mode.kmode->max_height);
@@ -1919,6 +1930,7 @@ sna_output_detect(xf86OutputPtr output)
 			sna_output->num_modes = min(old_count, sna_output->num_modes);
 			break;
 		}
+		VG(VALGRIND_MAKE_MEM_DEFINED(sna_output->modes, sizeof(*sna_output->modes)*sna_output->num_modes));
 	}
 
 	DBG(("%s(%s): found %d modes, connection status=%d\n",
@@ -2105,14 +2117,20 @@ sna_output_panel_edid(xf86OutputPtr output, DisplayModePtr modes)
 
 static char *canonical_mode_name(DisplayModePtr mode)
 {
-	char *str;
+	char tmp[32], *buf;
+	int len;
 
-	if (asprintf(&str, "%dx%d%s",
-		     mode->HDisplay, mode->VDisplay,
-		     mode->Flags & V_INTERLACE ? "i" : "") < 0)
+	len = sprintf(tmp, "%dx%d%s",
+		      mode->HDisplay, mode->VDisplay,
+		      mode->Flags & V_INTERLACE ? "i" : "");
+	if ((unsigned)len >= sizeof(tmp))
 		return NULL;
 
-	return str;
+	buf = malloc(len + 1);
+	if (buf == NULL)
+		return NULL;
+
+	return memcpy(buf, tmp, len + 1);
 }
 
 static DisplayModePtr
@@ -2565,22 +2583,24 @@ static const int subpixel_conv_table[] = {
 	SubPixelNone
 };
 
-static const char *output_names[] = {
-	"None",
-	"VGA",
-	"DVI",
-	"DVI",
-	"DVI",
-	"Composite",
-	"TV",
-	"LVDS",
-	"CTV",
-	"DIN",
-	"DP",
-	"HDMI",
-	"HDMI",
-	"TV",
-	"eDP",
+static const char * const output_names[] = {
+	/* DRM_MODE_CONNECTOR_Unknown */	"None",
+	/* DRM_MODE_CONNECTOR_VGA */		"VGA",
+	/* DRM_MODE_CONNECTOR_DVII */		"DVI",
+	/* DRM_MODE_CONNECTOR_DVID */		"DVI",
+	/* DRM_MODE_CONNECTOR_DVIA */		"DVI",
+	/* DRM_MODE_CONNECTOR_Composite */	"Composite",
+	/* DRM_MODE_CONNECTOR_SVIDEO */		"TV",
+	/* DRM_MODE_CONNECTOR_LVDS */		"LVDS",
+	/* DRM_MODE_CONNECTOR_Component */	"CTV",
+	/* DRM_MODE_CONNECTOR_9PinDIN */	"DIN",
+	/* DRM_MODE_CONNECTOR_DisplayPort */	"DP",
+	/* DRM_MODE_CONNECTOR_HDMIA */		"HDMI",
+	/* DRM_MODE_CONNECTOR_HDMIB */		"HDMI",
+	/* DRM_MODE_CONNECTOR_TV */		"TV",
+	/* DRM_MODE_CONNECTOR_eDP */		"eDP",
+	/* DRM_MODE_CONNECTOR_VIRTUAL */	"Virtual",
+	/* DRM_MODE_CONNECTOR_DSI */		"DSI"
 };
 
 static bool
@@ -3696,14 +3716,58 @@ static bool sna_emit_wait_for_scanline_hsw(struct sna *sna,
 	return true;
 }
 
+static bool sna_emit_wait_for_scanline_vlv(struct sna *sna,
+					   xf86CrtcPtr crtc,
+					   int pipe, int y1, int y2,
+					   bool full_height)
+{
+	uint32_t display_base = 0x180000;
+	uint32_t event;
+	uint32_t *b;
+
+	return false; /* synchronisation? I've heard of that */
+
+	if (!sna->kgem.has_secure_batches)
+		return false;
+
+	assert(y1 >= 0);
+	assert(y2 > y1);
+	assert(sna->kgem.mode);
+
+	/* Always program one less than the desired value */
+	if (--y1 < 0)
+		y1 = crtc->bounds.y2;
+	y2--;
+
+	b = kgem_get_batch(&sna->kgem);
+	sna->kgem.nbatch += 4;
+
+	if (pipe == 0) {
+		if (full_height)
+			event = MI_WAIT_FOR_PIPEA_SVBLANK;
+		else
+			event = MI_WAIT_FOR_PIPEA_SCAN_LINE_WINDOW;
+	} else {
+		if (full_height)
+			event = MI_WAIT_FOR_PIPEB_SVBLANK;
+		else
+			event = MI_WAIT_FOR_PIPEB_SCAN_LINE_WINDOW;
+	}
+	b[0] = MI_LOAD_REGISTER_IMM | 1;
+	b[1] = display_base + 0x70004 + 0x1000 * pipe;
+	b[2] = (1 << 31) | (y1 << 16) | y2;
+	b[3] = MI_WAIT_FOR_EVENT | event;
+
+	sna->kgem.batch_flags |= I915_EXEC_SECURE;
+	return true;
+}
+
 static bool sna_emit_wait_for_scanline_ivb(struct sna *sna,
 					   xf86CrtcPtr crtc,
 					   int pipe, int y1, int y2,
 					   bool full_height)
 {
-	uint32_t *b;
-	uint32_t event;
-	uint32_t forcewake;
+	uint32_t event, *b;
 
 	if (!sna->kgem.has_secure_batches)
 		return false;
@@ -3731,11 +3795,6 @@ static bool sna_emit_wait_for_scanline_ivb(struct sna *sna,
 		break;
 	}
 
-	if (sna->kgem.gen == 071)
-		forcewake = 0x1300b0; /* FORCEWAKE_VLV */
-	else
-		forcewake = 0xa188; /* FORCEWAKE_MT */
-
 	b = kgem_get_batch(&sna->kgem);
 
 	/* Both the LRI and WAIT_FOR_EVENT must be in the same cacheline */
@@ -3750,14 +3809,14 @@ static bool sna_emit_wait_for_scanline_ivb(struct sna *sna,
 	b[1] = 0x44050; /* DERRMR */
 	b[2] = ~event;
 	b[3] = MI_LOAD_REGISTER_IMM | 1;
-	b[4] = forcewake;
+	b[4] = 0xa188; /* FORCEWAKE_MT */
 	b[5] = 2 << 16 | 2;
 	b[6] = MI_LOAD_REGISTER_IMM | 1;
 	b[7] = 0x70068 + 0x1000 * pipe;
 	b[8] = (1 << 31) | (1 << 30) | (y1 << 16) | y2;
 	b[9] = MI_WAIT_FOR_EVENT | event;
 	b[10] = MI_LOAD_REGISTER_IMM | 1;
-	b[11] = forcewake;
+	b[11] = 0xa188; /* FORCEWAKE_MT */
 	b[12] = 2 << 16;
 	b[13] = MI_LOAD_REGISTER_IMM | 1;
 	b[14] = 0x44050; /* DERRMR */
@@ -3918,10 +3977,12 @@ sna_wait_for_scanline(struct sna *sna,
 	DBG(("%s: pipe=%d, y1=%d, y2=%d, full_height?=%d\n",
 	     __FUNCTION__, pipe, y1, y2, full_height));
 
-	if (sna->kgem.gen >= 0100)
+	if (sna->kgem.gen >= 0110)
 		ret = false;
 	else if (sna->kgem.gen >= 075)
 		ret = sna_emit_wait_for_scanline_hsw(sna, crtc, pipe, y1, y2, full_height);
+	else if (sna->kgem.gen == 071)
+		ret = sna_emit_wait_for_scanline_vlv(sna, crtc, pipe, y1, y2, full_height);
 	else if (sna->kgem.gen >= 070)
 		ret = sna_emit_wait_for_scanline_ivb(sna, crtc, pipe, y1, y2, full_height);
 	else if (sna->kgem.gen >= 060)
@@ -4037,10 +4098,9 @@ static void transformed_box(BoxRec *box, xf86CrtcPtr crtc)
 }
 
 static void
-sna_crtc_redisplay__fallback(xf86CrtcPtr crtc, RegionPtr region)
+sna_crtc_redisplay__fallback(xf86CrtcPtr crtc, RegionPtr region, struct kgem_bo *bo)
 {
 	struct sna *sna = to_sna(crtc->scrn);
-	struct sna_crtc *sna_crtc = to_sna_crtc(crtc);
 	ScreenPtr screen = sna->scrn->pScreen;
 	PictFormatPtr format;
 	PicturePtr src, dst;
@@ -4050,7 +4110,7 @@ sna_crtc_redisplay__fallback(xf86CrtcPtr crtc, RegionPtr region)
 
 	DBG(("%s: compositing transformed damage boxes\n", __FUNCTION__));
 
-	ptr = kgem_bo_map__gtt(&sna->kgem, sna_crtc->bo);
+	ptr = kgem_bo_map__gtt(&sna->kgem, bo);
 	if (ptr == NULL)
 		return;
 
@@ -4064,7 +4124,7 @@ sna_crtc_redisplay__fallback(xf86CrtcPtr crtc, RegionPtr region)
 					crtc->mode.VDisplay,
 					sna->front->drawable.depth,
 					sna->front->drawable.bitsPerPixel,
-					sna_crtc->bo->pitch, ptr))
+					bo->pitch, ptr))
 		goto free_pixmap;
 
 	error = sna_render_format_for_depth(sna->front->drawable.depth);
@@ -4095,7 +4155,7 @@ sna_crtc_redisplay__fallback(xf86CrtcPtr crtc, RegionPtr region)
 	if (!dst)
 		goto free_src;
 
-	kgem_bo_sync__gtt(&sna->kgem, sna_crtc->bo);
+	kgem_bo_sync__gtt(&sna->kgem, bo);
 
 	if (sigtrap_get() == 0) { /* paranoia */
 		const BoxRec *b = REGION_RECTS(region);
@@ -4190,7 +4250,7 @@ sna_crtc_redisplay__composite(xf86CrtcPtr crtc, RegionPtr region, struct kgem_bo
 				   crtc->mode.HDisplay, crtc->mode.VDisplay,
 				   memset(&tmp, 0, sizeof(tmp)))) {
 		DBG(("%s: unsupported operation!\n", __FUNCTION__));
-		sna_crtc_redisplay__fallback(crtc, region);
+		sna_crtc_redisplay__fallback(crtc, region, bo);
 		goto free_dst;
 	}
 
@@ -4268,7 +4328,7 @@ sna_crtc_redisplay(xf86CrtcPtr crtc, RegionPtr region)
 	if (can_render(sna))
 		sna_crtc_redisplay__composite(crtc, region, sna_crtc->bo);
 	else
-		sna_crtc_redisplay__fallback(crtc, region);
+		sna_crtc_redisplay__fallback(crtc, region, sna_crtc->bo);
 }
 
 struct wait_for_shadow {
@@ -4297,6 +4357,7 @@ static bool wait_for_shadow(struct sna *sna, struct sna_pixmap *priv, unsigned f
 		return true;
 
 	assert(sna->mode.shadow_active);
+	assert(bo == sna->mode.shadow);
 
 	assert(priv->gpu_bo->refcnt >= 1);
 	sna->mode.shadow = priv->gpu_bo;
@@ -4443,13 +4504,13 @@ void sna_mode_redisplay(struct sna *sna)
 				continue;
 
 			assert(crtc->enabled);
-			assert(crtc->transform_in_use);
+			assert(crtc->transform_in_use || sna->flags & SNA_TEAR_FREE);
 
 			damage.extents = crtc->bounds;
 			damage.data = NULL;
 			RegionIntersect(&damage, &damage, region);
 			if (RegionNotEmpty(&damage))
-				sna_crtc_redisplay__fallback(crtc, &damage);
+				sna_crtc_redisplay__fallback(crtc, &damage, sna_crtc->bo);
 			RegionUninit(&damage);
 		}
 

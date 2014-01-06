@@ -23,7 +23,7 @@
 # Initialize Autoconf
 AC_PREREQ([2.60])
 AC_INIT([xf86-video-intel],
-        [2.99.906],
+        [2.99.907],
         [https://bugs.freedesktop.org/enter_bug.cgi?product=xorg],
         [xf86-video-intel])
 AC_CONFIG_SRCDIR([Makefile.am])
@@ -99,7 +99,7 @@ gen4asm=no
 if test "x$ASM" != "xno"; then
 	AC_ARG_WITH(gen4asm,
 		    AS_HELP_STRING([--with-gen4asm=PATH],
-				   [Path to intel-gen4asm binary]]]),
+				   [Path to intel-gen4asm binary]),
 		    [path="$withval"],
 		    [path=""])
 	if test -n "$path" ; then
@@ -184,6 +184,7 @@ PKG_CHECK_MODULES(TOOL, [xinerama xrandr xdamage xfixes xcursor xtst xrender xex
 if test "x$tools" = "xyes"; then
   AC_CHECK_HEADER([sys/ipc.h], [], [tools=no])
   AC_CHECK_HEADER([sys/shm.h], [], [tools=no])
+  AC_CHECK_HEADER([sys/timerfd.h], [], [tools=no])
 
   if test "$ac_cv_header_sys_ipc_h" = "yes" -a "$ac_cv_header_sys_shm_h" = "yes"; then
       AC_MSG_CHECKING(whether shmctl IPC_RMID allows subsequent attaches)
@@ -283,7 +284,7 @@ PKG_CHECK_MODULES(PCIACCESS, [pciaccess >= 0.10])
 
 AC_ARG_ENABLE(sna,
 	      AS_HELP_STRING([--enable-sna],
-			     [Enable SandyBridge's New Acceleration (SNA) [default=auto]]),
+			     [Enable SandyBridge\'s New Acceleration (SNA) [default=auto]]),
 	      [SNA="$enableval"],
 	      [SNA=auto])
 

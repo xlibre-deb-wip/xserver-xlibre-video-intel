@@ -186,6 +186,8 @@ static bool sna_blt_fill_init(struct sna *sna,
 			b[0] = XY_SETUP_MONO_PATTERN_SL_BLT | 8;
 			if (bpp == 32)
 				b[0] |= BLT_WRITE_ALPHA | BLT_WRITE_RGB;
+			if (bo->tiling)
+				b[0] |= BLT_DST_TILED;
 			b[1] = blt->br13;
 			b[2] = 0;
 			b[3] = 0;
@@ -204,6 +206,8 @@ static bool sna_blt_fill_init(struct sna *sna,
 			b[0] = XY_SETUP_MONO_PATTERN_SL_BLT | 7;
 			if (bpp == 32)
 				b[0] |= BLT_WRITE_ALPHA | BLT_WRITE_RGB;
+			if (bo->tiling)
+				b[0] |= BLT_DST_TILED;
 			b[1] = blt->br13;
 			b[2] = 0;
 			b[3] = 0;
@@ -246,6 +250,8 @@ noinline static void sna_blt_fill_begin(struct sna *sna,
 		b[0] = XY_SETUP_MONO_PATTERN_SL_BLT | 8;
 		if (blt->bpp == 32)
 			b[0] |= BLT_WRITE_ALPHA | BLT_WRITE_RGB;
+		if (blt->bo[0]->tiling)
+			b[0] |= BLT_DST_TILED;
 		b[1] = blt->br13;
 		b[2] = 0;
 		b[3] = 0;
@@ -257,13 +263,15 @@ noinline static void sna_blt_fill_begin(struct sna *sna,
 					 0);
 		b[6] = blt->pixel;
 		b[7] = blt->pixel;
-		b[9] = 0;
+		b[8] = 0;
 		b[9] = 0;
 		kgem->nbatch += 10;
 	} else {
 		b[0] = XY_SETUP_MONO_PATTERN_SL_BLT | 7;
 		if (blt->bpp == 32)
 			b[0] |= BLT_WRITE_ALPHA | BLT_WRITE_RGB;
+		if (blt->bo[0]->tiling)
+			b[0] |= BLT_DST_TILED;
 		b[1] = blt->br13;
 		b[2] = 0;
 		b[3] = 0;
@@ -2347,9 +2355,9 @@ fill:
 			hint |= PREFER_GPU;
 			if (dst->pCompositeClip->data == NULL && (width | height))
 				hint |= IGNORE_CPU;
-				if (width == tmp->dst.pixmap->drawable.width &&
-				    height == tmp->dst.pixmap->drawable.height)
-					hint |= REPLACES;
+			if (width == tmp->dst.pixmap->drawable.width &&
+			    height == tmp->dst.pixmap->drawable.height)
+				hint |= REPLACES;
 		}
 		tmp->dst.bo = sna_drawable_use_bo(dst->pDrawable, hint,
 						  &dst_box, &tmp->damage);
@@ -3081,6 +3089,8 @@ bool sna_blt_fill_boxes(struct sna *sna, uint8_t alu,
 			b[0] = XY_SETUP_MONO_PATTERN_SL_BLT | 8;
 			if (bpp == 32)
 				b[0] |= BLT_WRITE_ALPHA | BLT_WRITE_RGB;
+			if (bo->tiling)
+				b[0] |= BLT_DST_TILED;
 			b[1] = br13;
 			b[2] = 0;
 			b[3] = 0;
@@ -3099,6 +3109,8 @@ bool sna_blt_fill_boxes(struct sna *sna, uint8_t alu,
 			b[0] = XY_SETUP_MONO_PATTERN_SL_BLT | 7;
 			if (bpp == 32)
 				b[0] |= BLT_WRITE_ALPHA | BLT_WRITE_RGB;
+			if (bo->tiling)
+				b[0] |= BLT_DST_TILED;
 			b[1] = br13;
 			b[2] = 0;
 			b[3] = 0;
@@ -3163,6 +3175,8 @@ bool sna_blt_fill_boxes(struct sna *sna, uint8_t alu,
 				b[0] = XY_SETUP_MONO_PATTERN_SL_BLT | 8;
 				if (bpp == 32)
 					b[0] |= BLT_WRITE_ALPHA | BLT_WRITE_RGB;
+				if (bo->tiling)
+					b[0] |= BLT_DST_TILED;
 				b[1] = br13;
 				b[2] = 0;
 				b[3] = 0;
@@ -3181,6 +3195,8 @@ bool sna_blt_fill_boxes(struct sna *sna, uint8_t alu,
 				b[0] = XY_SETUP_MONO_PATTERN_SL_BLT | 7;
 				if (bpp == 32)
 					b[0] |= BLT_WRITE_ALPHA | BLT_WRITE_RGB;
+				if (bo->tiling)
+					b[0] |= BLT_DST_TILED;
 				b[1] = br13;
 				b[2] = 0;
 				b[3] = 0;
@@ -3270,7 +3286,7 @@ bool sna_blt_copy_boxes(struct sna *sna, uint8_t alu,
 			}
 		} else {
 			if (kgem->nbatch >= 6 &&
-			    kgem->batch[kgem->nbatch-7] == (XY_COLOR_BLT | (cmd & (BLT_WRITE_ALPHA | BLT_WRITE_RGB)) | 4) &&
+			    kgem->batch[kgem->nbatch-6] == (XY_COLOR_BLT | (cmd & (BLT_WRITE_ALPHA | BLT_WRITE_RGB)) | 4) &&
 			    kgem->batch[kgem->nbatch-4] == ((uint32_t)(box->y1 + dst_dy) << 16 | (uint16_t)(box->x1 + dst_dx)) &&
 			    kgem->batch[kgem->nbatch-3] == ((uint32_t)(box->y2 + dst_dy) << 16 | (uint16_t)(box->x2 + dst_dx))) {
 				DBG(("%s: deleting last fill\n", __FUNCTION__));
@@ -3285,12 +3301,13 @@ bool sna_blt_copy_boxes(struct sna *sna, uint8_t alu,
 	    !kgem_check_reloc(kgem, 2) ||
 	    !kgem_check_many_bo_fenced(kgem, dst_bo, src_bo, NULL)) {
 		kgem_submit(kgem);
-		if (!kgem_check_many_bo_fenced(kgem, dst_bo, src_bo, NULL))
+		if (!kgem_check_many_bo_fenced(kgem, dst_bo, src_bo, NULL)) {
 			DBG(("%s: not enough room in aperture, fallback to tiling copy\n", __FUNCTION__));
 			return sna_tiling_blt_copy_boxes(sna, alu,
 							 src_bo, src_dx, src_dy,
 							 dst_bo, dst_dx, dst_dy,
 							 bpp, box, nbox);
+		}
 		_kgem_set_mode(kgem, KGEM_BLT);
 	}
 
@@ -3604,7 +3621,7 @@ bool sna_blt_copy_boxes__with_alpha(struct sna *sna, uint8_t alu,
 			}
 		} else {
 			if (kgem->nbatch >= 6 &&
-			    kgem->batch[kgem->nbatch-7] == (XY_COLOR_BLT | (cmd & (BLT_WRITE_ALPHA | BLT_WRITE_RGB)) | 4) &&
+			    kgem->batch[kgem->nbatch-6] == (XY_COLOR_BLT | (cmd & (BLT_WRITE_ALPHA | BLT_WRITE_RGB)) | 4) &&
 			    kgem->batch[kgem->nbatch-4] == ((uint32_t)(box->y1 + dst_dy) << 16 | (uint16_t)(box->x1 + dst_dx)) &&
 			    kgem->batch[kgem->nbatch-3] == ((uint32_t)(box->y2 + dst_dy) << 16 | (uint16_t)(box->x2 + dst_dx))) {
 				DBG(("%s: deleting last fill\n", __FUNCTION__));

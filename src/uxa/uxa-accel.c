@@ -36,7 +36,6 @@
 #include <X11/fonts/fontstruct.h>
 #include "dixfontstr.h"
 #include "uxa.h"
-#include "mipict.h"
 
 static void
 uxa_fill_spans(DrawablePtr pDrawable, GCPtr pGC, int n,
@@ -236,7 +235,7 @@ fallback:
 	}
 }
 
-static Bool inline
+static inline Bool
 uxa_copy_n_to_n_two_dir(DrawablePtr pSrcDrawable, DrawablePtr pDstDrawable,
 			GCPtr pGC, BoxPtr pbox, int nbox, int dx, int dy)
 {

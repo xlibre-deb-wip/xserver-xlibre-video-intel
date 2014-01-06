@@ -125,7 +125,6 @@ int gen4_vertex_finish(struct sna *sna)
 		}
 	}
 
-
 	size = 256*1024;
 	assert(!sna->render.active);
 	sna->render.vertices = NULL;
