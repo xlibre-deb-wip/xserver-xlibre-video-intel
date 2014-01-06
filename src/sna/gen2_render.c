@@ -1593,31 +1593,7 @@ gen2_composite_set_target(struct sna *sna,
 	if (op->dst.bo == NULL)
 		return false;
 
-	if (op->dst.bo->pitch < 8) {
-		struct sna_pixmap *priv;
-		struct kgem_bo *bo;
-
-		priv = sna_pixmap_move_to_gpu (op->dst.pixmap,
-					       MOVE_READ | MOVE_WRITE);
-		if (priv == NULL || priv->pinned)
-			return false;
-
-		assert(op->dst.bo == priv->gpu_bo);
-		bo = kgem_replace_bo(&sna->kgem, priv->gpu_bo,
-				     op->dst.width, op->dst.height, 8,
-				     op->dst.pixmap->drawable.bitsPerPixel);
-		if (bo == NULL)
-			return false;
-
-		kgem_bo_destroy(&sna->kgem, priv->gpu_bo);
-		priv->gpu_bo = bo;
-
-		op->dst.bo = priv->gpu_bo;
-		op->damage = &priv->gpu_damage;
-		if (sna_damage_is_all(op->damage,
-				      op->dst.width, op->dst.height))
-			op->damage = NULL;
-	}
+	assert((op->dst.bo->pitch & 7) == 0);
 
 	get_drawable_deltas(dst->pDrawable, op->dst.pixmap,
 			    &op->dst.x, &op->dst.y);
@@ -1869,7 +1845,7 @@ gen2_render_composite(struct sna *sna,
 		return true;
 
 	if (gen2_composite_fallback(sna, src, mask, dst))
-		return false;
+		goto fallback;
 
 	if (need_tiling(sna, width, height))
 		return sna_tiling_composite(op, src, mask, dst,
@@ -1883,7 +1859,7 @@ gen2_render_composite(struct sna *sna,
 				       dst_x, dst_y, width, height)) {
 		DBG(("%s: unable to set render target\n",
 		     __FUNCTION__));
-		return false;
+		goto fallback;
 	}
 
 	tmp->op = op;
@@ -1894,7 +1870,7 @@ gen2_render_composite(struct sna *sna,
 		if (!sna_render_composite_redirect(sna, tmp,
 						   dst_x, dst_y, width, height,
 						   op > PictOpSrc || dst->pCompositeClip->data != NULL))
-			return false;
+			goto fallback;
 	}
 
 	switch (gen2_composite_picture(sna, src, &tmp->src,
@@ -2057,15 +2033,27 @@ gen2_render_composite(struct sna *sna,
 	return true;
 
 cleanup_mask:
-	if (tmp->mask.bo)
+	if (tmp->mask.bo) {
 		kgem_bo_destroy(&sna->kgem, tmp->mask.bo);
+		tmp->mask.bo = NULL;
+	}
 cleanup_src:
-	if (tmp->src.bo)
+	if (tmp->src.bo) {
 		kgem_bo_destroy(&sna->kgem, tmp->src.bo);
+		tmp->src.bo = NULL;
+	}
 cleanup_dst:
-	if (tmp->redirect.real_bo)
+	if (tmp->redirect.real_bo) {
 		kgem_bo_destroy(&sna->kgem, tmp->dst.bo);
-	return false;
+		tmp->redirect.real_bo = NULL;
+	}
+fallback:
+	return (mask == NULL &&
+		sna_blt_composite(sna, op, src, dst,
+				  src_x, src_y,
+				  dst_x, dst_y,
+				  width, height,
+				  tmp, true));
 }
 
 fastcall static void

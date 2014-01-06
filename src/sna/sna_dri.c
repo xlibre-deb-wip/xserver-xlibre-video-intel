@@ -42,7 +42,6 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <unistd.h>
 
 #include "sna.h"
-#include "sna_reg.h"
 #include "intel_options.h"
 
 #include <xf86drm.h>
@@ -248,7 +247,7 @@ sna_dri_create_buffer(DrawablePtr draw,
 			assert(private->pixmap == pixmap);
 			assert(sna_pixmap(pixmap)->flush);
 			assert(sna_pixmap(pixmap)->gpu_bo == private->bo);
-			assert(sna_pixmap(pixmap)->pinned & PIN_DRI);
+			assert(sna_pixmap(pixmap)->pinned & PIN_DRI2);
 			assert(kgem_bo_flink(&sna->kgem, private->bo) == buffer->name);
 			assert(8*private->bo->pitch >= pixmap->drawable.width * pixmap->drawable.bitsPerPixel);
 			assert(private->bo->pitch * pixmap->drawable.height <= kgem_bo_size(private->bo));
@@ -378,10 +377,10 @@ sna_dri_create_buffer(DrawablePtr draw,
 
 		priv = sna_pixmap(pixmap);
 		assert(priv->flush == false);
-		assert((priv->pinned & PIN_DRI) == 0);
+		assert((priv->pinned & PIN_DRI2) == 0);
 
 		/* Don't allow this named buffer to be replaced */
-		priv->pinned |= PIN_DRI;
+		priv->pinned |= PIN_DRI2;
 
 		/* We need to submit any modifications to and reads from this
 		 * buffer before we send any reply to the Client.
@@ -424,7 +423,7 @@ static void _sna_dri_destroy_buffer(struct sna *sna, DRI2Buffer2Ptr buffer)
 		assert(sna_pixmap_get_buffer(pixmap) == buffer);
 		assert(priv->gpu_bo == private->bo);
 		assert(priv->gpu_bo->flush);
-		assert(priv->pinned & PIN_DRI);
+		assert(priv->pinned & PIN_DRI2);
 		assert(priv->flush);
 
 		/* Undo the DRI markings on this pixmap */
@@ -436,7 +435,7 @@ static void _sna_dri_destroy_buffer(struct sna *sna, DRI2Buffer2Ptr buffer)
 		list_del(&priv->flush_list);
 
 		priv->gpu_bo->flush = false;
-		priv->pinned &= ~PIN_DRI;
+		priv->pinned &= ~PIN_DRI2;
 
 		priv->flush = false;
 		sna_accel_watch_flush(sna, -1);
@@ -464,7 +463,7 @@ static inline void damage(PixmapPtr pixmap, struct sna_pixmap *priv, RegionPtr r
 {
 	assert(priv->gpu_bo);
 	if (DAMAGE_IS_ALL(priv->gpu_damage))
-		return;
+		goto done;
 
 	if (region == NULL) {
 damage_all:
@@ -479,6 +478,7 @@ damage_all:
 			goto damage_all;
 		sna_damage_add(&priv->gpu_damage, region);
 	}
+done:
 	priv->cpu = false;
 	priv->clear = false;
 }
@@ -496,7 +496,7 @@ static void set_bo(PixmapPtr pixmap, struct kgem_bo *bo)
 	assert(pixmap->drawable.height * bo->pitch <= kgem_bo_size(bo));
 	assert(bo->proxy == NULL);
 	assert(bo->flush);
-	assert(priv->pinned & PIN_DRI);
+	assert(priv->pinned & PIN_DRI2);
 	assert((priv->pinned & PIN_PRIME) == 0);
 	assert(priv->flush);
 
@@ -1214,6 +1214,12 @@ can_flip(struct sna * sna,
 		return false;
 	}
 
+	if (sna_pixmap(pixmap)->pinned & ~(PIN_DRI2 | PIN_SCANOUT)) {
+		DBG(("%s -- no, pinned: front %x\n",
+		     __FUNCTION__, sna_pixmap(pixmap)->pinned));
+		return false;
+	}
+
 	return true;
 }
 
@@ -1346,6 +1352,24 @@ void sna_dri_vblank_handler(struct sna *sna, struct drm_event_vblank *event)
 	draw = info->draw;
 	if (draw == NULL)
 		goto done;
+
+	if (sna->mode.shadow_flip && !sna->mode.shadow_damage) {
+		drmVBlank vbl;
+
+		/* recursed from wait_for_shadow(), simply requeue */
+		VG_CLEAR(vbl);
+		vbl.request.type =
+			DRM_VBLANK_RELATIVE |
+			DRM_VBLANK_EVENT |
+			pipe_select(info->pipe);
+		vbl.request.sequence = 1;
+		vbl.request.signal = (unsigned long)info;
+
+		if (sna_wait_vblank(sna, &vbl))
+			goto done;
+
+		return;
+	}
 
 	switch (info->type) {
 	case DRI2_FLIP:
@@ -1610,6 +1634,8 @@ static void sna_dri_flip_event(struct sna *sna,
 	     flip->fe_tv_sec,
 	     flip->fe_tv_usec,
 	     flip->type));
+
+	assert(!sna->mode.shadow_flip);
 
 	if (flip->scanout[1].bo) {
 		struct dri_bo *c = NULL;

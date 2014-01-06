@@ -288,8 +288,7 @@ trapezoids_fallback(struct sna *sna,
 
 		trapezoid_origin(&traps[0].left, &dst_x, &dst_y);
 
-		trapezoids_bounds(ntrap, traps, &bounds);
-		if (bounds.y1 >= bounds.y2 || bounds.x1 >= bounds.x2)
+		if (!trapezoids_bounds(ntrap, traps, &bounds))
 			return;
 
 		DBG(("%s: bounds (%d, %d), (%d, %d)\n", __FUNCTION__,
@@ -902,7 +901,7 @@ triangles_fallback(CARD8 op,
 		if (!scratch)
 			return;
 
-		memset(scratch->devPrivate.ptr, 0, scratch->devKind*height);
+		memset(scratch->devPrivate.ptr, 0, (size_t)scratch->devKind*height);
 		image = pixman_image_create_bits(format, width, height,
 						 scratch->devPrivate.ptr,
 						 scratch->devKind);

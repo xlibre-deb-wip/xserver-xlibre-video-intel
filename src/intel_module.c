@@ -110,6 +110,10 @@ static const struct intel_device_info intel_haswell_info = {
 	.gen = 075,
 };
 
+static const struct intel_device_info intel_broadwell_info = {
+	.gen = 0100,
+};
+
 static const SymTabRec intel_chipsets[] = {
 	{PCI_CHIP_I810,				"i810"},
 	{PCI_CHIP_I810_DC100,			"i810-dc100"},
@@ -144,6 +148,9 @@ static const SymTabRec intel_chipsets[] = {
 	{PCI_CHIP_G41_G,			"G41"},
 	{PCI_CHIP_B43_G,			"B43"},
 	{PCI_CHIP_B43_G1,			"B43"},
+
+	{0, ""},
+
 	{PCI_CHIP_IRONLAKE_D_G,			"HD Graphics"},
 	{PCI_CHIP_IRONLAKE_M_G,			"HD Graphics"},
 	{PCI_CHIP_SANDYBRIDGE_GT1,		"HD Graphics 2000" },
@@ -259,6 +266,9 @@ static const struct pci_id_match intel_device_match[] = {
 	INTEL_VLV_D_IDS(&intel_valleyview_info),
 	INTEL_VLV_M_IDS(&intel_valleyview_info),
 
+	INTEL_BDW_D_IDS(&intel_broadwell_info),
+	INTEL_BDW_M_IDS(&intel_broadwell_info),
+
 	INTEL_VGA_DEVICE(PCI_MATCH_ANY, &intel_generic_info),
 #endif
 
@@ -342,7 +352,7 @@ static void intel_identify(int flags)
 	xf86Msg(X_INFO, INTEL_NAME ": Driver for Intel(R) Integrated Graphics Chipsets:\n\t");
 	len = 8;
 
-	for (chipset = intel_chipsets; chipset->name; chipset++) {
+	for (chipset = intel_chipsets; chipset->token; chipset++) {
 		for (j = i; --j >= 0;)
 			if (strcmp(unique[j], chipset->name) == 0)
 				break;
@@ -384,6 +394,10 @@ static void intel_identify(int flags)
 	xf86ErrorF("\n");
 	if (unique != stack)
 		free(unique);
+
+	xf86Msg(X_INFO, INTEL_NAME ": Driver for Intel(R) HD Graphics: 2000-5000\n");
+	xf86Msg(X_INFO, INTEL_NAME ": Driver for Intel(R) Iris(TM) Graphics: 5100\n");
+	xf86Msg(X_INFO, INTEL_NAME ": Driver for Intel(R) Iris(TM) Pro Graphics: 5200\n");
 }
 
 static Bool intel_driver_func(ScrnInfoPtr pScrn,

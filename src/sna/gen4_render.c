@@ -63,7 +63,7 @@
 #define NO_FILL_BOXES 0
 #define NO_VIDEO 0
 
-#define MAX_FLUSH_VERTICES 6
+#define MAX_FLUSH_VERTICES 1 /* was 6, https://bugs.freedesktop.org/show_bug.cgi?id=55500 */
 
 #define GEN4_GRF_BLOCKS(nreg)    ((nreg + 15) / 16 - 1)
 
@@ -1864,7 +1864,7 @@ gen4_render_composite(struct sna *sna,
 		return true;
 
 	if (gen4_composite_fallback(sna, src, mask, dst))
-		return false;
+		goto fallback;
 
 	if (need_tiling(sna, width, height))
 		return sna_tiling_composite(op, src, mask, dst,
@@ -1878,7 +1878,7 @@ gen4_render_composite(struct sna *sna,
 				       dst_x, dst_y, width, height,
 				       op > PictOpSrc || dst->pCompositeClip->data)) {
 		DBG(("%s: failed to set composite target\n", __FUNCTION__));
-		return false;
+		goto fallback;
 	}
 
 	tmp->op = op;
@@ -1988,15 +1988,28 @@ gen4_render_composite(struct sna *sna,
 	return true;
 
 cleanup_mask:
-	if (tmp->mask.bo)
+	if (tmp->mask.bo) {
 		kgem_bo_destroy(&sna->kgem, tmp->mask.bo);
+		tmp->mask.bo = NULL;
+	}
 cleanup_src:
-	if (tmp->src.bo)
+	if (tmp->src.bo) {
 		kgem_bo_destroy(&sna->kgem, tmp->src.bo);
+		tmp->src.bo = NULL;
+	}
 cleanup_dst:
-	if (tmp->redirect.real_bo)
+	if (tmp->redirect.real_bo) {
 		kgem_bo_destroy(&sna->kgem, tmp->dst.bo);
-	return false;
+		tmp->redirect.real_bo = NULL;
+	}
+fallback:
+	return (mask == NULL &&
+		sna_blt_composite(sna, op,
+				  src, dst,
+				  src_x, src_y,
+				  dst_x, dst_y,
+				  width, height,
+				  tmp, true));
 }
 
 #if !NO_COMPOSITE_SPANS
@@ -2413,6 +2426,7 @@ fallback_blt:
 			kgem_bo_destroy(&sna->kgem, tmp.src.bo);
 			if (tmp.redirect.real_bo)
 				kgem_bo_destroy(&sna->kgem, tmp.dst.bo);
+
 			goto fallback_blt;
 		}
 	}

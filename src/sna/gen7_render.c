@@ -1105,19 +1105,19 @@ gen7_emit_state(struct sna *sna,
 
 	assert(op->dst.bo->exec);
 
-	need_invalidate = kgem_bo_is_dirty(op->src.bo) || kgem_bo_is_dirty(op->mask.bo);
-	if (ALWAYS_INVALIDATE)
-		need_invalidate = true;
-
-	need_flush =
-		sna->render_state.gen7.emit_flush &&
-		wm_binding_table & GEN7_READS_DST(op->u.gen7.flags);
+	need_flush = wm_binding_table & 1 ||
+		(sna->render_state.gen7.emit_flush && GEN7_READS_DST(op->u.gen7.flags));
 	if (ALWAYS_FLUSH)
 		need_flush = true;
 
 	wm_binding_table &= ~1;
 
 	need_stall = sna->render_state.gen7.surface_table != wm_binding_table;
+
+	need_invalidate = kgem_bo_is_dirty(op->src.bo) || kgem_bo_is_dirty(op->mask.bo);
+	if (ALWAYS_INVALIDATE)
+		need_invalidate = true;
+
 	need_stall &= gen7_emit_drawing_rectangle(sna, op);
 	if (ALWAYS_STALL)
 		need_stall = true;
@@ -1534,6 +1534,9 @@ static void gen7_emit_composite_state(struct sna *sna,
 		sna->kgem.surface += sizeof(struct gen7_surface_state) / sizeof(uint32_t);
 		offset = sna->render_state.gen7.surface_table;
 	}
+
+	if (sna->kgem.batch[sna->render_state.gen7.surface_table] == binding_table[0])
+		dirty = 0;
 
 	gen7_emit_state(sna, op, offset | dirty);
 }
@@ -2421,13 +2424,7 @@ gen7_render_composite(struct sna *sna,
 		return true;
 
 	if (gen7_composite_fallback(sna, src, mask, dst))
-		return (mask == NULL &&
-			sna_blt_composite(sna, op,
-					src, dst,
-					src_x, src_y,
-					dst_x, dst_y,
-					width, height,
-					tmp, true));
+		goto fallback;
 
 	if (need_tiling(sna, width, height))
 		return sna_tiling_composite(op, src, mask, dst,
@@ -2437,13 +2434,13 @@ gen7_render_composite(struct sna *sna,
 					    width, height,
 					    tmp);
 
-	if (op == PictOpClear)
+	if (op == PictOpClear && src == sna->clear)
 		op = PictOpSrc;
 	tmp->op = op;
 	if (!gen7_composite_set_target(sna, tmp, dst,
 				       dst_x, dst_y, width, height,
 				       op > PictOpSrc || dst->pCompositeClip->data))
-		return false;
+		goto fallback;
 
 	switch (gen7_composite_picture(sna, src, &tmp->src,
 				       src_x, src_y,
@@ -2558,15 +2555,28 @@ gen7_render_composite(struct sna *sna,
 	return true;
 
 cleanup_mask:
-	if (tmp->mask.bo)
+	if (tmp->mask.bo) {
 		kgem_bo_destroy(&sna->kgem, tmp->mask.bo);
+		tmp->mask.bo = NULL;
+	}
 cleanup_src:
-	if (tmp->src.bo)
+	if (tmp->src.bo) {
 		kgem_bo_destroy(&sna->kgem, tmp->src.bo);
+		tmp->src.bo = NULL;
+	}
 cleanup_dst:
-	if (tmp->redirect.real_bo)
+	if (tmp->redirect.real_bo) {
 		kgem_bo_destroy(&sna->kgem, tmp->dst.bo);
-	return false;
+		tmp->redirect.real_bo = NULL;
+	}
+fallback:
+	return (mask == NULL &&
+		sna_blt_composite(sna, op,
+				  src, dst,
+				  src_x, src_y,
+				  dst_x, dst_y,
+				  width, height,
+				  tmp, true));
 }
 
 #if !NO_COMPOSITE_SPANS
@@ -2809,6 +2819,9 @@ gen7_emit_copy_state(struct sna *sna,
 		sna->kgem.surface += sizeof(struct gen7_surface_state) / sizeof(uint32_t);
 		offset = sna->render_state.gen7.surface_table;
 	}
+
+	if (sna->kgem.batch[sna->render_state.gen7.surface_table] == binding_table[0])
+		dirty = 0;
 
 	assert(!GEN7_READS_DST(op->u.gen7.flags));
 	gen7_emit_state(sna, op, offset | dirty);
@@ -3242,6 +3255,9 @@ gen7_emit_fill_state(struct sna *sna, const struct sna_composite_op *op)
 		offset = sna->render_state.gen7.surface_table;
 	}
 
+	if (sna->kgem.batch[sna->render_state.gen7.surface_table] == binding_table[0])
+		dirty = 0;
+
 	gen7_emit_state(sna, op, offset | dirty);
 }
 
@@ -3346,6 +3362,7 @@ gen7_render_fill_boxes(struct sna *sna,
 			kgem_bo_destroy(&sna->kgem, tmp.src.bo);
 			if (tmp.redirect.real_bo)
 				kgem_bo_destroy(&sna->kgem, tmp.dst.bo);
+
 			return false;
 		}
 		_kgem_set_mode(&sna->kgem, KGEM_RENDER);
@@ -3732,7 +3749,7 @@ static void gen7_render_reset(struct sna *sna)
 	sna->render_state.gen7.kernel = -1;
 	sna->render_state.gen7.drawrect_offset = -1;
 	sna->render_state.gen7.drawrect_limit = -1;
-	sna->render_state.gen7.surface_table = -1;
+	sna->render_state.gen7.surface_table = 0;
 
 	if (sna->render.vbo && !kgem_bo_can_map(&sna->kgem, sna->render.vbo)) {
 		DBG(("%s: discarding unmappable vbo\n", __FUNCTION__));

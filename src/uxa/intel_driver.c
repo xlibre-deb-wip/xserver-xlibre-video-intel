@@ -53,13 +53,11 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "compiler.h"
 #include "mipointer.h"
 #include "micmap.h"
-#include "shadowfb.h"
 #include <X11/extensions/randr.h>
 #include "fb.h"
 #include "miscstruct.h"
 #include "dixstruct.h"
 #include "xf86xv.h"
-#include <X11/extensions/Xv.h>
 #include "shadow.h"
 #include "intel.h"
 #include "intel_video.h"
@@ -70,12 +68,9 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "intel_xvmc.h"
 #endif
 
-#include "legacy/legacy.h"
 #include "uxa.h"
 
-#include <sys/ioctl.h>
 #include "i915_drm.h"
-#include <xf86drmMode.h>
 
 #include "intel_glamor.h"
 #include "intel_options.h"
@@ -880,10 +875,8 @@ I830UeventInit(ScrnInfoPtr scrn)
 		return;
 	}
 
-	intel->uevent_handler =
-		xf86AddGeneralHandler(udev_monitor_get_fd(mon),
-				I830HandleUEvents,
-				scrn);
+	intel->uevent_handler = xf86AddGeneralHandler(udev_monitor_get_fd(mon),
+						      I830HandleUEvents, scrn);
 	if (!intel->uevent_handler) {
 		udev_monitor_unref(mon);
 		udev_unref(u);

@@ -1,5 +1,7 @@
 stress_TESTS = \
 	basic-fillrect \
+	basic-tiledrect \
+	basic-stippledrect \
 	basic-rectangle \
 	basic-string \
 	basic-copyarea \
@@ -12,7 +14,9 @@ stress_TESTS = \
 	render-trapezoid-image \
 	render-fill-copy \
 	render-composite-solid \
+	render-composite-solid-mask \
 	render-copyarea \
+	render-copyarea-mask \
 	render-copyarea-size \
 	render-copy-alphaless \
 	mixed-stress \
@@ -30,8 +34,8 @@ check_PROGRAMS = $(stress_TESTS)
 
 noinst_PROGRAMS = lowlevel-blt-bench
 
-AM_CFLAGS = @CWARNFLAGS@ @X11_CFLAGS@ @DRM_CFLAGS@
-LDADD = libtest.la @X11_LIBS@ @DRM_LIBS@ @CLOCK_GETTIME_LIBS@
+AM_CFLAGS = @CWARNFLAGS@ $(X11_CFLAGS) $(DRM_CFLAGS)
+LDADD = libtest.la $(X11_LIBS) $(DRM_LIBS) $(CLOCK_GETTIME_LIBS)
 
 noinst_LTLIBRARIES = libtest.la
 libtest_la_SOURCES = \
