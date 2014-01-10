@@ -1,0 +1,70 @@
+This is a squash of bd22abee8f33b20ff6bc7297b0a9ae8708d18727 and 
+0e692800055827cf526c7539515c71aecb58bf30 from xf86-video-intel git backported
+to 2.99.904.
+
+=== modified file 'src/sna/sna_display.c'
+--- a/src/sna/sna_display.c	2014-01-10 04:13:58 +0000
++++ b/src/sna/sna_display.c	2014-01-10 08:15:02 +0000
+@@ -3571,6 +3571,52 @@
+ 	return true;
+ }
+ 
++static bool sna_emit_wait_for_scanline_vlv(struct sna *sna,
++					   xf86CrtcPtr crtc,
++					   int pipe, int y1, int y2,
++					   bool full_height)
++{
++	uint32_t display_base = 0x180000;
++	uint32_t event;
++	uint32_t *b;
++
++	return false; /* synchronisation? I've heard of that */
++
++	if (!sna->kgem.has_secure_batches)
++		return false;
++
++	assert(y1 >= 0);
++	assert(y2 > y1);
++	assert(sna->kgem.mode);
++
++	/* Always program one less than the desired value */
++	if (--y1 < 0)
++		y1 = crtc->bounds.y2;
++	y2--;
++
++	b = kgem_get_batch(&sna->kgem);
++	sna->kgem.nbatch += 4;
++
++	if (pipe == 0) {
++		if (full_height)
++			event = MI_WAIT_FOR_PIPEA_SVBLANK;
++		else
++			event = MI_WAIT_FOR_PIPEA_SCAN_LINE_WINDOW;
++	} else {
++		if (full_height)
++			event = MI_WAIT_FOR_PIPEB_SVBLANK;
++		else
++			event = MI_WAIT_FOR_PIPEB_SCAN_LINE_WINDOW;
++	}
++	b[0] = MI_LOAD_REGISTER_IMM | 1;
++	b[1] = display_base + 0x70004 + 0x1000 * pipe;
++	b[2] = (1 << 31) | (y1 << 16) | y2;
++	b[3] = MI_WAIT_FOR_EVENT | event;
++
++	sna->kgem.batch_flags |= I915_EXEC_SECURE;
++	return true;
++}
++
+ static bool sna_emit_wait_for_scanline_ivb(struct sna *sna,
+ 					   xf86CrtcPtr crtc,
+ 					   int pipe, int y1, int y2,
+@@ -3792,7 +3838,7 @@
+ 	else if (sna->kgem.gen >= 075)
+ 		ret = sna_emit_wait_for_scanline_hsw(sna, crtc, pipe, y1, y2, full_height);
+ 	else if (sna->kgem.gen == 071)
+-		ret =sna_emit_wait_for_scanline_gen6(sna, crtc, pipe, y1, y2, full_height);
++		ret =sna_emit_wait_for_scanline_vlv(sna, crtc, pipe, y1, y2, full_height);
+ 	else if (sna->kgem.gen >= 070)
+ 		ret = sna_emit_wait_for_scanline_ivb(sna, crtc, pipe, y1, y2, full_height);
+ 	else if (sna->kgem.gen >= 060)
+

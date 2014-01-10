@@ -2,3 +2,5 @@
 
 xmir.patch
 sna-sanitize-output-crtc.diff
+baytrail-sna-vsync.patch
+haswell-sna-vsync.patch

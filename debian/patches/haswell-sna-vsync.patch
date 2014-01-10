@@ -1,0 +1,33 @@
+From 68cef6cd281572fcfb76a341dc45b7c8e5baffe6 Mon Sep 17 00:00:00 2001
+From: Chris Wilson <chris@chris-wilson.co.uk>
+Date: Thu, 07 Nov 2013 13:09:25 +0000
+Subject: sna/gen7: Request secure batches for Haswell vsync
+
+Since commit 8ff8eb2b38dc705f5c86f524c1cd74a811a7b04c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Sep 9 16:23:04 2013 +0100
+
+    sna/hsw: Scanline waits require both DERRMR and forcewake
+
+we have been emitting LRI to enable vsync on the render ring. This
+requires a privileged batch buffer, and whilst we were checking for
+kernel support, we forgot to actually tell the kernel to submit the
+batch with the right privileges.
+
+Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=71328
+Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+---
+diff --git a/src/sna/sna_display.c b/src/sna/sna_display.c
+index eb30dfa..889019c 100644
+--- a/src/sna/sna_display.c
++++ b/src/sna/sna_display.c
+@@ -3692,6 +3692,7 @@ static bool sna_emit_wait_for_scanline_hsw(struct sna *sna,
+ 	b[15] = 0x44050; /* DERRMR */
+ 	b[16] = ~0;
+ 
++	sna->kgem.batch_flags |= I915_EXEC_SECURE;
+ 	return true;
+ }
+ 
+--
+cgit v0.9.0.2-2-gbebe
