@@ -499,6 +499,7 @@ gen5_bind_bo(struct sna *sna,
 		if (offset) {
 			if (is_dst)
 				kgem_bo_mark_dirty(bo);
+			assert(offset >= sna->kgem.surface);
 			return offset * sizeof(uint32_t);
 		}
 	}
@@ -611,7 +612,7 @@ static int gen5_get_rectangles__flush(struct sna *sna,
 			return rem;
 	}
 
-	if (!kgem_check_batch(&sna->kgem, op->need_magic_ca_pass ? 20 : 6))
+	if (!kgem_check_batch(&sna->kgem, op->need_magic_ca_pass ? 40 : 6))
 		return 0;
 	if (!kgem_check_reloc_and_exec(&sna->kgem, 2))
 		return 0;
@@ -1571,6 +1572,7 @@ gen5_composite_set_target(struct sna *sna,
 			  bool partial)
 {
 	BoxRec box;
+	unsigned hint;
 
 	op->dst.pixmap = get_drawable_pixmap(dst->pDrawable);
 	op->dst.width  = op->dst.pixmap->drawable.width;
@@ -1584,9 +1586,14 @@ gen5_composite_set_target(struct sna *sna,
 	} else
 		sna_render_picture_extents(dst, &box);
 
-	op->dst.bo = sna_drawable_use_bo (dst->pDrawable,
-					  PREFER_GPU | FORCE_GPU | RENDER_GPU,
-					  &box, &op->damage);
+	hint = PREFER_GPU | FORCE_GPU | RENDER_GPU;
+	if (!partial) {
+		hint |= IGNORE_CPU;
+		if (w == op->dst.width && h == op->dst.height)
+			hint |= REPLACES;
+	}
+
+	op->dst.bo = sna_drawable_use_bo(dst->pDrawable, hint, &box, &op->damage);
 	if (op->dst.bo == NULL)
 		return false;
 
@@ -1830,6 +1837,7 @@ gen5_render_composite(struct sna *sna,
 		      int16_t msk_x, int16_t msk_y,
 		      int16_t dst_x, int16_t dst_y,
 		      int16_t width, int16_t height,
+		      unsigned flags,
 		      struct sna_composite_op *tmp)
 {
 	DBG(("%s: %dx%d, current mode=%d\n", __FUNCTION__,
@@ -1846,7 +1854,7 @@ gen5_render_composite(struct sna *sna,
 			      src_x, src_y,
 			      dst_x, dst_y,
 			      width, height,
-			      tmp, false))
+			      flags, tmp))
 		return true;
 
 	if (gen5_composite_fallback(sna, src, mask, dst))
@@ -1862,7 +1870,7 @@ gen5_render_composite(struct sna *sna,
 
 	if (!gen5_composite_set_target(sna, tmp, dst,
 				       dst_x, dst_y, width, height,
-				       op > PictOpSrc || dst->pCompositeClip->data)) {
+				       flags & COMPOSITE_PARTIAL || op > PictOpSrc || dst->pCompositeClip->data)) {
 		DBG(("%s: failed to set composite target\n", __FUNCTION__));
 		goto fallback;
 	}
@@ -1991,7 +1999,7 @@ fallback:
 				  src_x, src_y,
 				  dst_x, dst_y,
 				  width, height,
-				  tmp, true));
+				  flags | COMPOSITE_FALLBACK, tmp));
 }
 
 #if !NO_COMPOSITE_SPANS

@@ -54,6 +54,8 @@
 #define FORCE_NONRECTILINEAR_SPANS -1
 #define FORCE_FLUSH 1 /* https://bugs.freedesktop.org/show_bug.cgi?id=55500 */
 
+#define ALWAYS_FLUSH 1
+
 #define NO_COMPOSITE 0
 #define NO_COMPOSITE_SPANS 0
 #define NO_COPY 0
@@ -79,8 +81,8 @@
 #define URB_GS_ENTRY_SIZE     0
 #define URB_GS_ENTRIES	      0
 
-#define URB_CLIP_ENTRY_SIZE   0
-#define URB_CLIP_ENTRIES      0
+#define URB_CL_ENTRY_SIZE   0
+#define URB_CL_ENTRIES      0
 
 #define URB_SF_ENTRY_SIZE     2
 #define URB_SF_ENTRIES	      64
@@ -512,6 +514,7 @@ gen4_bind_bo(struct sna *sna,
 	/* After the first bind, we manage the cache domains within the batch */
 	offset = kgem_bo_get_binding(bo, format | is_dst << 31);
 	if (offset) {
+		assert(offset >= sna->kgem.surface);
 		if (is_dst)
 			kgem_bo_mark_dirty(bo);
 		return offset * sizeof(uint32_t);
@@ -568,6 +571,45 @@ static void gen4_emit_vertex_buffer(struct sna *sna,
 	sna->render.vb_id |= 1 << id;
 }
 
+inline static void
+gen4_emit_pipe_flush(struct sna *sna)
+{
+#if 1
+	OUT_BATCH(GEN4_PIPE_CONTROL | (4 - 2));
+	OUT_BATCH(GEN4_PIPE_CONTROL_WC_FLUSH);
+	OUT_BATCH(0);
+	OUT_BATCH(0);
+#else
+	OUT_BATCH(MI_FLUSH | MI_INHIBIT_RENDER_CACHE_FLUSH);
+#endif
+}
+
+inline static void
+gen4_emit_pipe_break(struct sna *sna)
+{
+#if !ALWAYS_FLUSH
+	OUT_BATCH(GEN4_PIPE_CONTROL | (4 - 2));
+	OUT_BATCH(0);
+	OUT_BATCH(0);
+	OUT_BATCH(0);
+#else
+	OUT_BATCH(MI_FLUSH | MI_INHIBIT_RENDER_CACHE_FLUSH);
+#endif
+}
+
+inline static void
+gen4_emit_pipe_invalidate(struct sna *sna)
+{
+#if 0
+	OUT_BATCH(GEN4_PIPE_CONTROL | (4 - 2));
+	OUT_BATCH(GEN4_PIPE_CONTROL_WC_FLUSH | GEN4_PIPE_CONTROL_TC_FLUSH);
+	OUT_BATCH(0);
+	OUT_BATCH(0);
+#else
+	OUT_BATCH(MI_FLUSH);
+#endif
+}
+
 static void gen4_emit_primitive(struct sna *sna)
 {
 	if (sna->kgem.nbatch == sna->render_state.gen4.last_primitive) {
@@ -601,10 +643,10 @@ static bool gen4_rectangle_begin(struct sna *sna,
 		return true;
 
 	/* 7xpipelined pointers + 6xprimitive + 1xflush */
-	ndwords = op->need_magic_ca_pass? 20 : 6;
+	ndwords = op->need_magic_ca_pass? 19 : 6;
 	if ((sna->render.vb_id & id) == 0)
 		ndwords += 5;
-	ndwords += 2*FORCE_FLUSH;
+	ndwords += 8*FORCE_FLUSH;
 
 	if (!kgem_check_batch(&sna->kgem, ndwords))
 		return false;
@@ -628,7 +670,7 @@ static int gen4_get_rectangles__flush(struct sna *sna,
 	}
 
 	if (!kgem_check_batch(&sna->kgem,
-			      2*FORCE_FLUSH + (op->need_magic_ca_pass ? 25 : 6)))
+			      8*FORCE_FLUSH + (op->need_magic_ca_pass ? 2*19+6 : 6)))
 		return 0;
 	if (!kgem_check_reloc_and_exec(&sna->kgem, 2))
 		return 0;
@@ -660,11 +702,13 @@ inline static int gen4_get_rectangles(struct sna *sna,
 		if (rem <= 0) {
 			if (sna->render.vertex_offset) {
 				gen4_vertex_flush(sna);
-				if (gen4_magic_ca_pass(sna, op))
-					gen4_emit_pipelined_pointers(sna, op, op->op,
-								     op->u.gen4.wm_kernel);
+				if (gen4_magic_ca_pass(sna, op)) {
+					if (kgem_check_batch(&sna->kgem, 19+6))
+						gen4_emit_pipelined_pointers(sna, op, op->op,
+									     op->u.gen4.wm_kernel);
+				}
 			}
-			OUT_BATCH(MI_FLUSH | MI_INHIBIT_RENDER_CACHE_FLUSH);
+			gen4_emit_pipe_break(sna);
 			rem = MAX_FLUSH_VERTICES;
 		}
 	} else
@@ -726,25 +770,21 @@ gen4_composite_get_binding_table(struct sna *sna, uint16_t *offset)
 static void
 gen4_emit_urb(struct sna *sna)
 {
-	int urb_vs_start, urb_vs_size;
-	int urb_gs_start, urb_gs_size;
-	int urb_clip_start, urb_clip_size;
-	int urb_sf_start, urb_sf_size;
-	int urb_cs_start, urb_cs_size;
+	int urb_vs_end;
+	int urb_gs_end;
+	int urb_cl_end;
+	int urb_sf_end;
+	int urb_cs_end;
 
 	if (!sna->render_state.gen4.needs_urb)
 		return;
 
-	urb_vs_start = 0;
-	urb_vs_size = URB_VS_ENTRIES * URB_VS_ENTRY_SIZE;
-	urb_gs_start = urb_vs_start + urb_vs_size;
-	urb_gs_size = URB_GS_ENTRIES * URB_GS_ENTRY_SIZE;
-	urb_clip_start = urb_gs_start + urb_gs_size;
-	urb_clip_size = URB_CLIP_ENTRIES * URB_CLIP_ENTRY_SIZE;
-	urb_sf_start = urb_clip_start + urb_clip_size;
-	urb_sf_size = URB_SF_ENTRIES * URB_SF_ENTRY_SIZE;
-	urb_cs_start = urb_sf_start + urb_sf_size;
-	urb_cs_size = URB_CS_ENTRIES * URB_CS_ENTRY_SIZE;
+	urb_vs_end =              URB_VS_ENTRIES * URB_VS_ENTRY_SIZE;
+	urb_gs_end = urb_vs_end + URB_GS_ENTRIES * URB_GS_ENTRY_SIZE;
+	urb_cl_end = urb_gs_end + URB_CL_ENTRIES * URB_CL_ENTRY_SIZE;
+	urb_sf_end = urb_cl_end + URB_SF_ENTRIES * URB_SF_ENTRY_SIZE;
+	urb_cs_end = urb_sf_end + URB_CS_ENTRIES * URB_CS_ENTRY_SIZE;
+	assert(urb_cs_end <= 256);
 
 	while ((sna->kgem.nbatch & 15) > 12)
 		OUT_BATCH(MI_NOOP);
@@ -756,11 +796,11 @@ gen4_emit_urb(struct sna *sna)
 		  UF0_GS_REALLOC |
 		  UF0_VS_REALLOC |
 		  1);
-	OUT_BATCH(((urb_clip_start + urb_clip_size) << UF1_CLIP_FENCE_SHIFT) |
-		  ((urb_gs_start + urb_gs_size) << UF1_GS_FENCE_SHIFT) |
-		  ((urb_vs_start + urb_vs_size) << UF1_VS_FENCE_SHIFT));
-	OUT_BATCH(((urb_cs_start + urb_cs_size) << UF2_CS_FENCE_SHIFT) |
-		  ((urb_sf_start + urb_sf_size) << UF2_SF_FENCE_SHIFT));
+	OUT_BATCH(urb_cl_end << UF1_CLIP_FENCE_SHIFT |
+		  urb_gs_end << UF1_GS_FENCE_SHIFT |
+		  urb_vs_end << UF1_VS_FENCE_SHIFT);
+	OUT_BATCH(urb_cs_end << UF2_CS_FENCE_SHIFT |
+		  urb_sf_end << UF2_SF_FENCE_SHIFT);
 
 	/* Constant buffer state */
 	OUT_BATCH(GEN4_CS_URB_STATE | 0);
@@ -1039,21 +1079,23 @@ gen4_emit_state(struct sna *sna,
 	assert(op->dst.bo->exec);
 
 	flush = wm_binding_table & 1;
-	if (kgem_bo_is_dirty(op->src.bo) || kgem_bo_is_dirty(op->mask.bo)) {
+	wm_binding_table &= ~1;
+
+	if (ALWAYS_FLUSH || kgem_bo_is_dirty(op->src.bo) || kgem_bo_is_dirty(op->mask.bo)) {
 		DBG(("%s: flushing dirty (%d, %d), forced? %d\n", __FUNCTION__,
 		     kgem_bo_is_dirty(op->src.bo),
 		     kgem_bo_is_dirty(op->mask.bo),
 		     flush));
-		OUT_BATCH(MI_FLUSH);
+		gen4_emit_pipe_invalidate(sna);
 		kgem_clear_dirty(&sna->kgem);
 		kgem_bo_mark_dirty(op->dst.bo);
 		flush = false;
 	}
 	flush &= gen4_emit_drawing_rectangle(sna, op);
 	if (flush && op->op > PictOpSrc)
-		OUT_BATCH(MI_FLUSH | MI_INHIBIT_RENDER_CACHE_FLUSH);
+		gen4_emit_pipe_flush(sna);
 
-	gen4_emit_binding_table(sna, wm_binding_table & ~1);
+	gen4_emit_binding_table(sna, wm_binding_table);
 	gen4_emit_pipelined_pointers(sna, op, op->op, op->u.gen4.wm_kernel);
 	gen4_emit_vertex_elements(sna, op);
 }
@@ -1062,11 +1104,11 @@ static void
 gen4_bind_surfaces(struct sna *sna,
 		   const struct sna_composite_op *op)
 {
-	bool dirty = kgem_bo_is_dirty(op->dst.bo);
 	uint32_t *binding_table;
-	uint16_t offset;
+	uint16_t offset, dirty;
 
 	gen4_get_batch(sna, op);
+	dirty = kgem_bo_is_dirty(op->dst.bo);
 
 	binding_table = gen4_composite_get_binding_table(sna, &offset);
 
@@ -1098,6 +1140,9 @@ gen4_bind_surfaces(struct sna *sna,
 		sna->kgem.surface += sizeof(struct gen4_surface_state_padded) / sizeof(uint32_t);
 		offset = sna->render_state.gen4.surface_table;
 	}
+
+	if (!ALWAYS_FLUSH && sna->kgem.batch[sna->render_state.gen4.surface_table] == binding_table[0])
+		dirty = 0;
 
 	gen4_emit_state(sna, op, offset | dirty);
 }
@@ -1273,7 +1318,6 @@ static uint32_t gen4_bind_video_source(struct sna *sna,
 static void gen4_video_bind_surfaces(struct sna *sna,
 				     const struct sna_composite_op *op)
 {
-	bool dirty = kgem_bo_is_dirty(op->dst.bo);
 	struct sna_video_frame *frame = op->priv;
 	uint32_t src_surf_format;
 	uint32_t src_surf_base[6];
@@ -1281,7 +1325,7 @@ static void gen4_video_bind_surfaces(struct sna *sna,
 	int src_height[6];
 	int src_pitch[6];
 	uint32_t *binding_table;
-	uint16_t offset;
+	uint16_t offset, dirty;
 	int n_src, n;
 
 	src_surf_base[0] = 0;
@@ -1316,6 +1360,7 @@ static void gen4_video_bind_surfaces(struct sna *sna,
 	}
 
 	gen4_get_batch(sna, op);
+	dirty = kgem_bo_is_dirty(op->dst.bo);
 
 	binding_table = gen4_composite_get_binding_table(sna, &offset);
 	binding_table[0] =
@@ -1333,6 +1378,9 @@ static void gen4_video_bind_surfaces(struct sna *sna,
 					       src_pitch[n],
 					       src_surf_format);
 	}
+
+	if (!ALWAYS_FLUSH && sna->kgem.batch[sna->render_state.gen4.surface_table] == binding_table[0])
+		dirty = 0;
 
 	gen4_emit_state(sna, op, offset | dirty);
 }
@@ -1588,6 +1636,7 @@ gen4_composite_set_target(struct sna *sna,
 			  bool partial)
 {
 	BoxRec box;
+	unsigned hint;
 
 	op->dst.pixmap = get_drawable_pixmap(dst->pDrawable);
 	op->dst.width  = op->dst.pixmap->drawable.width;
@@ -1601,9 +1650,14 @@ gen4_composite_set_target(struct sna *sna,
 	} else
 		sna_render_picture_extents(dst, &box);
 
-	op->dst.bo = sna_drawable_use_bo (dst->pDrawable,
-					  PREFER_GPU | FORCE_GPU | RENDER_GPU,
-					  &box, &op->damage);
+	hint = PREFER_GPU | FORCE_GPU | RENDER_GPU;
+	if (!partial) {
+		hint |= IGNORE_CPU;
+		if (w == op->dst.width && h == op->dst.height)
+			hint |= REPLACES;
+	}
+
+	op->dst.bo = sna_drawable_use_bo(dst->pDrawable, hint, &box, &op->damage);
 	if (op->dst.bo == NULL)
 		return false;
 
@@ -1846,6 +1900,7 @@ gen4_render_composite(struct sna *sna,
 		      int16_t msk_x, int16_t msk_y,
 		      int16_t dst_x, int16_t dst_y,
 		      int16_t width, int16_t height,
+		      unsigned flags,
 		      struct sna_composite_op *tmp)
 {
 	DBG(("%s: %dx%d, current mode=%d\n", __FUNCTION__,
@@ -1860,7 +1915,7 @@ gen4_render_composite(struct sna *sna,
 			      src_x, src_y,
 			      dst_x, dst_y,
 			      width, height,
-			      tmp, false))
+			      flags, tmp))
 		return true;
 
 	if (gen4_composite_fallback(sna, src, mask, dst))
@@ -1876,7 +1931,7 @@ gen4_render_composite(struct sna *sna,
 
 	if (!gen4_composite_set_target(sna, tmp, dst,
 				       dst_x, dst_y, width, height,
-				       op > PictOpSrc || dst->pCompositeClip->data)) {
+				       flags & COMPOSITE_PARTIAL || op > PictOpSrc || dst->pCompositeClip->data)) {
 		DBG(("%s: failed to set composite target\n", __FUNCTION__));
 		goto fallback;
 	}
@@ -2009,7 +2064,7 @@ fallback:
 				  src_x, src_y,
 				  dst_x, dst_y,
 				  width, height,
-				  tmp, true));
+				  flags | COMPOSITE_FALLBACK, tmp));
 }
 
 #if !NO_COMPOSITE_SPANS
@@ -2252,11 +2307,11 @@ cleanup_dst:
 static void
 gen4_copy_bind_surfaces(struct sna *sna, const struct sna_composite_op *op)
 {
-	bool dirty = kgem_bo_is_dirty(op->dst.bo);
 	uint32_t *binding_table;
-	uint16_t offset;
+	uint16_t offset, dirty;
 
 	gen4_get_batch(sna, op);
+	dirty = kgem_bo_is_dirty(op->dst.bo);
 
 	binding_table = gen4_composite_get_binding_table(sna, &offset);
 
@@ -2276,6 +2331,9 @@ gen4_copy_bind_surfaces(struct sna *sna, const struct sna_composite_op *op)
 		sna->kgem.surface += sizeof(struct gen4_surface_state_padded) / sizeof(uint32_t);
 		offset = sna->render_state.gen4.surface_table;
 	}
+
+	if (!ALWAYS_FLUSH && sna->kgem.batch[sna->render_state.gen4.surface_table] == binding_table[0])
+		dirty = 0;
 
 	gen4_emit_state(sna, op, offset | dirty);
 }
@@ -2888,7 +2946,7 @@ static void gen4_render_reset(struct sna *sna)
 
 	sna->render_state.gen4.drawrect_offset = -1;
 	sna->render_state.gen4.drawrect_limit = -1;
-	sna->render_state.gen4.surface_table = -1;
+	sna->render_state.gen4.surface_table = 0;
 
 	if (sna->render.vbo && !kgem_bo_can_map(&sna->kgem, sna->render.vbo)) {
 		DBG(("%s: discarding unmappable vbo\n", __FUNCTION__));

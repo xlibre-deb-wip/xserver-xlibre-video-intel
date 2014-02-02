@@ -352,7 +352,7 @@ sna_output_backlight_init(xf86OutputPtr output)
 
 	DBG(("%s: found 'wscons'\n", __FUNCTION__));
 
-	sna_output->backlight_iface = "wscons";
+	sna_output->backlight_iface = strdup("wscons");
 	sna_output->backlight_max = param.max;
 	sna_output->backlight_active_level = param.curval;
 }
@@ -471,14 +471,14 @@ has_user_backlight_override(xf86OutputPtr output)
 {
 	struct sna_output *sna_output = output->driver_private;
 	struct sna *sna = to_sna(output->scrn);
-	char *str;
+	const char *str;
 	int max;
 
 	str = xf86GetOptValString(sna->Options, OPTION_BACKLIGHT);
 	if (str == NULL)
 		return NULL;
 
-	sna_output->backlight_iface = str;
+	sna_output->backlight_iface = (char *)str;
 	max = sna_output_backlight_get_max(output);
 	sna_output->backlight_iface = NULL;
 	if (max <= 0) {
@@ -488,7 +488,7 @@ has_user_backlight_override(xf86OutputPtr output)
 		return NULL;
 	}
 
-	return str;
+	return strdup(str);
 }
 
 static char *
@@ -838,7 +838,7 @@ sna_crtc_apply(xf86CrtcPtr crtc)
 	struct sna_crtc *sna_crtc = to_sna_crtc(crtc);
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(crtc->scrn);
 	struct drm_mode_crtc arg;
-	uint32_t output_ids[16];
+	uint32_t output_ids[32];
 	int output_count = 0;
 	int i;
 
@@ -861,7 +861,8 @@ sna_crtc_apply(xf86CrtcPtr crtc)
 		     (uint32_t)output->possible_crtcs,
 		     (uint32_t)output->possible_clones));
 		output_ids[output_count] = to_connector_id(output);
-		output_count++;
+		if (++output_count == ARRAY_SIZE(output_ids))
+			return false;
 	}
 
 	VG_CLEAR(arg);
@@ -897,6 +898,105 @@ sna_crtc_apply(xf86CrtcPtr crtc)
 	return true;
 }
 
+struct wait_for_shadow {
+	RegionRec region;
+	struct kgem_bo *bo;
+};
+
+static bool wait_for_shadow(struct sna *sna, struct sna_pixmap *priv, unsigned flags)
+{
+	struct wait_for_shadow *wait = priv->move_to_gpu_data;
+	struct kgem_bo *bo = wait->bo;
+	PixmapPtr pixmap = priv->pixmap;
+	DamagePtr damage;
+	bool ret = true;
+
+	DBG(("%s: flags=%x, shadow_flip=%d, handle=%d, wait=%d, old=%d\n",
+	     __FUNCTION__, flags, sna->mode.shadow_flip,
+	     priv->gpu_bo->handle, wait->bo->handle, sna->mode.shadow->handle));
+
+	assert(wait->bo != priv->gpu_bo);
+
+	if (flags == 0 || pixmap != sna->front || !sna->mode.shadow_damage)
+		goto done;
+
+	if ((flags & MOVE_WRITE) == 0)
+		return true;
+
+	assert(sna->mode.shadow_active);
+	assert(bo == sna->mode.shadow);
+
+	assert(priv->gpu_bo->refcnt >= 1);
+	sna->mode.shadow = priv->gpu_bo;
+
+	damage = sna->mode.shadow_damage;
+	sna->mode.shadow_damage = NULL;
+
+	while (sna->mode.shadow_flip && sna_mode_has_pending_events(sna))
+		sna_mode_wakeup(sna);
+
+	if (sna->mode.shadow_flip) {
+		bo = kgem_create_2d(&sna->kgem,
+				    pixmap->drawable.width,
+				    pixmap->drawable.height,
+				    pixmap->drawable.bitsPerPixel,
+				    priv->gpu_bo->tiling,
+				    CREATE_EXACT | CREATE_SCANOUT);
+		if (bo != NULL) {
+			DBG(("%s: replacing still-attached GPU bo\n",
+			     __FUNCTION__));
+
+			kgem_bo_destroy(&sna->kgem, wait->bo);
+			RegionUninit(&wait->region);
+
+			wait->region.extents.x1 = 0;
+			wait->region.extents.y1 = 0;
+			wait->region.extents.x2 = pixmap->drawable.width;
+			wait->region.extents.y2 = pixmap->drawable.height;
+			wait->region.data = NULL;
+		} else {
+			while (sna->mode.shadow_flip &&
+			       sna_mode_wait_for_event(sna))
+				sna_mode_wakeup(sna);
+
+			bo = wait->bo;
+		}
+	}
+
+	sna->mode.shadow_damage = damage;
+
+	if (flags & MOVE_READ) {
+		DBG(("%s: copying existing GPU damage: %ldx(%d, %d), (%d, %d)\n",
+		     __FUNCTION__, (long)REGION_NUM_RECTS(&wait->region),
+		     wait->region.extents.x1, wait->region.extents.y1,
+		     wait->region.extents.x2, wait->region.extents.y2));
+		ret = sna->render.copy_boxes(sna, GXcopy,
+					     pixmap, priv->gpu_bo, 0, 0,
+					     pixmap, bo, 0, 0,
+					     REGION_RECTS(&wait->region),
+					     REGION_NUM_RECTS(&wait->region),
+					     0);
+	}
+
+	if (priv->cow)
+		sna_pixmap_undo_cow(sna, priv, 0);
+
+	sna_pixmap_unmap(pixmap, priv);
+	priv->gpu_bo = bo;
+
+	sna_dri_pixmap_update_bo(sna, pixmap);
+
+done:
+	kgem_bo_destroy(&sna->kgem, wait->bo);
+	RegionUninit(&wait->region);
+	free(wait);
+
+	priv->move_to_gpu_data = NULL;
+	priv->move_to_gpu = NULL;
+
+	return ret;
+}
+
 static bool sna_mode_enable_shadow(struct sna *sna)
 {
 	ScreenPtr screen = sna->scrn->pScreen;
@@ -918,10 +1018,16 @@ static bool sna_mode_enable_shadow(struct sna *sna)
 
 static void sna_mode_disable_shadow(struct sna *sna)
 {
+	struct sna_pixmap *priv;
+
 	if (!sna->mode.shadow_damage)
 		return;
 
 	DBG(("%s\n", __FUNCTION__));
+
+	priv = sna_pixmap(sna->front);
+	if (priv->move_to_gpu == wait_for_shadow)
+		priv->move_to_gpu(sna, priv, 0);
 
 	DamageUnregister(&sna->front->drawable, sna->mode.shadow_damage);
 	DamageDestroy(sna->mode.shadow_damage);
@@ -1317,6 +1423,8 @@ static struct kgem_bo *sna_crtc_attach(xf86CrtcPtr crtc)
 
 		DBG(("%s: attaching to single shadow pixmap\n", __FUNCTION__));
 		if (sna->mode.shadow == NULL) {
+			BoxRec box;
+
 			bo = kgem_create_2d(&sna->kgem,
 					    sna->scrn->virtualX,
 					    sna->scrn->virtualY,
@@ -1325,6 +1433,18 @@ static struct kgem_bo *sna_crtc_attach(xf86CrtcPtr crtc)
 					    CREATE_SCANOUT);
 			if (bo == NULL)
 				return NULL;
+
+			box.x1 = box.y1 = 0;
+			box.x2 = sna->scrn->virtualX;
+			box.y2 = sna->scrn->virtualY;
+
+			if (!sna->render.copy_boxes(sna, GXcopy,
+						    sna->front, sna_pixmap(sna->front)->gpu_bo, 0, 0,
+						    sna->front, bo, 0, 0,
+						    &box, 1, COPY_LAST)) {
+				kgem_bo_destroy(&sna->kgem, bo);
+				return NULL;
+			}
 
 			if (!get_fb(sna, bo,
 				    sna->scrn->virtualX,
@@ -2191,7 +2311,7 @@ sna_output_get_modes(xf86OutputPtr output)
 	if (current && (current->name == NULL || *current->name == '\0')) {
 		char *str = canonical_mode_name(current);
 		if (str) {
-			free(current->name);
+			free((char *)current->name);
 			current->name = str;
 		}
 	}
@@ -2293,18 +2413,19 @@ sna_output_dpms(xf86OutputPtr output, int dpms)
 	 * record the value before the kernel modifies it
 	 * and reapply it afterwards.
 	 */
-	if (dpms == DPMSModeOff)
+	if (dpms != DPMSModeOn)
 		sna_output_dpms_backlight(output,
 					  sna_output->dpms_mode,
 					  dpms);
 
-	if (output->crtc)
-		drmModeConnectorSetProperty(sna->kgem.fd,
-					    sna_output->id,
-					    sna_output->dpms_id,
-					    dpms);
+	if (output->crtc &&
+	    drmModeConnectorSetProperty(sna->kgem.fd,
+					sna_output->id,
+					sna_output->dpms_id,
+					dpms))
+		dpms = sna_output->dpms_mode;
 
-	if (dpms != DPMSModeOff)
+	if (dpms == DPMSModeOn)
 		sna_output_dpms_backlight(output,
 					  sna_output->dpms_mode,
 					  dpms);
@@ -3267,7 +3388,7 @@ static void crtc_init_gamma(xf86CrtcPtr crtc) { }
 
 static const char *preferred_mode(xf86OutputPtr output)
 {
-	char *mode;
+	const char *mode;
 
 	mode = xf86GetOptValString(output->options, OPTION_PREFERRED_MODE);
 	if (mode)
@@ -3372,7 +3493,9 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 
 		for (j = 0; j < config->num_crtc; j++) {
 			xf86CrtcPtr crtc = config->crtc[j];
-			if (to_sna_crtc(crtc)->id != crtc_id)
+
+			if (to_sna_crtc(crtc) == NULL ||
+			    to_sna_crtc(crtc)->id != crtc_id)
 				continue;
 
 			if (crtc->desiredMode.status == MODE_OK) {
@@ -4202,11 +4325,17 @@ sna_crtc_redisplay__composite(xf86CrtcPtr crtc, RegionPtr region, struct kgem_bo
 	DBG(("%s: compositing transformed damage boxes\n", __FUNCTION__));
 
 	pixmap = sna_pixmap_create_unattached(screen,
-					      crtc->mode.HDisplay,
-					      crtc->mode.VDisplay,
-					      sna->front->drawable.depth);
+					      0, 0, sna->front->drawable.depth);
 	if (pixmap == NullPixmap)
 		return;
+
+	if (!screen->ModifyPixmapHeader(pixmap,
+					crtc->mode.HDisplay,
+					crtc->mode.VDisplay,
+					sna->front->drawable.depth,
+					sna->front->drawable.bitsPerPixel,
+					bo->pitch, NULL))
+		goto free_pixmap;
 
 	if (!sna_pixmap_attach_to_bo(pixmap, bo))
 		goto free_pixmap;
@@ -4248,7 +4377,7 @@ sna_crtc_redisplay__composite(xf86CrtcPtr crtc, RegionPtr region, struct kgem_bo
 				   0, 0,
 				   0, 0,
 				   crtc->mode.HDisplay, crtc->mode.VDisplay,
-				   memset(&tmp, 0, sizeof(tmp)))) {
+				   0, memset(&tmp, 0, sizeof(tmp)))) {
 		DBG(("%s: unsupported operation!\n", __FUNCTION__));
 		sna_crtc_redisplay__fallback(crtc, region, bo);
 		goto free_dst;
@@ -4331,105 +4460,6 @@ sna_crtc_redisplay(xf86CrtcPtr crtc, RegionPtr region)
 		sna_crtc_redisplay__fallback(crtc, region, sna_crtc->bo);
 }
 
-struct wait_for_shadow {
-	RegionRec region;
-	struct kgem_bo *bo;
-};
-
-static bool wait_for_shadow(struct sna *sna, struct sna_pixmap *priv, unsigned flags)
-{
-	struct wait_for_shadow *wait = priv->move_to_gpu_data;
-	struct kgem_bo *bo = wait->bo;
-	PixmapPtr pixmap = priv->pixmap;
-	DamagePtr damage;
-	bool ret = true;
-
-	DBG(("%s: flags=%x, shadow_flip=%d, handle=%d, wait=%d, old=%d\n",
-	     __FUNCTION__, flags, sna->mode.shadow_flip,
-	     priv->gpu_bo->handle, wait->bo->handle, sna->mode.shadow->handle));
-
-	assert(wait->bo != priv->gpu_bo);
-
-	if (flags == 0 || pixmap != sna->front || !sna->mode.shadow_damage)
-		goto done;
-
-	if ((flags & MOVE_WRITE) == 0)
-		return true;
-
-	assert(sna->mode.shadow_active);
-	assert(bo == sna->mode.shadow);
-
-	assert(priv->gpu_bo->refcnt >= 1);
-	sna->mode.shadow = priv->gpu_bo;
-
-	damage = sna->mode.shadow_damage;
-	sna->mode.shadow_damage = NULL;
-
-	while (sna->mode.shadow_flip && sna_mode_has_pending_events(sna))
-		sna_mode_wakeup(sna);
-
-	if (sna->mode.shadow_flip) {
-		bo = kgem_create_2d(&sna->kgem,
-				    pixmap->drawable.width,
-				    pixmap->drawable.height,
-				    pixmap->drawable.bitsPerPixel,
-				    priv->gpu_bo->tiling,
-				    CREATE_EXACT | CREATE_SCANOUT);
-		if (bo != NULL) {
-			DBG(("%s: replacing still-attached GPU bo\n",
-			     __FUNCTION__));
-
-			kgem_bo_destroy(&sna->kgem, wait->bo);
-			RegionUninit(&wait->region);
-
-			wait->region.extents.x1 = 0;
-			wait->region.extents.y1 = 0;
-			wait->region.extents.x2 = pixmap->drawable.width;
-			wait->region.extents.y2 = pixmap->drawable.height;
-			wait->region.data = NULL;
-		} else {
-			while (sna->mode.shadow_flip &&
-			       sna_mode_wait_for_event(sna))
-				sna_mode_wakeup(sna);
-
-			bo = wait->bo;
-		}
-	}
-
-	sna->mode.shadow_damage = damage;
-
-	if (flags & MOVE_READ) {
-		DBG(("%s: copying existing GPU damage: %ldx(%d, %d), (%d, %d)\n",
-		     __FUNCTION__, (long)REGION_NUM_RECTS(&wait->region),
-		     wait->region.extents.x1, wait->region.extents.y1,
-		     wait->region.extents.x2, wait->region.extents.y2));
-		ret = sna->render.copy_boxes(sna, GXcopy,
-					     pixmap, priv->gpu_bo, 0, 0,
-					     pixmap, bo, 0, 0,
-					     REGION_RECTS(&wait->region),
-					     REGION_NUM_RECTS(&wait->region),
-					     0);
-	}
-
-	if (priv->cow)
-		sna_pixmap_undo_cow(sna, priv, 0);
-
-	sna_pixmap_unmap(pixmap, priv);
-	priv->gpu_bo = bo;
-
-	sna_dri_pixmap_update_bo(sna, pixmap);
-
-done:
-	kgem_bo_destroy(&sna->kgem, wait->bo);
-	RegionUninit(&wait->region);
-	free(wait);
-
-	priv->move_to_gpu_data = NULL;
-	priv->move_to_gpu = NULL;
-
-	return ret;
-}
-
 static void set_bo(PixmapPtr pixmap, struct kgem_bo *bo, RegionPtr region)
 {
 	struct sna_pixmap *priv = sna_pixmap(pixmap);
@@ -4462,8 +4492,10 @@ void sna_mode_redisplay(struct sna *sna)
 	if (!sna->mode.shadow_damage)
 		return;
 
-	DBG(("%s: posting shadow damage? %d\n",
-	     __FUNCTION__, !RegionNil(DamageRegion(sna->mode.shadow_damage))));
+	DBG(("%s: posting shadow damage? %d (flips pending? %d)\n",
+	     __FUNCTION__,
+	     !RegionNil(DamageRegion(sna->mode.shadow_damage)),
+	     sna->mode.shadow_flip));
 	assert((sna->flags & SNA_IS_HOSTED) == 0);
 	assert(sna->mode.shadow_active);
 
@@ -4518,16 +4550,43 @@ void sna_mode_redisplay(struct sna *sna)
 		return;
 	}
 
-	assert(sna_pixmap(sna->front)->move_to_gpu == NULL);
+	{
+		struct sna_pixmap *priv;
+
+		priv = sna_pixmap(sna->front);
+		assert(priv != NULL);
+
+		if (priv->move_to_gpu) {
+			if (priv->move_to_gpu == wait_for_shadow) {
+				/* No damage written to new scanout
+				 * (backbuffer), ignore redisplay request
+				 * and continue with the current intact
+				 * scanout (frontbuffer).
+				 */
+				RegionEmpty(region);
+				return;
+			}
+
+			(void)priv->move_to_gpu(sna, priv, 0);
+		}
+
+		assert(priv->move_to_gpu == NULL);
+	}
 
 	for (i = 0; i < config->num_crtc; i++) {
 		xf86CrtcPtr crtc = config->crtc[i];
 		struct sna_crtc *sna_crtc = to_sna_crtc(crtc);
 		RegionRec damage;
 
-		if (sna_crtc == NULL ||
-		    !sna_crtc->shadow ||
-		    sna_crtc->bo == sna->mode.shadow)
+		if (sna_crtc == NULL)
+			continue;
+
+		DBG(("%s: crtc[%d] shadow? %d, transformed? %d\n",
+		     __FUNCTION__, i,
+		     sna_crtc->shadow,
+		     sna_crtc->bo != sna->mode.shadow));
+
+		if (!sna_crtc->shadow || sna_crtc->bo == sna->mode.shadow)
 			continue;
 
 		assert(crtc->enabled);
@@ -4674,6 +4733,11 @@ disable2:
 			kgem_bo_destroy(&sna->kgem, old);
 			crtc->bo = kgem_bo_reference(new);
 		}
+
+		DBG(("%s: flipped %d outputs, shadow active? %d\n",
+		     __FUNCTION__,
+		     sna->mode.shadow_flip,
+		     sna->mode.shadow ? sna->mode.shadow->handle : 0));
 
 		if (sna->mode.shadow) {
 			assert(old == sna->mode.shadow);

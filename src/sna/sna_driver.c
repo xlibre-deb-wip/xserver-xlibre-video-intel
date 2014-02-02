@@ -447,7 +447,6 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 	char buf[1024];
 	rgb defaultWeight = { 0, 0, 0 };
 	EntityInfoPtr pEnt;
-	int preferred_depth;
 	Gamma zeros = { 0.0, 0.0, 0.0 };
 	int fd;
 
@@ -513,11 +512,7 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 	xf86DrvMsg(scrn->scrnIndex, X_PROBED, "CPU: %s\n",
 		   sna_cpu_features_to_string(sna->cpu_features, buf));
 
-	preferred_depth = sna->info->gen < 030 ? 15 : 24;
-	if (!fb_supports_depth(fd, preferred_depth))
-		preferred_depth = 24;
-
-	if (!xf86SetDepthBpp(scrn, preferred_depth, 0, 0,
+	if (!xf86SetDepthBpp(scrn, 24, 0, 0,
 			     Support32bppFb |
 			     SupportConvert24to32 | PreferConvert24to32))
 		goto cleanup;
@@ -709,7 +704,8 @@ sna_handle_uevents(int fd, void *closure)
 
 	if (memcmp(&s.st_rdev, &udev_devnum, sizeof (dev_t)) == 0 &&
 	    hotplug && atoi(hotplug) == 1) {
-		DBG(("%s: hotplug event\n", __FUNCTION__));
+		DBG(("%s: hotplug event (vtSema?=%d)\n",
+		     __FUNCTION__, sna->scrn->vtSema));
 		if (sna->scrn->vtSema) {
 			sna_mode_update(sna);
 			RRGetInfo(xf86ScrnToScreen(scrn), TRUE);
@@ -1103,6 +1099,8 @@ static Bool sna_enter_vt(VT_FUNC_ARGS_DECL)
 		return FALSE;
 
 	if (sna->flags & SNA_REPROBE) {
+		DBG(("%s: reporting deferred hotplug event\n",
+		     __FUNCTION__));
 		RRGetInfo(xf86ScrnToScreen(scrn), TRUE);
 		sna->flags &= ~SNA_REPROBE;
 	}
@@ -1182,7 +1180,7 @@ static Bool sna_pm_event(SCRN_ARG_TYPE arg, pmEvent event, Bool undo)
 		break;
 
 	default:
-		ErrorF("sna_pm_event: received APM event %d\n", event);
+		ERR(("sna_pm_event: received APM event %d\n", event));
 	}
 	return TRUE;
 }
@@ -1247,3 +1245,24 @@ Bool sna_init_scrn(ScrnInfoPtr scrn, int entity_num)
 
 	return TRUE;
 }
+
+#if HAS_DEBUG_FULL
+_X_ATTRIBUTE_PRINTF(1, 0) void LogF(const char *f, ...)
+{
+	va_list ap;
+
+	/* As we not only may be called from any context, we may also
+	 * be called from a thread whilst the main thread is handling
+	 * signals, therefore we have to use the signal-safe variants
+	 * or else we trip over false positive assertions.
+	 */
+
+	va_start(ap, f);
+#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,12,99,901,0)
+	LogVMessageVerbSigSafe(X_NONE, 1, f, ap);
+#else
+	LogVMessageVerb(X_NONE, 1, f, ap);
+#endif
+	va_end(ap);
+}
+#endif

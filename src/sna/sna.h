@@ -75,9 +75,12 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "compiler.h"
 
 #if HAS_DEBUG_FULL
-#define DBG(x) ErrorF x
+void LogF(const char *f, ...);
+#define DBG(x) LogF x
+#define ERR(x) ErrorF x
 #else
 #define DBG(x)
+#define ERR(x)
 #endif
 
 #define DEBUG_NO_BLT 0
@@ -205,7 +208,7 @@ struct sna_gc {
 	long changes;
 	long serial;
 
-	GCFuncs *old_funcs;
+	const GCFuncs *old_funcs;
 	void *priv;
 };
 
@@ -345,6 +348,7 @@ struct sna {
 #if DEBUG_MEMORY
 	struct {
 		int pixmap_allocs;
+		int pixmap_cached;
 		int cpu_bo_allocs;
 		size_t shadow_pixels_bytes;
 		size_t cpu_bo_bytes;
@@ -503,13 +507,17 @@ PixmapPtr sna_pixmap_create_unattached(ScreenPtr screen,
 				       int width, int height, int depth);
 void sna_pixmap_destroy(PixmapPtr pixmap);
 
-#define assert_pixmap_map(pixmap, priv) \
-	assert(priv->mapped == false || pixmap->devPrivate.ptr == (priv->mapped == MAPPED_CPU ? MAP(priv->gpu_bo->map__cpu) : MAP(priv->gpu_bo->map__gtt)));
+#define assert_pixmap_map(pixmap, priv)  do { \
+	assert(priv->mapped != MAPPED_NONE || pixmap->devPrivate.ptr == PTR(priv->ptr)); \
+	assert(priv->mapped == MAPPED_NONE || pixmap->devPrivate.ptr == (priv->mapped == MAPPED_CPU ? MAP(priv->gpu_bo->map__cpu) : MAP(priv->gpu_bo->map__gtt))); \
+} while (0)
 
 static inline void sna_pixmap_unmap(PixmapPtr pixmap, struct sna_pixmap *priv)
 {
-	if (priv->mapped == MAPPED_NONE)
+	if (priv->mapped == MAPPED_NONE) {
+		assert(pixmap->devPrivate.ptr == PTR(priv->ptr));
 		return;
+	}
 
 	DBG(("%s: pixmap=%ld dropping %s mapping\n",
 	     __FUNCTION__, pixmap->drawable.serialNumber,
@@ -626,6 +634,16 @@ region_subsumes_drawable(RegionPtr region, DrawablePtr drawable)
 	return  extents->x1 <= 0 && extents->y1 <= 0 &&
 		extents->x2 >= drawable->width &&
 		extents->y2 >= drawable->height;
+}
+
+static inline bool
+region_subsumes_pixmap(RegionPtr region, PixmapPtr pixmap)
+{
+	if (region->data)
+		return false;
+
+	return (region->extents.x2 - region->extents.x1 >= pixmap->drawable.width &&
+		region->extents.y2 - region->extents.y1 >= pixmap->drawable.height);
 }
 
 static inline bool

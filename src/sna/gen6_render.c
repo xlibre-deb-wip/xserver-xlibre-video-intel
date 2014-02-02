@@ -1052,6 +1052,7 @@ gen6_bind_bo(struct sna *sna,
 		DBG(("[%x]  bo(handle=%d), format=%d, reuse %s binding\n",
 		     offset, bo->handle, format,
 		     is_dst ? "render" : "sampler"));
+		assert(offset >= sna->kgem.surface);
 		if (is_dst)
 			kgem_bo_mark_dirty(bo);
 		return offset * sizeof(uint32_t);
@@ -1828,6 +1829,7 @@ gen6_composite_set_target(struct sna *sna,
 			  bool partial)
 {
 	BoxRec box;
+	unsigned int hint;
 
 	op->dst.pixmap = get_drawable_pixmap(dst->pDrawable);
 	op->dst.format = dst->format;
@@ -1842,9 +1844,14 @@ gen6_composite_set_target(struct sna *sna,
 	} else
 		sna_render_picture_extents(dst, &box);
 
-	op->dst.bo = sna_drawable_use_bo(dst->pDrawable,
-					 PREFER_GPU | FORCE_GPU | RENDER_GPU,
-					 &box, &op->damage);
+	hint = PREFER_GPU | FORCE_GPU | RENDER_GPU;
+	if (!partial) {
+		hint |= IGNORE_CPU;
+		if (w == op->dst.width && h == op->dst.height)
+			hint |= REPLACES;
+	}
+
+	op->dst.bo = sna_drawable_use_bo(dst->pDrawable, hint, &box, &op->damage);
 	if (op->dst.bo == NULL)
 		return false;
 
@@ -1895,7 +1902,9 @@ try_blt(struct sna *sna,
 
 	if (src->pDrawable) {
 		bo = __sna_drawable_peek_bo(src->pDrawable);
-		if (bo && bo->rq)
+		if (bo == NULL)
+			return true;
+		else if (bo->rq)
 			return RQ_IS_BLT(bo->rq);
 	}
 
@@ -2124,6 +2133,7 @@ gen6_render_composite(struct sna *sna,
 		      int16_t msk_x, int16_t msk_y,
 		      int16_t dst_x, int16_t dst_y,
 		      int16_t width, int16_t height,
+		      unsigned flags,
 		      struct sna_composite_op *tmp)
 {
 	if (op >= ARRAY_SIZE(gen6_blend_op))
@@ -2139,7 +2149,7 @@ gen6_render_composite(struct sna *sna,
 			      src_x, src_y,
 			      dst_x, dst_y,
 			      width, height,
-			      tmp, false))
+			      flags, tmp))
 		return true;
 
 	if (gen6_composite_fallback(sna, src, mask, dst))
@@ -2158,7 +2168,7 @@ gen6_render_composite(struct sna *sna,
 	tmp->op = op;
 	if (!gen6_composite_set_target(sna, tmp, dst,
 				       dst_x, dst_y, width, height,
-				       op > PictOpSrc || dst->pCompositeClip->data))
+				       flags & COMPOSITE_PARTIAL || op > PictOpSrc || dst->pCompositeClip->data))
 		goto fallback;
 
 	switch (gen6_composite_picture(sna, src, &tmp->src,
@@ -2295,7 +2305,7 @@ fallback:
 				  src_x, src_y,
 				  dst_x, dst_y,
 				  width, height,
-				  tmp, true));
+				  flags | COMPOSITE_FALLBACK, tmp));
 }
 
 #if !NO_COMPOSITE_SPANS

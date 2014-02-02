@@ -206,7 +206,7 @@ static bool sna_blt_fill_init(struct sna *sna,
 			b[0] = XY_SETUP_MONO_PATTERN_SL_BLT | 7;
 			if (bpp == 32)
 				b[0] |= BLT_WRITE_ALPHA | BLT_WRITE_RGB;
-			if (bo->tiling)
+			if (bo->tiling && kgem->gen >= 040)
 				b[0] |= BLT_DST_TILED;
 			b[1] = blt->br13;
 			b[2] = 0;
@@ -270,7 +270,7 @@ noinline static void sna_blt_fill_begin(struct sna *sna,
 		b[0] = XY_SETUP_MONO_PATTERN_SL_BLT | 7;
 		if (blt->bpp == 32)
 			b[0] |= BLT_WRITE_ALPHA | BLT_WRITE_RGB;
-		if (blt->bo[0]->tiling)
+		if (blt->bo[0]->tiling && kgem->gen >= 040)
 			b[0] |= BLT_DST_TILED;
 		b[1] = blt->br13;
 		b[2] = 0;
@@ -944,6 +944,11 @@ blt_composite_fill_box__cpu(struct sna *sna,
 			    const struct sna_composite_op *op,
 			    const BoxRec *box)
 {
+	assert(box->x1 >= 0);
+	assert(box->y1 >= 0);
+	assert(box->x2 <= op->dst.pixmap->drawable.width);
+	assert(box->y2 <= op->dst.pixmap->drawable.height);
+
 	pixman_fill(op->dst.pixmap->devPrivate.ptr,
 		    op->dst.pixmap->devKind / sizeof(uint32_t),
 		    op->dst.pixmap->drawable.bitsPerPixel,
@@ -957,6 +962,11 @@ blt_composite_fill_boxes__cpu(struct sna *sna,
 			      const BoxRec *box, int n)
 {
 	do {
+		assert(box->x1 >= 0);
+		assert(box->y1 >= 0);
+		assert(box->x2 <= op->dst.pixmap->drawable.width);
+		assert(box->y2 <= op->dst.pixmap->drawable.height);
+
 		pixman_fill(op->dst.pixmap->devPrivate.ptr,
 			    op->dst.pixmap->devKind / sizeof(uint32_t),
 			    op->dst.pixmap->drawable.bitsPerPixel,
@@ -1327,9 +1337,9 @@ prepare_blt_clear(struct sna *sna,
 	op->done = nop_done;
 
 	if (!sna_blt_fill_init(sna, &op->u.blt,
-				 op->dst.bo,
-				 op->dst.pixmap->drawable.bitsPerPixel,
-				 GXclear, 0))
+			       op->dst.bo,
+			       op->dst.pixmap->drawable.bitsPerPixel,
+			       GXclear, 0))
 		return false;
 
 	return begin_blt(sna, op);
@@ -2243,8 +2253,8 @@ sna_blt_composite(struct sna *sna,
 		  int16_t x, int16_t y,
 		  int16_t dst_x, int16_t dst_y,
 		  int16_t width, int16_t height,
-		  struct sna_composite_op *tmp,
-		  bool fallback)
+		  unsigned flags,
+		  struct sna_composite_op *tmp)
 {
 	PictFormat src_format = src->format;
 	PixmapPtr src_pixmap;
@@ -2259,7 +2269,6 @@ sna_blt_composite(struct sna *sna,
 #if DEBUG_NO_BLT || NO_BLT_COMPOSITE
 	return false;
 #endif
-
 	DBG(("%s (%d, %d), (%d, %d), %dx%d\n",
 	     __FUNCTION__, x, y, dst_x, dst_y, width, height));
 
@@ -2299,22 +2308,25 @@ clear:
 		hint = 0;
 		if (can_render(sna)) {
 			hint |= PREFER_GPU;
-			if (dst->pCompositeClip->data == NULL && (width | height)) {
+			if (dst->pCompositeClip->data == NULL &&
+			    (flags & COMPOSITE_PARTIAL) == 0) {
 				hint |= IGNORE_CPU;
-				if (width == tmp->dst.pixmap->drawable.width &&
+				if (width  == tmp->dst.pixmap->drawable.width &&
 				    height == tmp->dst.pixmap->drawable.height)
 					hint |= REPLACES;
 			}
 		}
 		tmp->dst.bo = sna_drawable_use_bo(dst->pDrawable, hint,
 						  &dst_box, &tmp->damage);
-		if (tmp->dst.bo && !kgem_bo_can_blt(&sna->kgem, tmp->dst.bo)) {
-			DBG(("%s: can not blit to dst, tiling? %d, pitch? %d\n",
-			     __FUNCTION__, tmp->dst.bo->tiling, tmp->dst.bo->pitch));
-			return false;
-		}
-
-		if (!tmp->dst.bo) {
+		if (tmp->dst.bo) {
+			if (!kgem_bo_can_blt(&sna->kgem, tmp->dst.bo)) {
+				DBG(("%s: can not blit to dst, tiling? %d, pitch? %d\n",
+				     __FUNCTION__, tmp->dst.bo->tiling, tmp->dst.bo->pitch));
+				return false;
+			}
+			if (hint & REPLACES)
+				kgem_bo_undo(&sna->kgem, tmp->dst.bo);
+		} else {
 			RegionRec region;
 
 			region.extents = dst_box;
@@ -2323,8 +2335,7 @@ clear:
 			if (!sna_drawable_move_region_to_cpu(dst->pDrawable, &region,
 							     MOVE_INPLACE_HINT | MOVE_WRITE))
 				return false;
-		} else if (hint & REPLACES)
-			kgem_bo_undo(&sna->kgem, tmp->dst.bo);
+		}
 
 		return prepare_blt_clear(sna, tmp);
 	}
@@ -2353,31 +2364,34 @@ fill:
 		hint = 0;
 		if (can_render(sna)) {
 			hint |= PREFER_GPU;
-			if (dst->pCompositeClip->data == NULL && (width | height))
+			if (dst->pCompositeClip->data == NULL &&
+			    (flags & COMPOSITE_PARTIAL) == 0) {
 				hint |= IGNORE_CPU;
-			if (width == tmp->dst.pixmap->drawable.width &&
-			    height == tmp->dst.pixmap->drawable.height)
-				hint |= REPLACES;
+				if (width  == tmp->dst.pixmap->drawable.width &&
+				    height == tmp->dst.pixmap->drawable.height)
+					hint |= REPLACES;
+			}
 		}
 		tmp->dst.bo = sna_drawable_use_bo(dst->pDrawable, hint,
 						  &dst_box, &tmp->damage);
-		if (tmp->dst.bo && !kgem_bo_can_blt(&sna->kgem, tmp->dst.bo)) {
-			DBG(("%s: can not blit to dst, tiling? %d, pitch? %d\n",
-			     __FUNCTION__, tmp->dst.bo->tiling, tmp->dst.bo->pitch));
-			return false;
-		}
-
-		if (!tmp->dst.bo) {
+		if (tmp->dst.bo) {
+			if (!kgem_bo_can_blt(&sna->kgem, tmp->dst.bo)) {
+				DBG(("%s: can not blit to dst, tiling? %d, pitch? %d\n",
+				     __FUNCTION__, tmp->dst.bo->tiling, tmp->dst.bo->pitch));
+				return false;
+			}
+			if (hint & REPLACES)
+				kgem_bo_undo(&sna->kgem, tmp->dst.bo);
+		} else {
 			RegionRec region;
 
 			region.extents = dst_box;
 			region.data = NULL;
 
 			if (!sna_drawable_move_region_to_cpu(dst->pDrawable, &region,
-							MOVE_INPLACE_HINT | MOVE_WRITE))
+							     MOVE_INPLACE_HINT | MOVE_WRITE))
 				return false;
-		} else if (hint & REPLACES)
-			kgem_bo_undo(&sna->kgem, tmp->dst.bo);
+		}
 
 		return prepare_blt_fill(sna, tmp, color);
 	}
@@ -2495,7 +2509,7 @@ fill:
 		if (src_pixmap->drawable.width  <= sna->render.max_3d_size &&
 		    src_pixmap->drawable.height <= sna->render.max_3d_size &&
 		    bo->pitch <= sna->render.max_3d_pitch &&
-		    !fallback)
+		    (flags & COMPOSITE_FALLBACK) == 0)
 		{
 			return false;
 		}
@@ -2506,9 +2520,10 @@ fill:
 	hint = 0;
 	if (bo || can_render(sna)) {
 		hint |= PREFER_GPU;
-		if (dst->pCompositeClip->data == NULL && (width | height)) {
+		if (dst->pCompositeClip->data == NULL &&
+		    (flags & COMPOSITE_PARTIAL) == 0) {
 			hint |= IGNORE_CPU;
-			if (width == tmp->dst.pixmap->drawable.width &&
+			if (width  == tmp->dst.pixmap->drawable.width &&
 			    height == tmp->dst.pixmap->drawable.height)
 				hint |= REPLACES;
 		}
@@ -2526,7 +2541,7 @@ fill:
 		if (!tmp->dst.bo) {
 			DBG(("%s: fallback -- unaccelerated read back\n",
 			     __FUNCTION__));
-			if (fallback || !kgem_bo_is_busy(bo))
+			if (flags & COMPOSITE_FALLBACK || !kgem_bo_is_busy(bo))
 				goto put;
 		} else if (bo->snoop && tmp->dst.bo->snoop) {
 			DBG(("%s: fallback -- can not copy between snooped bo\n",
@@ -2535,11 +2550,11 @@ fill:
 		} else if (!kgem_bo_can_blt(&sna->kgem, tmp->dst.bo)) {
 			DBG(("%s: fallback -- unaccelerated upload\n",
 			     __FUNCTION__));
-			if (fallback || !kgem_bo_is_busy(bo))
+			if (flags & COMPOSITE_FALLBACK || !kgem_bo_is_busy(bo))
 				goto put;
 		} else {
 			ret = prepare_blt_copy(sna, tmp, bo, alpha_fixup);
-			if (fallback && !ret)
+			if (flags & COMPOSITE_FALLBACK && !ret)
 				goto put;
 		}
 	} else {
@@ -3109,7 +3124,7 @@ bool sna_blt_fill_boxes(struct sna *sna, uint8_t alu,
 			b[0] = XY_SETUP_MONO_PATTERN_SL_BLT | 7;
 			if (bpp == 32)
 				b[0] |= BLT_WRITE_ALPHA | BLT_WRITE_RGB;
-			if (bo->tiling)
+			if (bo->tiling && kgem->gen >= 040)
 				b[0] |= BLT_DST_TILED;
 			b[1] = br13;
 			b[2] = 0;
@@ -3195,7 +3210,7 @@ bool sna_blt_fill_boxes(struct sna *sna, uint8_t alu,
 				b[0] = XY_SETUP_MONO_PATTERN_SL_BLT | 7;
 				if (bpp == 32)
 					b[0] |= BLT_WRITE_ALPHA | BLT_WRITE_RGB;
-				if (bo->tiling)
+				if (bo->tiling && kgem->gen >= 040)
 					b[0] |= BLT_DST_TILED;
 				b[1] = br13;
 				b[2] = 0;

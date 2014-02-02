@@ -389,12 +389,11 @@ static void _assert_pixmap_contains_box(PixmapPtr pixmap, BoxPtr box, const char
 	    box->x2 > pixmap->drawable.width ||
 	    box->y2 > pixmap->drawable.height)
 	{
-		ErrorF("%s: damage box is beyond the pixmap: box=(%d, %d), (%d, %d), pixmap=(%d, %d)\n",
-		       __FUNCTION__,
-		       box->x1, box->y1, box->x2, box->y2,
-		       pixmap->drawable.width,
-		       pixmap->drawable.height);
-		assert(0);
+		FatalError("%s: damage box is beyond the pixmap: box=(%d, %d), (%d, %d), pixmap=(%d, %d)\n",
+			   function,
+			   box->x1, box->y1, box->x2, box->y2,
+			   pixmap->drawable.width,
+			   pixmap->drawable.height);
 	}
 }
 #define assert_pixmap_contains_box(p, b) _assert_pixmap_contains_box(p, b, __FUNCTION__)
@@ -721,7 +720,7 @@ sna_composite(CARD8 op,
 				   region.extents.y1,
 				   region.extents.x2 - region.extents.x1,
 				   region.extents.y2 - region.extents.y1,
-				   memset(&tmp, 0, sizeof(tmp)))) {
+				   0, memset(&tmp, 0, sizeof(tmp)))) {
 		DBG(("%s: fallback due unhandled composite op\n", __FUNCTION__));
 		goto fallback;
 	}
