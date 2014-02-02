@@ -1118,7 +1118,7 @@ intel_output_dpms(xf86OutputPtr output, int dpms)
 
 		if (!strcmp(props->name, "DPMS")) {
 			/* Make sure to reverse the order between on and off. */
-			if (dpms == DPMSModeOff)
+			if (dpms != DPMSModeOn)
 				intel_output_dpms_backlight(output,
 							    intel_output->dpms_mode,
 							    dpms);
@@ -1129,7 +1129,7 @@ intel_output_dpms(xf86OutputPtr output, int dpms)
 							    props->prop_id,
 							    dpms);
 
-			if (dpms != DPMSModeOff)
+			if (dpms == DPMSModeOn)
 				intel_output_dpms_backlight(output,
 							    intel_output->dpms_mode,
 							    dpms);
@@ -1188,7 +1188,7 @@ intel_output_create_ranged_atom(xf86OutputPtr output, Atom *atom,
 
 	err = RRChangeOutputProperty(output->randr_output, *atom, XA_INTEGER,
 				     32, PropModeReplace, 1, &value, FALSE,
-				     TRUE);
+				     FALSE);
 	if (err != 0)
 		xf86DrvMsg(output->scrn->scrnIndex, X_ERROR,
 			   "RRChangeOutputProperty error, %d\n", err);
@@ -1271,7 +1271,7 @@ intel_output_create_resources(xf86OutputPtr output)
 					break;
 			/* there's always a matching value */
 			err = RRChangeOutputProperty(output->randr_output, p->atoms[0],
-						     XA_ATOM, 32, PropModeReplace, 1, &p->atoms[j+1], FALSE, TRUE);
+						     XA_ATOM, 32, PropModeReplace, 1, &p->atoms[j+1], FALSE, FALSE);
 			if (err != 0) {
 				xf86DrvMsg(output->scrn->scrnIndex, X_ERROR,
 					   "RRChangeOutputProperty error, %d\n", err);
@@ -1391,7 +1391,7 @@ intel_output_get_property(xf86OutputPtr output, Atom property)
 
 		err = RRChangeOutputProperty(output->randr_output, property,
 					     XA_INTEGER, 32, PropModeReplace, 1, &val,
-					     FALSE, TRUE);
+					     FALSE, FALSE);
 		if (err != 0) {
 			xf86DrvMsg(output->scrn->scrnIndex, X_ERROR,
 				   "RRChangeOutputProperty error, %d\n", err);

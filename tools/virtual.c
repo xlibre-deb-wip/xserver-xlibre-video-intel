@@ -205,6 +205,12 @@ static int
 _check_error_handler(Display     *display,
 		     XErrorEvent *event)
 {
+	DBG(("X11 error from display %s, serial=%ld, error=%d, req=%d.%d\n",
+	     DisplayString(display),
+	     event->serial,
+	     event->error_code,
+	     event->request_code,
+	     event->minor_code));
 	_x_error_occurred = 1;
 	return False; /* ignored */
 }
@@ -533,6 +539,8 @@ static int clone_update_modes__randr(struct clone *clone)
 			old = &to_res->modes[j];
 			if (mode_equal(mode, old)) {
 				id = old->id;
+				DBG(("%s(%s-%s): reusing mode %ld: %s\n", __func__,
+				     DisplayString(clone->src.dpy), clone->src.name, id, mode->name));
 				break;
 			}
 		}
@@ -1091,8 +1099,10 @@ static int context_update(struct context *ctx)
 			RRCrtc rr_crtc;
 			Status ret;
 
-			DBG(("%s: copying configuration from %s (mode=%ld) to %s\n",
-			     DisplayString(dst->dpy), src->name, (long)src->mode.id, dst->name));
+			DBG(("%s: copying configuration from %s (mode=%ld: %s) to %s\n",
+			     DisplayString(dst->dpy),
+			     src->name, (long)src->mode.id, src->mode.name,
+			     dst->name));
 
 			if (src->mode.id == 0) {
 err:
@@ -1120,9 +1130,29 @@ err:
 				}
 			}
 			if (dst->mode.id == 0) {
-				DBG(("%s: failed to find suitable mode for %s\n",
-				     DisplayString(dst->dpy), dst->name));
-				goto err;
+				XRRModeInfo m;
+				char buf[256];
+				RRMode id;
+
+				/* XXX User names must be unique! */
+				m = src->mode;
+				m.nameLength = snprintf(buf, sizeof(buf),
+							"%s.%ld-%s", src->name, (long)src->mode.id, src->mode.name);
+				m.name = buf;
+
+				id = XRRCreateMode(dst->dpy, dst->window, &m);
+				if (id) {
+					DBG(("%s: adding mode %ld: %s to %s\n",
+					     DisplayString(dst->dpy),
+					     (long)id, src->mode.name,
+					     dst->name));
+					XRRAddOutputMode(dst->dpy, dst->rr_output, id);
+					dst->mode.id = id;
+				} else {
+					DBG(("%s: failed to find suitable mode for %s\n",
+					     DisplayString(dst->dpy), dst->name));
+					goto err;
+				}
 			}
 
 			rr_crtc = dst->rr_crtc;
@@ -1161,15 +1191,17 @@ err:
 				goto err;
 			}
 
-			DBG(("%s: enabling output '%s' (%d,%d)x(%d,%d), rotation %d, on CRTC:%ld\n",
+			DBG(("%s: enabling output '%s' (%d,%d)x(%d,%d), rotation %d, on CRTC:%ld, using mode %ld\n",
 			     DisplayString(dst->dpy), dst->name,
 			     dst->x, dst->y, dst->mode.width, dst->mode.height,
-			     dst->rotation, (long)rr_crtc));
+			     dst->rotation, (long)rr_crtc, dst->mode.id));
 
 			ret = XRRSetCrtcConfig(dst->dpy, res, rr_crtc, CurrentTime,
 					       dst->x, dst->y, dst->mode.id, dst->rotation,
 					       &dst->rr_output, 1);
 			DBG(("%s-%s: XRRSetCrtcConfig %s\n", DisplayString(dst->dpy), dst->name, ret ? "failed" : "success"));
+			if (ret)
+				goto err;
 
 			ret = XRRSetPanning(dst->dpy, res, rr_crtc, memset(&panning, 0, sizeof(panning)));
 			DBG(("%s-%s: XRRSetPanning %s\n", DisplayString(dst->dpy), dst->name, ret ? "failed" : "success"));
