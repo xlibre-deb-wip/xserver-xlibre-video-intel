@@ -1,3 +1,13 @@
+xserver-xorg-video-intel (2:2.21.15-2) unstable; urgency=medium
+
+  [ Michael Stapelberg ]
+  * Revert back to 1.0 source format.
+
+  [ Julien Cristau ]
+  * Cherry-pick upstream build fix for xserver 1.15 (closes: #736980).
+
+ -- Julien Cristau <jcristau@debian.org>  Tue, 04 Feb 2014 15:24:32 +0100
+
 xserver-xorg-video-intel (2:2.21.15-1) unstable; urgency=low
 
   * New upstream release.
