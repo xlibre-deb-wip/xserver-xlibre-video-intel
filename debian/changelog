@@ -10,6 +10,12 @@ xserver-xorg-video-intel (2:2.99.909-1) UNRELEASED; urgency=low
 
  -- Timo Aaltonen <tjaalton@ubuntu.com>  Tue, 01 Oct 2013 14:07:22 +0300
 
+xserver-xorg-video-intel (2:2.99.907-0ubuntu2) trusty; urgency=medium
+
+  * Rebuild for xorg 1.15 abi.
+
+ -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Wed, 05 Feb 2014 09:51:52 +0000
+
 xserver-xorg-video-intel (2:2.99.907-0ubuntu1) trusty; urgency=low
 
   [ Timo Aaltonen ]
