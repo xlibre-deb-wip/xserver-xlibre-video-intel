@@ -1,3 +1,9 @@
+xserver-xorg-video-intel (2:2.99.909-0ubuntu2) UNRELEASED; urgency=medium
+
+  * Refresh xmir patch.
+
+ -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Wed, 05 Feb 2014 14:31:48 +0000
+
 xserver-xorg-video-intel (2:2.99.909-0ubuntu1) trusty; urgency=medium
 
   [ Timo Aaltonen ]
