@@ -1,8 +1,9 @@
-xserver-xorg-video-intel (2:2.99.909-0ubuntu1) UNRELEASED; urgency=medium
+xserver-xorg-video-intel (2:2.99.909-0ubuntu1) trusty; urgency=medium
 
+  [ Timo Aaltonen ]
   * Merge from Debian git. (LP: #1272338)
 
- -- Timo Aaltonen <tjaalton@ubuntu.com>  Sun, 02 Feb 2014 09:12:25 +0200
+ -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Wed, 05 Feb 2014 14:14:16 +0000
 
 xserver-xorg-video-intel (2:2.99.909-1) UNRELEASED; urgency=low
 
