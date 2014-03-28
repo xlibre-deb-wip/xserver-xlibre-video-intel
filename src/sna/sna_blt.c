@@ -521,7 +521,7 @@ static void sna_blt_copy_one(struct sna *sna,
 	    kgem->reloc[kgem->nreloc-1].target_handle == blt->bo[1]->target_handle) {
 		if (sna->kgem.gen >= 0100) {
 			if (kgem->nbatch >= 7 &&
-			    kgem->batch[kgem->nbatch-7] == (XY_COLOR_BLT | (blt->cmd & (BLT_WRITE_ALPHA | BLT_WRITE_RGB)) | 5) &&
+			    kgem->batch[kgem->nbatch-7] == (XY_COLOR_BLT | (blt->cmd & (BLT_DST_TILED | BLT_WRITE_ALPHA | BLT_WRITE_RGB)) | 5) &&
 			    kgem->batch[kgem->nbatch-5] == ((uint32_t)dst_y << 16 | (uint16_t)dst_x) &&
 			    kgem->batch[kgem->nbatch-4] == ((uint32_t)(dst_y+height) << 16 | (uint16_t)(dst_x+width))) {
 				DBG(("%s: replacing last fill\n", __FUNCTION__));
@@ -546,7 +546,7 @@ static void sna_blt_copy_one(struct sna *sna,
 			}
 		} else {
 			if (kgem->nbatch >= 6 &&
-			    kgem->batch[kgem->nbatch-6] == (XY_COLOR_BLT | (blt->cmd & (BLT_WRITE_ALPHA | BLT_WRITE_RGB)) | 4) &&
+			    kgem->batch[kgem->nbatch-6] == (XY_COLOR_BLT | (blt->cmd & (BLT_DST_TILED | BLT_WRITE_ALPHA | BLT_WRITE_RGB)) | 4) &&
 			    kgem->batch[kgem->nbatch-4] == ((uint32_t)dst_y << 16 | (uint16_t)dst_x) &&
 			    kgem->batch[kgem->nbatch-3] == ((uint32_t)(dst_y+height) << 16 | (uint16_t)(dst_x+width))) {
 				DBG(("%s: replacing last fill\n", __FUNCTION__));
@@ -932,6 +932,8 @@ static void blt_composite_fill__cpu(struct sna *sna,
 	if (x2 <= x1 || y2 <= y1)
 		return;
 
+	assert(op->dst.pixmap->devPrivate.ptr);
+	assert(op->dst.pixmap->devKind);
 	pixman_fill(op->dst.pixmap->devPrivate.ptr,
 		    op->dst.pixmap->devKind / sizeof(uint32_t),
 		    op->dst.pixmap->drawable.bitsPerPixel,
@@ -940,19 +942,63 @@ static void blt_composite_fill__cpu(struct sna *sna,
 }
 
 fastcall static void
-blt_composite_fill_box__cpu(struct sna *sna,
-			    const struct sna_composite_op *op,
-			    const BoxRec *box)
+blt_composite_fill_box_no_offset__cpu(struct sna *sna,
+				      const struct sna_composite_op *op,
+				      const BoxRec *box)
 {
 	assert(box->x1 >= 0);
 	assert(box->y1 >= 0);
 	assert(box->x2 <= op->dst.pixmap->drawable.width);
 	assert(box->y2 <= op->dst.pixmap->drawable.height);
 
+	assert(op->dst.pixmap->devPrivate.ptr);
+	assert(op->dst.pixmap->devKind);
 	pixman_fill(op->dst.pixmap->devPrivate.ptr,
 		    op->dst.pixmap->devKind / sizeof(uint32_t),
 		    op->dst.pixmap->drawable.bitsPerPixel,
 		    box->x1, box->y1, box->x2-box->x1, box->y2-box->y1,
+		    op->u.blt.pixel);
+}
+
+static void
+blt_composite_fill_boxes_no_offset__cpu(struct sna *sna,
+					const struct sna_composite_op *op,
+					const BoxRec *box, int n)
+{
+	do {
+		assert(box->x1 >= 0);
+		assert(box->y1 >= 0);
+		assert(box->x2 <= op->dst.pixmap->drawable.width);
+		assert(box->y2 <= op->dst.pixmap->drawable.height);
+
+		assert(op->dst.pixmap->devPrivate.ptr);
+		assert(op->dst.pixmap->devKind);
+		pixman_fill(op->dst.pixmap->devPrivate.ptr,
+			    op->dst.pixmap->devKind / sizeof(uint32_t),
+			    op->dst.pixmap->drawable.bitsPerPixel,
+			    box->x1, box->y1, box->x2-box->x1, box->y2-box->y1,
+			    op->u.blt.pixel);
+		box++;
+	} while (--n);
+}
+
+fastcall static void
+blt_composite_fill_box__cpu(struct sna *sna,
+			    const struct sna_composite_op *op,
+			    const BoxRec *box)
+{
+	assert(box->x1 + op->dst.x >= 0);
+	assert(box->y1 + op->dst.y >= 0);
+	assert(box->x2 + op->dst.x <= op->dst.pixmap->drawable.width);
+	assert(box->y2 + op->dst.y <= op->dst.pixmap->drawable.height);
+
+	assert(op->dst.pixmap->devPrivate.ptr);
+	assert(op->dst.pixmap->devKind);
+	pixman_fill(op->dst.pixmap->devPrivate.ptr,
+		    op->dst.pixmap->devKind / sizeof(uint32_t),
+		    op->dst.pixmap->drawable.bitsPerPixel,
+		    box->x1 + op->dst.x, box->y1 + op->dst.y,
+		    box->x2 - box->x1, box->y2 - box->y1,
 		    op->u.blt.pixel);
 }
 
@@ -962,15 +1008,18 @@ blt_composite_fill_boxes__cpu(struct sna *sna,
 			      const BoxRec *box, int n)
 {
 	do {
-		assert(box->x1 >= 0);
-		assert(box->y1 >= 0);
-		assert(box->x2 <= op->dst.pixmap->drawable.width);
-		assert(box->y2 <= op->dst.pixmap->drawable.height);
+		assert(box->x1 + op->dst.x >= 0);
+		assert(box->y1 + op->dst.y >= 0);
+		assert(box->x2 + op->dst.x <= op->dst.pixmap->drawable.width);
+		assert(box->y2 + op->dst.y <= op->dst.pixmap->drawable.height);
 
+		assert(op->dst.pixmap->devPrivate.ptr);
+		assert(op->dst.pixmap->devKind);
 		pixman_fill(op->dst.pixmap->devPrivate.ptr,
 			    op->dst.pixmap->devKind / sizeof(uint32_t),
 			    op->dst.pixmap->drawable.bitsPerPixel,
-			    box->x1, box->y1, box->x2-box->x1, box->y2-box->y1,
+			    box->x1 + op->dst.x, box->y1 + op->dst.y,
+			    box->x2 - box->x1, box->y2 - box->y1,
 			    op->u.blt.pixel);
 		box++;
 	} while (--n);
@@ -1316,9 +1365,15 @@ prepare_blt_clear(struct sna *sna,
 
 	if (op->dst.bo == NULL) {
 		op->blt   = blt_composite_fill__cpu;
-		op->box   = blt_composite_fill_box__cpu;
-		op->boxes = blt_composite_fill_boxes__cpu;
-		op->thread_boxes = blt_composite_fill_boxes__cpu;
+		if (op->dst.x|op->dst.y) {
+			op->box   = blt_composite_fill_box__cpu;
+			op->boxes = blt_composite_fill_boxes__cpu;
+			op->thread_boxes = blt_composite_fill_boxes__cpu;
+		} else {
+			op->box   = blt_composite_fill_box_no_offset__cpu;
+			op->boxes = blt_composite_fill_boxes_no_offset__cpu;
+			op->thread_boxes = blt_composite_fill_boxes_no_offset__cpu;
+		}
 		op->done  = nop_done;
 		op->u.blt.pixel = 0;
 		return true;
@@ -1355,9 +1410,15 @@ prepare_blt_fill(struct sna *sna,
 	if (op->dst.bo == NULL) {
 		op->u.blt.pixel = pixel;
 		op->blt = blt_composite_fill__cpu;
-		op->box   = blt_composite_fill_box__cpu;
-		op->boxes = blt_composite_fill_boxes__cpu;
-		op->thread_boxes = blt_composite_fill_boxes__cpu;
+		if (op->dst.x|op->dst.y) {
+			op->box   = blt_composite_fill_box__cpu;
+			op->boxes = blt_composite_fill_boxes__cpu;
+			op->thread_boxes = blt_composite_fill_boxes__cpu;
+		} else {
+			op->box   = blt_composite_fill_box_no_offset__cpu;
+			op->boxes = blt_composite_fill_boxes_no_offset__cpu;
+			op->thread_boxes = blt_composite_fill_boxes_no_offset__cpu;
+		}
 		op->done = nop_done;
 		return true;
 	}
@@ -1877,6 +1938,10 @@ blt_put_composite__cpu(struct sna *sna,
 {
 	PixmapPtr dst = op->dst.pixmap;
 	PixmapPtr src = op->u.blt.src_pixmap;
+	assert(src->devPrivate.ptr);
+	assert(src->devKind);
+	assert(dst->devPrivate.ptr);
+	assert(dst->devKind);
 	memcpy_blt(src->devPrivate.ptr, dst->devPrivate.ptr,
 		   src->drawable.bitsPerPixel, src->devKind, dst->devKind,
 		   r->src.x + op->u.blt.sx, r->src.y + op->u.blt.sy,
@@ -1891,6 +1956,10 @@ blt_put_composite_box__cpu(struct sna *sna,
 {
 	PixmapPtr dst = op->dst.pixmap;
 	PixmapPtr src = op->u.blt.src_pixmap;
+	assert(src->devPrivate.ptr);
+	assert(src->devKind);
+	assert(dst->devPrivate.ptr);
+	assert(dst->devKind);
 	memcpy_blt(src->devPrivate.ptr, dst->devPrivate.ptr,
 		   src->drawable.bitsPerPixel, src->devKind, dst->devKind,
 		   box->x1 + op->u.blt.sx, box->y1 + op->u.blt.sy,
@@ -1905,6 +1974,10 @@ blt_put_composite_boxes__cpu(struct sna *sna,
 {
 	PixmapPtr dst = op->dst.pixmap;
 	PixmapPtr src = op->u.blt.src_pixmap;
+	assert(src->devPrivate.ptr);
+	assert(src->devKind);
+	assert(dst->devPrivate.ptr);
+	assert(dst->devKind);
 	do {
 		memcpy_blt(src->devPrivate.ptr, dst->devPrivate.ptr,
 			   src->drawable.bitsPerPixel, src->devKind, dst->devKind,
@@ -1922,6 +1995,10 @@ blt_put_composite_with_alpha__cpu(struct sna *sna,
 {
 	PixmapPtr dst = op->dst.pixmap;
 	PixmapPtr src = op->u.blt.src_pixmap;
+	assert(src->devPrivate.ptr);
+	assert(src->devKind);
+	assert(dst->devPrivate.ptr);
+	assert(dst->devKind);
 	memcpy_xor(src->devPrivate.ptr, dst->devPrivate.ptr,
 		   src->drawable.bitsPerPixel, src->devKind, dst->devKind,
 		   r->src.x + op->u.blt.sx, r->src.y + op->u.blt.sy,
@@ -1938,6 +2015,10 @@ blt_put_composite_box_with_alpha__cpu(struct sna *sna,
 {
 	PixmapPtr dst = op->dst.pixmap;
 	PixmapPtr src = op->u.blt.src_pixmap;
+	assert(src->devPrivate.ptr);
+	assert(src->devKind);
+	assert(dst->devPrivate.ptr);
+	assert(dst->devKind);
 	memcpy_xor(src->devPrivate.ptr, dst->devPrivate.ptr,
 		   src->drawable.bitsPerPixel, src->devKind, dst->devKind,
 		   box->x1 + op->u.blt.sx, box->y1 + op->u.blt.sy,
@@ -1953,6 +2034,10 @@ blt_put_composite_boxes_with_alpha__cpu(struct sna *sna,
 {
 	PixmapPtr dst = op->dst.pixmap;
 	PixmapPtr src = op->u.blt.src_pixmap;
+	assert(src->devPrivate.ptr);
+	assert(src->devKind);
+	assert(dst->devPrivate.ptr);
+	assert(dst->devKind);
 	do {
 		memcpy_xor(src->devPrivate.ptr, dst->devPrivate.ptr,
 			   src->drawable.bitsPerPixel, src->devKind, dst->devKind,
@@ -2019,6 +2104,8 @@ fastcall static void blt_put_composite_box(struct sna *sna,
 	     op->u.blt.sx, op->u.blt.sy,
 	     op->dst.x, op->dst.y));
 
+	assert(src->devPrivate.ptr);
+	assert(src->devKind);
 	if (!dst_priv->pinned &&
 	    box->x2 - box->x1 == op->dst.width &&
 	    box->y2 - box->y1 == op->dst.height) {
@@ -2057,6 +2144,8 @@ static void blt_put_composite_boxes(struct sna *sna,
 	     op->dst.x, op->dst.y,
 	     box->x1, box->y1, box->x2, box->y2, n));
 
+	assert(src->devPrivate.ptr);
+	assert(src->devKind);
 	if (n == 1 && !dst_priv->pinned &&
 	    box->x2 - box->x1 == op->dst.width &&
 	    box->y2 - box->y1 == op->dst.height) {
@@ -2099,6 +2188,9 @@ blt_put_composite_with_alpha(struct sna *sna,
 	int16_t src_x = r->src.x + op->u.blt.sx;
 	int16_t src_y = r->src.y + op->u.blt.sy;
 
+	assert(src->devPrivate.ptr);
+	assert(src->devKind);
+
 	if (!dst_priv->pinned &&
 	    dst_x <= 0 && dst_y <= 0 &&
 	    dst_x + r->width >= op->dst.width &&
@@ -2139,6 +2231,9 @@ blt_put_composite_box_with_alpha(struct sna *sna,
 	     op->u.blt.sx, op->u.blt.sy,
 	     op->dst.x, op->dst.y));
 
+	assert(src->devPrivate.ptr);
+	assert(src->devKind);
+
 	if (!dst_priv->pinned &&
 	    box->x2 - box->x1 == op->dst.width &&
 	    box->y2 - box->y1 == op->dst.height) {
@@ -2175,6 +2270,9 @@ blt_put_composite_boxes_with_alpha(struct sna *sna,
 	     op->u.blt.sx, op->u.blt.sy,
 	     op->dst.x, op->dst.y,
 	     box->x1, box->y1, box->x2, box->y2, n));
+
+	assert(src->devPrivate.ptr);
+	assert(src->devKind);
 
 	if (n == 1 && !dst_priv->pinned &&
 	    box->x2 - box->x1 == op->dst.width &&
@@ -2417,11 +2515,15 @@ fill:
 		return false;
 	}
 
-	if (!sna_transform_is_integer_translation(src->transform, &tx, &ty)) {
+	if (!sna_transform_is_imprecise_integer_translation(src->transform, src->filter,
+							    dst->polyMode == PolyModePrecise,
+							    &tx, &ty)) {
 		DBG(("%s: source transform is not an integer translation\n",
 		     __FUNCTION__));
 		return false;
 	}
+	DBG(("%s: converting transform to integer translation? (%d, %d)\n",
+	     __FUNCTION__, src->transform != NULL, tx, ty));
 	x += tx;
 	y += ty;
 
@@ -2811,6 +2913,128 @@ fastcall static void sna_blt_fill_op_boxes(struct sna *sna,
 	_sna_blt_fill_boxes(sna, &op->base.u.blt, box, nbox);
 }
 
+static inline uint64_t pt_add(uint32_t cmd, const DDXPointRec *pt, int16_t dx, int16_t dy)
+{
+	union {
+		DDXPointRec pt;
+		uint32_t i;
+	} u;
+
+	u.pt.x = pt->x + dx;
+	u.pt.y = pt->y + dy;
+
+	return cmd | (uint64_t)u.i<<32;
+}
+
+fastcall static void sna_blt_fill_op_points(struct sna *sna,
+					    const struct sna_fill_op *op,
+					    int16_t dx, int16_t dy,
+					    const DDXPointRec *p, int n)
+{
+	const struct sna_blt_state *blt = &op->base.u.blt;
+	struct kgem *kgem = &sna->kgem;
+	uint32_t cmd;
+
+	DBG(("%s: %08x x %d\n", __FUNCTION__, blt->pixel, n));
+
+	if (sna->blt_state.fill_bo != op->base.u.blt.bo[0]->unique_id) {
+		sna_blt_fill_begin(sna, blt);
+
+		sna->blt_state.fill_bo = blt->bo[0]->unique_id;
+		sna->blt_state.fill_pixel = blt->pixel;
+		sna->blt_state.fill_alu = blt->alu;
+	}
+
+	if (!kgem_check_batch(kgem, 2))
+		sna_blt_fill_begin(sna, blt);
+
+	cmd = XY_PIXEL_BLT;
+	if (kgem->gen >= 040 && op->base.u.blt.bo[0]->tiling)
+		cmd |= BLT_DST_TILED;
+
+	do {
+		uint32_t *b = kgem->batch + kgem->nbatch;
+		int n_this_time;
+
+		assert(sna->kgem.mode == KGEM_BLT);
+		n_this_time = n;
+		if (2*n_this_time > kgem->surface - kgem->nbatch - KGEM_BATCH_RESERVED)
+			n_this_time = (kgem->surface - kgem->nbatch - KGEM_BATCH_RESERVED) / 2;
+		assert(n_this_time);
+		n -= n_this_time;
+
+		kgem->nbatch += 2 * n_this_time;
+		assert(kgem->nbatch < kgem->surface);
+
+		if ((dx|dy) == 0) {
+			while (n_this_time >= 8) {
+				*((uint64_t *)b + 0) = pt_add(cmd, p+0, 0, 0);
+				*((uint64_t *)b + 1) = pt_add(cmd, p+1, 0, 0);
+				*((uint64_t *)b + 2) = pt_add(cmd, p+2, 0, 0);
+				*((uint64_t *)b + 3) = pt_add(cmd, p+3, 0, 0);
+				*((uint64_t *)b + 4) = pt_add(cmd, p+4, 0, 0);
+				*((uint64_t *)b + 5) = pt_add(cmd, p+5, 0, 0);
+				*((uint64_t *)b + 6) = pt_add(cmd, p+6, 0, 0);
+				*((uint64_t *)b + 7) = pt_add(cmd, p+7, 0, 0);
+				b += 16;
+				n_this_time -= 8;
+				p += 8;
+			}
+			if (n_this_time & 4) {
+				*((uint64_t *)b + 0) = pt_add(cmd, p+0, 0, 0);
+				*((uint64_t *)b + 1) = pt_add(cmd, p+1, 0, 0);
+				*((uint64_t *)b + 2) = pt_add(cmd, p+2, 0, 0);
+				*((uint64_t *)b + 3) = pt_add(cmd, p+3, 0, 0);
+				b += 8;
+				p += 4;
+			}
+			if (n_this_time & 2) {
+				*((uint64_t *)b + 0) = pt_add(cmd, p+0, 0, 0);
+				*((uint64_t *)b + 1) = pt_add(cmd, p+1, 0, 0);
+				b += 4;
+				p += 2;
+			}
+			if (n_this_time & 1)
+				*((uint64_t *)b + 0) = pt_add(cmd, p++, 0, 0);
+		} else {
+			while (n_this_time >= 8) {
+				*((uint64_t *)b + 0) = pt_add(cmd, p+0, dx, dy);
+				*((uint64_t *)b + 1) = pt_add(cmd, p+1, dx, dy);
+				*((uint64_t *)b + 2) = pt_add(cmd, p+2, dx, dy);
+				*((uint64_t *)b + 3) = pt_add(cmd, p+3, dx, dy);
+				*((uint64_t *)b + 4) = pt_add(cmd, p+4, dx, dy);
+				*((uint64_t *)b + 5) = pt_add(cmd, p+5, dx, dy);
+				*((uint64_t *)b + 6) = pt_add(cmd, p+6, dx, dy);
+				*((uint64_t *)b + 7) = pt_add(cmd, p+7, dx, dy);
+				b += 16;
+				n_this_time -= 8;
+				p += 8;
+			}
+			if (n_this_time & 4) {
+				*((uint64_t *)b + 0) = pt_add(cmd, p+0, dx, dy);
+				*((uint64_t *)b + 1) = pt_add(cmd, p+1, dx, dy);
+				*((uint64_t *)b + 2) = pt_add(cmd, p+2, dx, dy);
+				*((uint64_t *)b + 3) = pt_add(cmd, p+3, dx, dy);
+				b += 8;
+				p += 8;
+			}
+			if (n_this_time & 2) {
+				*((uint64_t *)b + 0) = pt_add(cmd, p+0, dx, dy);
+				*((uint64_t *)b + 1) = pt_add(cmd, p+1, dx, dy);
+				b += 4;
+				p += 2;
+			}
+			if (n_this_time & 1)
+				*((uint64_t *)b + 0) = pt_add(cmd, p++, dx, dy);
+		}
+
+		if (!n)
+			return;
+
+		sna_blt_fill_begin(sna, blt);
+	} while (1);
+}
+
 bool sna_blt_fill(struct sna *sna, uint8_t alu,
 		  struct kgem_bo *bo, int bpp,
 		  uint32_t pixel,
@@ -2835,6 +3059,7 @@ bool sna_blt_fill(struct sna *sna, uint8_t alu,
 	fill->blt   = sna_blt_fill_op_blt;
 	fill->box   = sna_blt_fill_op_box;
 	fill->boxes = sna_blt_fill_op_boxes;
+	fill->points = sna_blt_fill_op_points;
 	fill->done  =
 		(void (*)(struct sna *, const struct sna_fill_op *))nop_done;
 	return true;
@@ -2931,7 +3156,7 @@ static bool sna_blt_fill_box(struct sna *sna, uint8_t alu,
 				return true;
 			}
 			if (kgem->nbatch >= 10 &&
-			    (kgem->batch[kgem->nbatch-10] & 0xffc0000f) == XY_SRC_COPY_BLT_CMD &&
+			    (kgem->batch[kgem->nbatch-10] & 0xffc00000) == XY_SRC_COPY_BLT_CMD &&
 			    *(uint64_t *)&kgem->batch[kgem->nbatch-8] == *(const uint64_t *)box &&
 			    kgem->reloc[kgem->nreloc-2].target_handle == bo->target_handle) {
 				DBG(("%s: replacing last copy\n", __FUNCTION__));
@@ -2956,7 +3181,7 @@ static bool sna_blt_fill_box(struct sna *sna, uint8_t alu,
 				return true;
 			}
 			if (kgem->nbatch >= 8 &&
-			    (kgem->batch[kgem->nbatch-8] & 0xffc0000f) == XY_SRC_COPY_BLT_CMD &&
+			    (kgem->batch[kgem->nbatch-8] & 0xffc00000) == XY_SRC_COPY_BLT_CMD &&
 			    *(uint64_t *)&kgem->batch[kgem->nbatch-6] == *(const uint64_t *)box &&
 			    kgem->reloc[kgem->nreloc-2].target_handle == bo->target_handle) {
 				DBG(("%s: replacing last copy\n", __FUNCTION__));
@@ -3292,7 +3517,7 @@ bool sna_blt_copy_boxes(struct sna *sna, uint8_t alu,
 	    kgem->reloc[kgem->nreloc-1].target_handle == dst_bo->target_handle) {
 		if (kgem->gen >= 0100) {
 			if (kgem->nbatch >= 7 &&
-			    kgem->batch[kgem->nbatch-7] == (XY_COLOR_BLT | (cmd & (BLT_WRITE_ALPHA | BLT_WRITE_RGB)) | 5) &&
+			    kgem->batch[kgem->nbatch-7] == (XY_COLOR_BLT | (cmd & (BLT_DST_TILED | BLT_WRITE_ALPHA | BLT_WRITE_RGB)) | 5) &&
 			    kgem->batch[kgem->nbatch-5] == ((uint32_t)(box->y1 + dst_dy) << 16 | (uint16_t)(box->x1 + dst_dx)) &&
 			    kgem->batch[kgem->nbatch-4] == ((uint32_t)(box->y2 + dst_dy) << 16 | (uint16_t)(box->x2 + dst_dx))) {
 				DBG(("%s: deleting last fill\n", __FUNCTION__));
@@ -3301,7 +3526,7 @@ bool sna_blt_copy_boxes(struct sna *sna, uint8_t alu,
 			}
 		} else {
 			if (kgem->nbatch >= 6 &&
-			    kgem->batch[kgem->nbatch-6] == (XY_COLOR_BLT | (cmd & (BLT_WRITE_ALPHA | BLT_WRITE_RGB)) | 4) &&
+			    kgem->batch[kgem->nbatch-6] == (XY_COLOR_BLT | (cmd & (BLT_DST_TILED | BLT_WRITE_ALPHA | BLT_WRITE_RGB)) | 4) &&
 			    kgem->batch[kgem->nbatch-4] == ((uint32_t)(box->y1 + dst_dy) << 16 | (uint16_t)(box->x1 + dst_dx)) &&
 			    kgem->batch[kgem->nbatch-3] == ((uint32_t)(box->y2 + dst_dy) << 16 | (uint16_t)(box->x2 + dst_dx))) {
 				DBG(("%s: deleting last fill\n", __FUNCTION__));

@@ -1030,6 +1030,8 @@ __sna_glyph_get_image(GlyphPtr g, ScreenPtr s)
 	PicturePtr p;
 	int dx, dy;
 
+	DBG(("%s: creating image cache for glyph %p (on screen %d)\n", __FUNCTION__, g, s->myNum));
+
 	p = GetGlyphPicture(g, s);
 	if (unlikely(p == NULL))
 		return NULL;
@@ -1147,13 +1149,10 @@ glyphs_via_mask(struct sna *sna,
 		memset(pixmap->devPrivate.ptr, 0, pixmap->devKind*height);
 #if HAS_PIXMAN_GLYPHS
 		if (sna->render.glyph_cache) {
+			pixman_glyph_cache_t *cache = sna->render.glyph_cache;
 			pixman_glyph_t stack_glyphs[N_STACK_GLYPHS];
 			pixman_glyph_t *pglyphs = stack_glyphs;
-			pixman_glyph_cache_t *cache;
 			int count, n;
-
-			cache = sna->render.glyph_cache;
-			pixman_glyph_cache_freeze(cache);
 
 			count = 0;
 			for (n = 0; n < nlist; ++n)
@@ -1164,6 +1163,7 @@ glyphs_via_mask(struct sna *sna,
 					goto err_pixmap;
 			}
 
+			pixman_glyph_cache_freeze(cache);
 			count = 0;
 			do {
 				n = list->len;
@@ -1184,6 +1184,7 @@ glyphs_via_mask(struct sna *sna,
 						if (glyph_image == NULL)
 							goto next_pglyph;
 
+						DBG(("%s: inserting glyph %p into pixman cache\n", __FUNCTION__, g));
 						ptr = pixman_glyph_cache_insert(cache, g, NULL,
 										g->info.x,
 										g->info.y,
@@ -1421,9 +1422,8 @@ glyphs_format(int nlist, GlyphListPtr list, GlyphPtr * glyphs)
 			return NULL;
 	}
 
-	x = 0;
-	y = 0;
-	for (i = 0; i < nlist; i++) {
+	x = y = 0; i = 0;
+	while (nlist--) {
 		BoxRec extents;
 		bool first = true;
 		int n = list->len;
@@ -1434,12 +1434,11 @@ glyphs_format(int nlist, GlyphListPtr list, GlyphPtr * glyphs)
 		 * If we overlap then we cannot substitute a mask as the
 		 * rendering will be altered.
 		 */
-		extents.x1 = 0;
-		extents.y1 = 0;
-		extents.x2 = 0;
-		extents.y2 = 0;
-
 		if (format->format != list->format->format) {
+			DBG(("%s: switching formats from %x to %x\n",
+			     __FUNCTION__,
+			     (unsigned)format->format,
+			     (unsigned)list->format->format));
 			format = NULL;
 			goto out;
 		}
@@ -1474,6 +1473,10 @@ glyphs_format(int nlist, GlyphListPtr list, GlyphPtr * glyphs)
 				 */
 				if (x1 < extents.x2-1 && x2 > extents.x1+1 &&
 				    y1 < extents.y2-1 && y2 > extents.y1+1) {
+					DBG(("%s: overlapping glyph inside line, current bbox (%d, %d), (%d, %d), glyph (%d, %d), (%d, %d)\n",
+					     __FUNCTION__,
+					     extents.x1, extents.y1, extents.x2, extents.y2,
+					     x1, y1, x2, y2));
 					format = NULL;
 					goto out;
 				}
@@ -1496,16 +1499,23 @@ skip_glyph:
 		 * the number of lists to be small, so just keep a list
 		 * of the previous boxes and walk those.
 		 */
-		for (j = 0; j < i; j++) {
-			if (extents.x1 < list_extents[j].x2-1 &&
-			    extents.x2 > list_extents[j].x1+1 &&
-			    extents.y1 < list_extents[j].y2-1 &&
-			    extents.y2 > list_extents[j].y1+1) {
-				format = NULL;
-				goto out;
+		if (!first) {
+			for (j = 0; j < i; j++) {
+				if (extents.x1 < list_extents[j].x2-1 &&
+				    extents.x2 > list_extents[j].x1+1 &&
+				    extents.y1 < list_extents[j].y2-1 &&
+				    extents.y2 > list_extents[j].y1+1) {
+					DBG(("%s: overlapping lines, current bbox (%d, %d), (%d, %d), previous line (%d, %d), (%d, %d)\n",
+					     __FUNCTION__,
+					     extents.x1, extents.y1, extents.x2, extents.y2,
+					     list_extents[j].x1, list_extents[j].y1,
+					     list_extents[j].x2, list_extents[j].y2));
+					format = NULL;
+					goto out;
+				}
 			}
+			list_extents[i++] = extents;
 		}
-		list_extents[i] = extents;
 	}
 
 out:
@@ -1523,6 +1533,11 @@ static bool can_discard_mask(uint8_t op, PicturePtr src, PictFormatPtr mask,
 	if (NO_DISCARD_MASK)
 		return false;
 
+	DBG(("%s: nlist=%d, mask=%08x, depth %d, op=%d (bounded? %d)\n",
+	     __FUNCTION__, nlist,
+	     mask ? (unsigned)mask->format : 0, mask ? mask->depth : 0,
+	     op, op_is_bounded(op)));
+
 	if (nlist == 1 && list->len == 1)
 		return true;
 
@@ -1533,6 +1548,9 @@ static bool can_discard_mask(uint8_t op, PicturePtr src, PictFormatPtr mask,
 	g = glyphs_format(nlist, list, glyphs);
 	if (mask == g)
 		return true;
+
+	DBG(("%s: preferred mask format %08x, depth %d\n",
+	     __FUNCTION__, g ? (unsigned)g->format : 0,  g ? g->depth : 0));
 
 	/* Otherwise if the glyphs are all bitmaps and we have an
 	 * opaque source we can also render directly to the dst.
@@ -1659,6 +1677,7 @@ glyphs_fallback(CARD8 op,
 					if (glyph_image == NULL)
 						goto next;
 
+					DBG(("%s: inserting glyph %p into pixman cache\n", __FUNCTION__, g));
 					ptr = pixman_glyph_cache_insert(cache, g, NULL,
 									g->info.x,
 									g->info.y,
@@ -1917,7 +1936,7 @@ sna_glyphs(CARD8 op,
 	}
 
 	if ((too_small(priv) || DAMAGE_IS_ALL(priv->cpu_damage)) &&
-	    !picture_is_gpu(sna, src)) {
+	    !picture_is_gpu(sna, src, 0)) {
 		DBG(("%s: fallback -- too small (%dx%d)\n",
 		     __FUNCTION__, dst->pDrawable->width, dst->pDrawable->height));
 		goto fallback;
@@ -2053,23 +2072,21 @@ glyphs_via_image(struct sna *sna,
 	memset(pixmap->devPrivate.ptr, 0, pixmap->devKind*height);
 #if HAS_PIXMAN_GLYPHS
 	if (sna->render.glyph_cache) {
+		pixman_glyph_cache_t *cache = sna->render.glyph_cache;
 		pixman_glyph_t stack_glyphs[N_STACK_GLYPHS];
 		pixman_glyph_t *pglyphs = stack_glyphs;
-		pixman_glyph_cache_t *cache;
 		int count, n;
-
-		cache = sna->render.glyph_cache;
-		pixman_glyph_cache_freeze(cache);
 
 		count = 0;
 		for (n = 0; n < nlist; ++n)
 			count += list[n].len;
 		if (count > N_STACK_GLYPHS) {
-			pglyphs = malloc (count * sizeof(pixman_glyph_t));
+			pglyphs = malloc(count * sizeof(pixman_glyph_t));
 			if (pglyphs == NULL)
 				goto err_pixmap;
 		}
 
+		pixman_glyph_cache_freeze(cache);
 		count = 0;
 		do {
 			n = list->len;
@@ -2090,6 +2107,7 @@ glyphs_via_image(struct sna *sna,
 					if (glyph_image == NULL)
 						goto next_pglyph;
 
+					DBG(("%s: inserting glyph %p into pixman cache\n", __FUNCTION__, g));
 					ptr = pixman_glyph_cache_insert(cache, g, NULL,
 									g->info.x,
 									g->info.y,
@@ -2144,8 +2162,7 @@ next_pglyph:
 				    yi + g->info.height <= 0)
 					goto next_image;
 
-				glyph_image =
-					sna_glyph_get_image(g, dst->pDrawable->pScreen);
+				glyph_image = sna_glyph_get_image(g, screen);
 				if (glyph_image == NULL)
 					goto next_image;
 
@@ -2248,7 +2265,7 @@ sna_glyphs__shared(CARD8 op,
 	}
 
 	if ((too_small(priv) || DAMAGE_IS_ALL(priv->cpu_damage)) &&
-	    !picture_is_gpu(sna, src)) {
+	    !picture_is_gpu(sna, src, 0)) {
 		DBG(("%s: fallback -- too small (%dx%d)\n",
 		     __FUNCTION__, dst->pDrawable->width, dst->pDrawable->height));
 		goto fallback;
@@ -2275,15 +2292,19 @@ sna_glyph_unrealize(ScreenPtr screen, GlyphPtr glyph)
 {
 	struct sna_glyph *p = sna_glyph(glyph);
 
-	DBG(("%s: screen=%d, glyph(image?=%d, atlas?=%d)\n",
-	     __FUNCTION__, screen->myNum, !!p->image, !!p->atlas));
+	DBG(("%s: screen=%d, glyph=%p (image?=%d, atlas?=%d)\n",
+	     __FUNCTION__, screen->myNum, glyph, !!p->image,
+	     p->atlas && p->atlas != GetGlyphPicture(glyph, screen)));
 
 	if (p->image) {
 #if HAS_PIXMAN_GLYPHS
 		struct sna *sna = to_sna_from_screen(screen);
-		if (sna->render.glyph_cache)
+		if (sna->render.glyph_cache) {
+			DBG(("%s: removing glyph %p from pixman cache\n",
+			     __FUNCTION__, glyph));
 			pixman_glyph_cache_remove(sna->render.glyph_cache,
 						  glyph, NULL);
+		}
 #endif
 		pixman_image_unref(p->image);
 		p->image = NULL;
@@ -2298,4 +2319,9 @@ sna_glyph_unrealize(ScreenPtr screen, GlyphPtr glyph)
 		cache->glyphs[p->pos >> 1] = NULL;
 		p->atlas = NULL;
 	}
+
+#if HAS_PIXMAN_GLYPHS
+	assert(to_sna_from_screen(screen)->render.glyph_cache == NULL ||
+	       pixman_glyph_cache_lookup(to_sna_from_screen(screen)->render.glyph_cache, glyph, NULL) == NULL);
+#endif
 }

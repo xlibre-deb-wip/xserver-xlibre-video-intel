@@ -852,7 +852,7 @@ mono_trapezoids_span_converter(struct sna *sna,
 			threads[n].extents.y1 = y;
 			threads[n].extents.y2 = y += h;
 
-			sna_threads_run(mono_span_thread, &threads[n]);
+			sna_threads_run(n, mono_span_thread, &threads[n]);
 		}
 
 		threads[0].extents.y1 = y;
@@ -1168,7 +1168,10 @@ unbounded_pass:
 		mono.span = mono_span__fast;
 	else
 		mono.span = mono_span;
-	mono_render(&mono);
+	if (sigtrap_get() == 0) {
+		mono_render(&mono);
+		sigtrap_put();
+	}
 	mono_fini(&mono);
 
 	if (op) {

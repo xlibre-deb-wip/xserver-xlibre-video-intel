@@ -1281,6 +1281,13 @@ gen8_tiling_bits(uint32_t tiling)
 	}
 }
 
+#define MOCS_WT (2 << 5)
+#define MOCS_WB (3 << 5)
+#define MOCS_eLLC_ONLY (0 << 3)
+#define MOCS_LLC_ONLY (1 << 3)
+#define MOCS_eLLC_LLC (2 << 3)
+#define MOCS_ALL_CACHES (3 << 3)
+
 /**
  * Sets up the common fields for a surface state buffer for the given
  * picture in the given surface state buffer.
@@ -1318,7 +1325,7 @@ gen8_bind_bo(struct sna *sna,
 		domains = I915_GEM_DOMAIN_RENDER << 16 |I915_GEM_DOMAIN_RENDER;
 	} else
 		domains = I915_GEM_DOMAIN_SAMPLER << 16;
-	ss[1] = (is_scanout || bo->io) ? 0 : 3 << 24;
+	ss[1] = bo->io ? 0 : is_scanout ? (MOCS_WT | MOCS_ALL_CACHES) << 24 : (MOCS_WB | MOCS_ALL_CACHES) << 24;
 	ss[2] = ((width - 1)  << SURFACE_WIDTH_SHIFT |
 		 (height - 1) << SURFACE_HEIGHT_SHIFT);
 	ss[3] = (bo->pitch - 1) << SURFACE_PITCH_SHIFT;
@@ -1799,7 +1806,7 @@ gen8_composite_picture(struct sna *sna,
 	y += dy + picture->pDrawable->y;
 
 	channel->is_affine = sna_transform_is_affine(picture->transform);
-	if (sna_transform_is_integer_translation(picture->transform, &dx, &dy)) {
+	if (sna_transform_is_imprecise_integer_translation(picture->transform, picture->filter, precise, &dx, &dy)) {
 		DBG(("%s: integer translation (%d, %d), removing\n",
 		     __FUNCTION__, dx, dy));
 		x += dx;
@@ -1862,7 +1869,7 @@ gen8_composite_set_target(struct sna *sna,
 	BoxRec box;
 	unsigned int hint;
 
-	DBG(("%s: (%d, %d)x(%d, %d), partial?=%d\n", __FUNCTION__, x, y, w, h));
+	DBG(("%s: (%d, %d)x(%d, %d), partial?=%d\n", __FUNCTION__, x, y, w, h, partial));
 
 	op->dst.pixmap = get_drawable_pixmap(dst->pDrawable);
 	op->dst.format = dst->format;
@@ -3318,6 +3325,7 @@ gen8_render_fill(struct sna *sna, uint8_t alu,
 	op->blt   = gen8_render_fill_op_blt;
 	op->box   = gen8_render_fill_op_box;
 	op->boxes = gen8_render_fill_op_boxes;
+	op->points = NULL;
 	op->done  = gen8_render_fill_op_done;
 	return true;
 }

@@ -1000,15 +1000,17 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
 		return FALSE;
 
 	if ((sna->flags & SNA_IS_HOSTED) == 0 &&
-	    xf86_cursors_init(screen, SNA_CURSOR_X, SNA_CURSOR_Y,
-			       HARDWARE_CURSOR_TRUECOLOR_AT_8BPP |
-			       HARDWARE_CURSOR_BIT_ORDER_MSBFIRST |
-			       HARDWARE_CURSOR_INVERT_MASK |
-			       HARDWARE_CURSOR_SWAP_SOURCE_AND_MASK |
-			       HARDWARE_CURSOR_AND_SOURCE_WITH_MASK |
-			       HARDWARE_CURSOR_SOURCE_MASK_INTERLEAVE_64 |
-			       HARDWARE_CURSOR_UPDATE_UNHIDDEN |
-			       HARDWARE_CURSOR_ARGB))
+	    xf86_cursors_init(screen,
+			      sna->mode.cursor_width,
+			      sna->mode.cursor_height,
+			      HARDWARE_CURSOR_TRUECOLOR_AT_8BPP |
+			      HARDWARE_CURSOR_BIT_ORDER_MSBFIRST |
+			      HARDWARE_CURSOR_INVERT_MASK |
+			      HARDWARE_CURSOR_SWAP_SOURCE_AND_MASK |
+			      HARDWARE_CURSOR_AND_SOURCE_WITH_MASK |
+			      HARDWARE_CURSOR_SOURCE_MASK_INTERLEAVE_64 |
+			      HARDWARE_CURSOR_UPDATE_UNHIDDEN |
+			      HARDWARE_CURSOR_ARGB))
 		xf86DrvMsg(scrn->scrnIndex, X_INFO, "HW Cursor enabled\n");
 
 	/* Must force it before EnterVT, so we are in control of VT and
@@ -1036,11 +1038,11 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
 	if (!miCreateDefColormap(screen))
 		return FALSE;
 
-	if (!xf86HandleColormaps(screen, 256, 8, sna_load_palette, NULL,
+	if (sna->mode.kmode &&
+	    !xf86HandleColormaps(screen, 256, 8, sna_load_palette, NULL,
 				 CMAP_RELOAD_ON_MODE_SWITCH |
-				 CMAP_PALETTED_TRUECOLOR)) {
+				 CMAP_PALETTED_TRUECOLOR))
 		return FALSE;
-	}
 
 	xf86DPMSInit(screen, xf86DPMSSet, 0);
 

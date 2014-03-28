@@ -23,7 +23,7 @@
 # Initialize Autoconf
 AC_PREREQ([2.60])
 AC_INIT([xf86-video-intel],
-        [2.99.910],
+        [2.99.911],
         [https://bugs.freedesktop.org/enter_bug.cgi?product=xorg],
         [xf86-video-intel])
 AC_CONFIG_SRCDIR([Makefile.am])
@@ -61,6 +61,23 @@ m4_ifndef([XORG_DRIVER_CHECK_EXT],
 AC_DISABLE_STATIC
 AC_PROG_LIBTOOL
 AC_SYS_LARGEFILE
+
+# Platform specific settings
+case $host_os in
+  *linux*)
+    backlight_helper=yes
+    ;;
+esac
+
+AC_ARG_ENABLE(backlight-helper,
+              AS_HELP_STRING([--disable-backlight-helper],
+			     [Enable building the backlight helper executable for running X under a normal user [default=auto]]),
+              [backlight_helper="$enableval"],)
+AM_CONDITIONAL(BUILD_BACKLIGHT_HELPER, [test "x$backlight_helper" = "xyes"])
+if test "x$backlight_helper" = "xyes"; then
+	tools_msg="$tools_msg xf86-video-intel-backlight-helper"
+	AC_DEFINE(USE_BACKLIGHT_HELPER, 1, [Enable use of the backlight helper interfaces])
+fi
 
 # Are we in a git checkout?
 dot_git=no
@@ -220,6 +237,10 @@ if test "x$tools" = "xyes"; then
 			#include <X11/Xproto.h>])
 fi
 
+if test "x$tools" = "xyes"; then
+      tools_msg="$tools_msg intel-virtual-output"
+fi
+
 AM_CONDITIONAL(BUILD_TOOLS, test "x$tools" = "xyes")
 
 # Define a configure option for an alternate module directory
@@ -293,13 +314,14 @@ if test "x$SNA" != "xno"; then
 	AC_CHECK_HEADERS([sys/sysinfo.h], AC_CHECK_MEMBERS([struct sysinfo.totalram], [], [], [[#include <sys/sysinfo.h>]]))
 fi
 
+uxa_requires_libdrm=2.4.52
 AC_ARG_ENABLE(uxa,
 	      AS_HELP_STRING([--enable-uxa],
-			     [Enable Unified Acceleration Architecture (UXA) [default=yes]]),
+			     [Enable Unified Acceleration Architecture (UXA) [default=auto]]),
 	      [UXA="$enableval"],
 	      [UXA=auto])
 if test "x$UXA" = "xauto"; then
-	if ! pkg-config --exists 'libdrm_intel >= 2.4.29'; then
+	if ! pkg-config --exists "libdrm_intel >= $uxa_requires_libdrm"; then
 		UXA=no
 	fi
 	if ! pkg-config --exists 'pixman-1 >= 0.24.0'; then
@@ -308,7 +330,7 @@ if test "x$UXA" = "xauto"; then
 fi
 if test "x$UXA" != "xno"; then
 	AC_DEFINE(USE_UXA, 1, [Enable UXA support])
-	PKG_CHECK_MODULES(DRMINTEL, [libdrm_intel >= 2.4.29])
+	PKG_CHECK_MODULES(DRMINTEL, [libdrm_intel >= $uxa_requires_libdrm])
 	required_pixman_version=0.24
 	UXA=yes
 fi
@@ -328,6 +350,7 @@ if test "x$GLAMOR" != "xno"; then
 fi
 
 PKG_CHECK_MODULES(XORG, [xorg-server >= $required_xorg_server_version xproto fontsproto pixman-1 >= $required_pixman_version $REQUIRED_MODULES])
+ABI_VERSION=`$PKG_CONFIG --variable=abi_videodrv xorg-server`
 
 if test "x$ONLY_UMS" = "xyes"; then
 	UMS="yes"
@@ -577,6 +600,17 @@ if test "x$CREATE2" = "xyes"; then
 	xp_msg="$xp_msg create2"
 fi
 
+AC_ARG_ENABLE(rotation,
+	      AS_HELP_STRING([--enable-rotation],
+			     [Enable use of native rotations (experimental) [default=no]]),
+	      [ROTATION="$enableval"],
+	      [ROTATION="no"])
+AM_CONDITIONAL(USE_ROTATION, test "x$ROTATION" = "xyes")
+if test "x$ROTATION" = "xyes"; then
+	AC_DEFINE(USE_ROTATION,1,[Assume "rotation" support])
+	xp_msg="$xp_msg rotation"
+fi
+
 AC_ARG_ENABLE(userptr,
 	      AS_HELP_STRING([--enable-userptr],
 			     [Enable use of userptr (experimental) [default=no]]),
@@ -669,6 +703,8 @@ fi
 DRIVER_NAME="intel"
 AC_SUBST([DRIVER_NAME])
 AC_SUBST([moduledir])
+AC_DEFINE_DIR([PREFIX_PATH], prefix, [installation prefix])
+AC_DEFINE_DIR([LIBEXEC_PATH], libexecdir, [libexec directory])
 
 AC_CONFIG_FILES([
                 Makefile
@@ -688,6 +724,7 @@ AC_CONFIG_FILES([
                 xvmc/shader/vld/Makefile
 		test/Makefile
 		tools/Makefile
+		tools/org.x.xf86-video-intel.backlight-helper.policy
 ])
 AC_OUTPUT
 
@@ -718,14 +755,13 @@ if test "x$dri_msg" = "x"; then
 	dri_msg=" none"
 fi
 
-if test "x$tools" = "xyes"; then
-	tools_msg=" intel-virtual-output"
-else
+if test "x$tools_msg" = "x"; then
 	tools_msg=" none"
 fi
 
 echo ""
 echo "AC_PACKAGE_STRING will be compiled with:"
+echo "  Xorg Video ABI version: $ABI_VERSION"
 echo "  Acceleration backends:$accel_msg"
 echo "  Additional debugging support?$debug_msg"
 echo "  Support for Kernel Mode Setting? $KMS"

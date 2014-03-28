@@ -527,7 +527,9 @@ sna_composite_fb(CARD8 op,
 	    src->filter != PictFilterConvolution &&
 	    (op == PictOpSrc || (op == PictOpOver && !PICT_FORMAT_A(src->format))) &&
 	    (dst->format == src->format || dst->format == alphaless(src->format)) &&
-	    sna_transform_is_integer_translation(src->transform, &tx, &ty)) {
+	    sna_transform_is_imprecise_integer_translation(src->transform, src->filter,
+							   dst->polyMode == PolyModePrecise,
+							   &tx, &ty)) {
 		PixmapPtr dst_pixmap = get_drawable_pixmap(dst->pDrawable);
 		PixmapPtr src_pixmap = get_drawable_pixmap(src->pDrawable);
 		int16_t sx = src_x + tx - (dst->pDrawable->x + dst_x);
@@ -570,6 +572,7 @@ sna_composite_fb(CARD8 op,
 
 					assert(box->x2 > box->x1 && box->y2 > box->y1);
 
+					sigtrap_assert_active();
 					memcpy_blt(src_pixmap->devPrivate.ptr,
 						   dst_pixmap->devPrivate.ptr,
 						   dst_pixmap->drawable.bitsPerPixel,
@@ -591,16 +594,12 @@ sna_composite_fb(CARD8 op,
 	mask_image = image_from_pict(mask, FALSE, &msk_xoff, &msk_yoff);
 	dest_image = image_from_pict(dst, TRUE, &dst_xoff, &dst_yoff);
 
-	if (src_image && dest_image && !(mask && !mask_image)) {
-		if (sigtrap_get() == 0) {
-			sna_image_composite(op, src_image, mask_image, dest_image,
-					    src_x + src_xoff, src_y + src_yoff,
-					    msk_x + msk_xoff, msk_y + msk_yoff,
-					    dst_x + dst_xoff, dst_y + dst_yoff,
-					    width, height);
-			sigtrap_put();
-		}
-	}
+	if (src_image && dest_image && !(mask && !mask_image))
+		sna_image_composite(op, src_image, mask_image, dest_image,
+				    src_x + src_xoff, src_y + src_yoff,
+				    msk_x + msk_xoff, msk_y + msk_yoff,
+				    dst_x + dst_xoff, dst_y + dst_yoff,
+				    width, height);
 
 	free_pixman_pict(src, src_image);
 	free_pixman_pict(mask, mask_image);
@@ -679,7 +678,8 @@ sna_composite(CARD8 op,
 	}
 
 	if (use_cpu(pixmap, priv, op, width, height) &&
-	    !picture_is_gpu(sna, src) && !picture_is_gpu(sna, mask)) {
+	    !picture_is_gpu(sna, src, PREFER_GPU_RENDER) &&
+	    !picture_is_gpu(sna, mask, PREFER_GPU_RENDER)) {
 		DBG(("%s: fallback, dst pixmap=%ld is too small (or completely damaged)\n",
 		     __FUNCTION__, pixmap->drawable.serialNumber));
 		goto fallback;
@@ -1094,6 +1094,7 @@ fallback:
 							  dst->format))
 				goto fallback_composite;
 
+			sigtrap_assert_active();
 			if (pixel == 0 &&
 			    box->x2 - box->x1 == pixmap->drawable.width &&
 			    box->y2 - box->y1 == pixmap->drawable.height) {

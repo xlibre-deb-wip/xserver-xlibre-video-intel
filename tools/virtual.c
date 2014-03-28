@@ -67,8 +67,10 @@
 
 #if 0
 #define DBG(x) printf x
+#define EXTRA_DBG 1
 #else
 #define DBG(x)
+#define EXTRA_DBG 0
 #endif
 
 #define FORCE_FULL_REDRAW 0
@@ -85,7 +87,6 @@ struct display {
 	Window root;
 	Visual *visual;
 	Damage damage;
-	long timestamp;
 
 	int width;
 	int height;
@@ -168,6 +169,9 @@ struct context {
 	int nfd;
 
 	int timer_active;
+
+	long timestamp;
+	long configTimestamp;
 
 	Atom singleton;
 	char command[1024];
@@ -442,6 +446,17 @@ static void clone_update_edid(struct clone *clone)
 	}
 }
 
+static void disable_crtc(Display *dpy, XRRScreenResources *res, RRCrtc crtc)
+{
+	XRRPanning panning;
+
+	if (crtc == 0)
+		return;
+
+	XRRSetPanning(dpy, res, crtc, memset(&panning, 0, sizeof(panning)));
+	XRRSetCrtcConfig(dpy, res, crtc, CurrentTime, 0, 0, None, RR_Rotate_0, NULL, 0);
+}
+
 static int clone_update_modes__randr(struct clone *clone)
 {
 	XRRScreenResources *from_res = NULL, *to_res = NULL;
@@ -452,7 +467,7 @@ static int clone_update_modes__randr(struct clone *clone)
 	assert(clone->dst.rr_output);
 	assert(clone->dst.display->rr_event);
 
-	from_res = XRRGetScreenResources(clone->dst.dpy, clone->dst.window);
+	from_res = _XRRGetScreenResourcesCurrent(clone->dst.dpy, clone->dst.window);
 	if (from_res == NULL)
 		goto err;
 
@@ -460,11 +475,10 @@ static int clone_update_modes__randr(struct clone *clone)
 	if (from_info == NULL)
 		goto err;
 
-	DBG(("%s(%s-%s): timestamp %ld (last %ld)\n", __func__,
+	DBG(("%s(%s-%s <- %s-%s): timestamp %ld (last %ld)\n", __func__,
 	     DisplayString(clone->src.dpy), clone->src.name,
-	    from_info->timestamp, clone->timestamp));
-	if (from_info->timestamp == clone->timestamp)
-		goto err;
+	     DisplayString(clone->dst.dpy), clone->dst.name,
+	     from_info->timestamp, clone->timestamp));
 
 	to_res = _XRRGetScreenResourcesCurrent(clone->src.dpy, clone->src.window);
 	if (to_res == NULL)
@@ -474,6 +488,8 @@ static int clone_update_modes__randr(struct clone *clone)
 	if (to_info == NULL)
 		goto err;
 
+	DBG(("%s: dst.rr_crtc=%ld, now %ld\n",
+	     __func__, (long)clone->dst.rr_crtc, (long)from_info->crtc));
 	if (clone->dst.rr_crtc == from_info->crtc) {
 		for (i = 0; i < to_info->nmode; i++) {
 			XRRModeInfo *mode, *old;
@@ -481,6 +497,11 @@ static int clone_update_modes__randr(struct clone *clone)
 			mode = lookup_mode(to_res, to_info->modes[i]);
 			if (mode == NULL)
 				break;
+
+			DBG(("%s(%s-%s): lookup mode %s\n", __func__,
+			     DisplayString(clone->src.dpy), clone->src.name,
+			     mode->name));
+
 			for (j = 0; j < from_info->nmode; j++) {
 				old = lookup_mode(from_res, from_info->modes[j]);
 				if (old && mode_equal(mode, old)) {
@@ -488,8 +509,12 @@ static int clone_update_modes__randr(struct clone *clone)
 					break;
 				}
 			}
-			if (mode)
+			if (mode) {
+				DBG(("%s(%s-%s): unknown mode %s\n", __func__,
+				     DisplayString(clone->src.dpy), clone->src.name,
+				     mode->name));
 				break;
+			}
 		}
 		if (i == from_info->nmode && i == to_info->nmode) {
 			DBG(("%s(%s-%s): no change in output\n", __func__,
@@ -498,14 +523,20 @@ static int clone_update_modes__randr(struct clone *clone)
 		}
 	}
 
-	clone->dst.rr_crtc = from_info->crtc;
+	/* Disable the remote output */
+	if (from_info->crtc != clone->dst.rr_crtc) {
+		DBG(("%s(%s-%s): disabling active CRTC\n", __func__,
+		     DisplayString(clone->dst.dpy), clone->dst.name));
+		disable_crtc(clone->dst.dpy, from_res, from_info->crtc);
+		clone->dst.rr_crtc = 0;
+		clone->dst.mode.id = 0;
+	}
 
 	/* Clear all current UserModes on the output, including any active ones */
 	if (to_info->crtc) {
 		DBG(("%s(%s-%s): disabling active CRTC\n", __func__,
 		     DisplayString(clone->src.dpy), clone->src.name));
-		XRRSetCrtcConfig(clone->src.dpy, to_res, to_info->crtc, CurrentTime,
-				0, 0, None, RR_Rotate_0, NULL, 0);
+		disable_crtc(clone->src.dpy, to_res, to_info->crtc);
 	}
 	for (i = 0; i < to_info->nmode; i++) {
 		DBG(("%s(%s-%s): deleting mode %ld\n", __func__,
@@ -605,8 +636,7 @@ static int clone_update_modes__fixed(struct clone *clone)
 	if (info->crtc) {
 		DBG(("%s(%s-%s): disabling active CRTC\n", __func__,
 		     DisplayString(clone->src.dpy), clone->src.name));
-		XRRSetCrtcConfig(clone->src.dpy, res, info->crtc, CurrentTime,
-				 0, 0, None, RR_Rotate_0, NULL, 0);
+		disable_crtc(clone->src.dpy, res, info->crtc);
 	}
 	for (i = 0; i < info->nmode; i++) {
 		DBG(("%s(%s-%s): deleting mode %ld\n", __func__,
@@ -705,9 +735,7 @@ static RROutput claim_virtual(struct display *display, char *output_name, int nc
 	/* Some else may have interrupted us and installed that new mode! */
 	output = XRRGetOutputInfo(dpy, res, rr_output);
 	if (output) {
-		if (output->crtc)
-			XRRSetCrtcConfig(dpy, res, output->crtc, CurrentTime,
-					 0, 0, None, RR_Rotate_0, NULL, 0);
+		disable_crtc(dpy, res, output->crtc);
 		XRRFreeOutputInfo(output);
 	}
 	XRRFreeScreenResources(res);
@@ -938,14 +966,20 @@ static int context_update(struct context *ctx)
 	if (res == NULL)
 		return 0;
 
-	DBG(("%s timestamp %ld (last %ld)\n", DisplayString(dpy), res->timestamp, ctx->display->timestamp));
-	if (res->timestamp == ctx->display->timestamp &&
+	DBG(("%s timestamp %ld (last %ld), config %ld (last %ld)\n",
+	     DisplayString(dpy),
+	     res->timestamp, ctx->timestamp,
+	     res->configTimestamp, ctx->configTimestamp));
+	if (res->timestamp == ctx->timestamp &&
+	    res->configTimestamp == ctx->configTimestamp &&
 	    res->timestamp != res->configTimestamp) { /* mutter be damned */
 		XRRFreeScreenResources(res);
 		return 0;
 	}
 
-	ctx->display->timestamp = res->timestamp;
+	ctx->timestamp = res->timestamp;
+	ctx->configTimestamp = res->configTimestamp;
+
 	for (n = 0; n < ctx->nclone; n++) {
 		struct output *output = &ctx->clones[n].src;
 		XRROutputInfo *o;
@@ -966,7 +1000,7 @@ static int context_update(struct context *ctx)
 			     output->x, output->y, output->rotation, output->mode.id,
 			     c->x, c->y, c->rotation, c->mode));
 
-			changed |= output->rotation |= c->rotation;
+			changed |= output->rotation != c->rotation;
 			output->rotation = c->rotation;
 
 			changed |= output->x != c->x;
@@ -975,7 +1009,7 @@ static int context_update(struct context *ctx)
 			changed |= output->y != c->y;
 			output->y = c->y;
 
-			changed |= output->mode.id != mode;
+			changed |= output->mode.id != c->mode;
 			mode = c->mode;
 			XRRFreeCrtcInfo(c);
 		} else {
@@ -985,6 +1019,9 @@ static int context_update(struct context *ctx)
 		}
 		output->rr_crtc = o->crtc;
 		XRRFreeOutputInfo(o);
+
+		DBG(("%s-%s crtc changed? %d\n",
+		     DisplayString(ctx->clones[n].dst.display->dpy), ctx->clones[n].dst.name, changed));
 
 		if (mode) {
 			if (output->mode.id != mode) {
@@ -1000,7 +1037,7 @@ static int context_update(struct context *ctx)
 			output->mode.id = 0;
 		}
 
-		DBG(("%s-%s changed? %d\n",
+		DBG(("%s-%s output changed? %d\n",
 		     DisplayString(ctx->clones[n].dst.display->dpy), ctx->clones[n].dst.name, changed));
 
 		if (changed)
@@ -1052,17 +1089,33 @@ static int context_update(struct context *ctx)
 				y2 = v;
 		}
 
-		x2 -= x1;
-		y2 -= y1;
 		DBG(("%s fb bounds (%d, %d)x(%d, %d)\n", DisplayString(display->dpy),
 		     x1, y1, x2, y2));
 
+		XGrabServer(display->dpy);
 		res = _XRRGetScreenResourcesCurrent(display->dpy, display->root);
 		if (res == NULL)
-			continue;
+			goto ungrab;
 
-		XGrabServer(display->dpy);
+		if (x2 <= x1 || y2 <= y1) {
+			/* Nothing enabled, preserve the current fb, and turn everything off */
+			for (clone = display->clone; clone; clone = clone->next) {
+				struct output *dst = &clone->dst;
 
+				if (!dst->rr_crtc)
+					continue;
+
+				DBG(("%s: disabling output '%s'\n",
+				     DisplayString(dst->dpy), dst->name));
+				disable_crtc(dpy, res, dst->rr_crtc);
+				dst->rr_crtc = 0;
+				dst->mode.id = 0;
+			}
+			goto free_res;
+		}
+
+		x2 -= x1;
+		y2 -= y1;
 		DBG(("%s: current size %dx%d, need %dx%d\n",
 		     DisplayString(display->dpy),
 		     display->width, display->height,
@@ -1078,8 +1131,7 @@ static int context_update(struct context *ctx)
 
 				DBG(("%s: disabling output '%s'\n",
 				     DisplayString(dst->dpy), dst->name));
-				XRRSetCrtcConfig(dst->dpy, res, dst->rr_crtc, CurrentTime,
-						0, 0, None, RR_Rotate_0, NULL, 0);
+				disable_crtc(dpy, res, dst->rr_crtc);
 				dst->rr_crtc = 0;
 				dst->mode.id = 0;
 			}
@@ -1099,9 +1151,9 @@ static int context_update(struct context *ctx)
 			RRCrtc rr_crtc;
 			Status ret;
 
-			DBG(("%s: copying configuration from %s (mode=%ld: %s) to %s\n",
+			DBG(("%s: copying configuration from %s (mode=%ld: %dx%d) to %s\n",
 			     DisplayString(dst->dpy),
-			     src->name, (long)src->mode.id, src->mode.name,
+			     src->name, (long)src->mode.id, src->mode.width, src->mode.height,
 			     dst->name));
 
 			if (src->mode.id == 0) {
@@ -1109,8 +1161,7 @@ err:
 				if (dst->rr_crtc) {
 					DBG(("%s: disabling unused output '%s'\n",
 					     DisplayString(dst->dpy), dst->name));
-					XRRSetCrtcConfig(dst->dpy, res, dst->rr_crtc, CurrentTime,
-							 0, 0, None, RR_Rotate_0, NULL, 0);
+					disable_crtc(dpy, res, dst->rr_crtc);
 					dst->rr_crtc = 0;
 					dst->mode.id = 0;
 				}
@@ -1137,15 +1188,20 @@ err:
 				/* XXX User names must be unique! */
 				m = src->mode;
 				m.nameLength = snprintf(buf, sizeof(buf),
-							"%s.%ld-%s", src->name, (long)src->mode.id, src->mode.name);
+							"%s.%ld-%dx%d", src->name,
+							(long)src->mode.id,
+							src->mode.width,
+							src->mode.height);
 				m.name = buf;
 
 				id = XRRCreateMode(dst->dpy, dst->window, &m);
 				if (id) {
-					DBG(("%s: adding mode %ld: %s to %s\n",
+					DBG(("%s: adding mode %ld: %dx%d to %s, new mode %ld\n",
 					     DisplayString(dst->dpy),
-					     (long)id, src->mode.name,
-					     dst->name));
+					     (long)src->mode.id,
+					     src->mode.width,
+					     src->mode.height,
+					     dst->name, (long)id));
 					XRRAddOutputMode(dst->dpy, dst->rr_output, id);
 					dst->mode.id = id;
 				} else {
@@ -1196,6 +1252,10 @@ err:
 			     dst->x, dst->y, dst->mode.width, dst->mode.height,
 			     dst->rotation, (long)rr_crtc, dst->mode.id));
 
+			ret = XRRSetPanning(dst->dpy, res, rr_crtc, memset(&panning, 0, sizeof(panning)));
+			DBG(("%s-%s: XRRSetPanning %s\n", DisplayString(dst->dpy), dst->name, ret ? "failed" : "success"));
+			(void)ret;
+
 			ret = XRRSetCrtcConfig(dst->dpy, res, rr_crtc, CurrentTime,
 					       dst->x, dst->y, dst->mode.id, dst->rotation,
 					       &dst->rr_output, 1);
@@ -1203,15 +1263,35 @@ err:
 			if (ret)
 				goto err;
 
-			ret = XRRSetPanning(dst->dpy, res, rr_crtc, memset(&panning, 0, sizeof(panning)));
-			DBG(("%s-%s: XRRSetPanning %s\n", DisplayString(dst->dpy), dst->name, ret ? "failed" : "success"));
+			if (EXTRA_DBG) {
+				XRRCrtcInfo *c;
+				XRRPanning *p;
+
+				c = XRRGetCrtcInfo(dst->dpy, res, rr_crtc);
+				if (c) {
+					DBG(("%s-%s: x=%d, y=%d, rotation=%d, mode=%ld\n",
+					     DisplayString(dst->dpy), dst->name,
+					     c->x, c->y, c->rotation, c->mode));
+					XRRFreeCrtcInfo(c);
+				}
+
+				p = XRRGetPanning(dst->dpy, res, rr_crtc);
+				if (p) {
+					DBG(("%s-%s: panning (%d, %d)x(%d, %d), tracking (%d, %d)x(%d, %d), border (%d, %d),(%d, %d)\n",
+					     DisplayString(dst->dpy), dst->name,
+					     p->left, p->top, p->width, p->height,
+					     p->track_left, p->track_top, p->track_width, p->track_height,
+					     p->border_left, p->border_top, p->border_right, p->border_bottom));
+					XRRFreePanning(p);
+				}
+			}
 
 			dst->rr_crtc = rr_crtc;
-			(void)ret;
 		}
-		XUngrabServer(display->dpy);
-
+free_res:
 		XRRFreeScreenResources(res);
+ungrab:
+		XUngrabServer(display->dpy);
 	}
 
 	ctx->active = NULL;
@@ -2083,6 +2163,20 @@ static struct display *last_display(struct context *ctx)
 	return &ctx->display[ctx->ndisplay-1];
 }
 
+static void reverse_clone_list(struct display *display)
+{
+	struct clone *list = NULL;
+
+	while (display->clone) {
+		struct clone *clone = display->clone;
+		display->clone = clone->next;
+		clone->next = list;
+		list = clone;
+	}
+
+	display->clone = list;
+}
+
 static int last_display_add_clones__randr(struct context *ctx)
 {
 	struct display *display = last_display(ctx);
@@ -2094,7 +2188,8 @@ static int last_display_add_clones__randr(struct context *ctx)
 
 	display_init_randr_hpd(display);
 
-	res = _XRRGetScreenResourcesCurrent(display->dpy, display->root);
+	/* Force a probe of outputs on initial connection */
+	res = XRRGetScreenResources(display->dpy, display->root);
 	if (res == NULL)
 		return -ENOMEM;
 
@@ -2149,13 +2244,14 @@ static int last_display_add_clones__randr(struct context *ctx)
 
 		if (o->crtc) {
 			DBG(("%s - disabling active output\n", DisplayString(display->dpy)));
-			XRRSetCrtcConfig(display->dpy, res, o->crtc, CurrentTime,
-					0, 0, None, RR_Rotate_0, NULL, 0);
+			disable_crtc(display->dpy, res, o->crtc);
 		}
 
 		XRRFreeOutputInfo(o);
 	}
 	XRRFreeScreenResources(res);
+
+	reverse_clone_list(display);
 	return 0;
 }
 
@@ -2229,6 +2325,8 @@ static int last_display_add_clones__xinerama(struct context *ctx)
 		ctx->active = clone;
 	}
 	XFree(xi);
+
+	reverse_clone_list(display);
 	return 0;
 }
 
@@ -2652,10 +2750,7 @@ static void context_cleanup(struct context *ctx)
 		if (output == NULL)
 			continue;
 
-		if (output->crtc)
-			XRRSetCrtcConfig(dpy, res, output->crtc, CurrentTime,
-					 0, 0, None, RR_Rotate_0, NULL, 0);
-
+		disable_crtc(dpy, res, output->crtc);
 		for (j = 0; j < output->nmode; j++)
 			XRRDeleteOutputMode(dpy, clone->src.rr_output, output->modes[j]);
 
@@ -2947,7 +3042,8 @@ int main(int argc, char **argv)
 		if (reconfigure && context_update(&ctx))
 			display_reset_damage(ctx.display);
 
-		XPending(ctx.record);
+		while (XPending(ctx.record)) /* discard all implicit events */
+			XNextEvent(ctx.record, &e);
 
 		if (ctx.timer_active && read(ctx.timer, &count, sizeof(count)) > 0) {
 			struct clone *clone;

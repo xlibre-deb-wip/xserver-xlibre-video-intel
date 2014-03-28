@@ -279,6 +279,9 @@ struct sna {
 		int shadow_flip;
 		int front_active;
 
+		unsigned short cursor_width;
+		unsigned short cursor_height;
+
 		unsigned num_real_crtc;
 		unsigned num_real_output;
 		unsigned num_fake;
@@ -439,8 +442,9 @@ static inline void sna_dri_close(struct sna *sna, ScreenPtr pScreen) { }
 #endif
 void sna_dri_pixmap_update_bo(struct sna *sna, PixmapPtr pixmap);
 
+extern bool sna_crtc_set_sprite_rotation(xf86CrtcPtr crtc, uint32_t rotation);
 extern int sna_crtc_to_pipe(xf86CrtcPtr crtc);
-extern uint32_t sna_crtc_to_plane(xf86CrtcPtr crtc);
+extern uint32_t sna_crtc_to_sprite(xf86CrtcPtr crtc);
 extern uint32_t sna_crtc_id(xf86CrtcPtr crtc);
 
 CARD32 sna_format_for_depth(int depth);
@@ -760,10 +764,13 @@ sna_get_transformed_coordinates_3d(int x, int y,
 				   float *x_out, float *y_out, float *z_out);
 
 bool sna_transform_is_affine(const PictTransform *t);
-bool sna_transform_is_integer_translation(const PictTransform *t,
-					  int16_t *tx, int16_t *ty);
 bool sna_transform_is_translation(const PictTransform *t,
 				  pixman_fixed_t *tx, pixman_fixed_t *ty);
+bool sna_transform_is_integer_translation(const PictTransform *t,
+					  int16_t *tx, int16_t *ty);
+bool sna_transform_is_imprecise_integer_translation(const PictTransform *t,
+					       int filter, bool precise,
+					       int16_t *tx, int16_t *ty);
 static inline bool
 sna_affine_transform_is_rotation(const PictTransform *t)
 {
@@ -1011,8 +1018,10 @@ void sna_acpi_fini(struct sna *sna);
 
 void sna_threads_init(void);
 int sna_use_threads (int width, int height, int threshold);
-void sna_threads_run(void (*func)(void *arg), void *arg);
+void sna_threads_run(int id, void (*func)(void *arg), void *arg);
+void sna_threads_trap(int sig);
 void sna_threads_wait(void);
+void sna_threads_kill(void);
 
 void sna_image_composite(pixman_op_t        op,
 			 pixman_image_t    *src,
@@ -1030,12 +1039,13 @@ void sna_image_composite(pixman_op_t        op,
 extern jmp_buf sigjmp[4];
 extern volatile sig_atomic_t sigtrap;
 
-#define sigtrap_assert() assert(sigtrap == 0)
+#define sigtrap_assert_inactive() assert(sigtrap == 0)
+#define sigtrap_assert_active() assert(sigtrap > 0 && sigtrap <= ARRAY_SIZE(sigjmp))
 #define sigtrap_get() sigsetjmp(sigjmp[sigtrap++], 1)
 
 static inline void sigtrap_put(void)
 {
-	assert(sigtrap > 0);
+	sigtrap_assert_active();
 	--sigtrap;
 }
 

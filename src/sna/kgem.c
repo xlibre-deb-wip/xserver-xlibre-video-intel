@@ -683,6 +683,8 @@ constant inline static int cache_bucket(int num_pages)
 static struct kgem_bo *__kgem_bo_init(struct kgem_bo *bo,
 				      int handle, int num_pages)
 {
+	DBG(("%s(handle=%d, num_pages=%d)\n", __FUNCTION__, handle, num_pages));
+
 	assert(num_pages);
 	memset(bo, 0, sizeof(*bo));
 
@@ -1754,7 +1756,7 @@ static void kgem_bo_binding_free(struct kgem *kgem, struct kgem_bo *bo)
 
 static void kgem_bo_free(struct kgem *kgem, struct kgem_bo *bo)
 {
-	DBG(("%s: handle=%d\n", __FUNCTION__, bo->handle));
+	DBG(("%s: handle=%d, size=%d\n", __FUNCTION__, bo->handle, bytes(bo)));
 	assert(bo->refcnt == 0);
 	assert(bo->proxy == NULL);
 	assert(bo->exec == NULL);
@@ -2081,7 +2083,7 @@ void kgem_bo_undo(struct kgem *kgem, struct kgem_bo *bo)
 
 static void __kgem_bo_destroy(struct kgem *kgem, struct kgem_bo *bo)
 {
-	DBG(("%s: handle=%d\n", __FUNCTION__, bo->handle));
+	DBG(("%s: handle=%d, size=%d\n", __FUNCTION__, bo->handle, bytes(bo)));
 
 	assert(list_is_empty(&bo->list));
 	assert(bo->refcnt == 0);
@@ -3008,6 +3010,25 @@ static void dump_fence_regs(struct kgem *kgem)
 }
 #endif
 
+static int do_execbuf(struct kgem *kgem, struct drm_i915_gem_execbuffer2 *execbuf)
+{
+	int ret;
+
+retry:
+	ret = do_ioctl(kgem->fd, DRM_IOCTL_I915_GEM_EXECBUFFER2, execbuf);
+	if (ret == 0)
+		return 0;
+
+	(void)__kgem_throttle_retire(kgem, 0);
+	if (kgem_expire_cache(kgem))
+		goto retry;
+
+	if (kgem_cleanup_cache(kgem))
+		goto retry;
+
+	return ret;
+}
+
 void _kgem_submit(struct kgem *kgem)
 {
 	struct kgem_request *rq;
@@ -3073,7 +3094,7 @@ void _kgem_submit(struct kgem *kgem)
 
 		if (kgem_batch_write(kgem, handle, size) == 0) {
 			struct drm_i915_gem_execbuffer2 execbuf;
-			int ret, retry = 3;
+			int ret;
 
 			memset(&execbuf, 0, sizeof(execbuf));
 			execbuf.buffers_ptr = (uintptr_t)kgem->exec;
@@ -3091,15 +3112,7 @@ void _kgem_submit(struct kgem *kgem)
 				}
 			}
 
-			ret = do_ioctl(kgem->fd,
-				       DRM_IOCTL_I915_GEM_EXECBUFFER2,
-				       &execbuf);
-			while (ret == -EBUSY && retry--) {
-				__kgem_throttle(kgem);
-				ret = do_ioctl(kgem->fd,
-					       DRM_IOCTL_I915_GEM_EXECBUFFER2,
-					       &execbuf);
-			}
+			ret = do_execbuf(kgem, &execbuf);
 			if (DEBUG_SYNC && ret == 0) {
 				struct drm_i915_gem_set_domain set_domain;
 
@@ -3755,6 +3768,7 @@ discard:
 struct kgem_bo *kgem_create_for_name(struct kgem *kgem, uint32_t name)
 {
 	struct drm_gem_open open_arg;
+	struct drm_i915_gem_get_tiling tiling;
 	struct kgem_bo *bo;
 
 	DBG(("%s(name=%d)\n", __FUNCTION__, name));
@@ -3765,15 +3779,27 @@ struct kgem_bo *kgem_create_for_name(struct kgem *kgem, uint32_t name)
 		return NULL;
 
 	DBG(("%s: new handle=%d\n", __FUNCTION__, open_arg.handle));
+
+	VG_CLEAR(tiling);
+	tiling.handle = open_arg.handle;
+	if (do_ioctl(kgem->fd, DRM_IOCTL_I915_GEM_GET_TILING, &tiling)) {
+		DBG(("%s(name=%d) get-tiling failed, ret=%d\n", __FUNCTION__, name, errno));
+		gem_close(kgem->fd, open_arg.handle);
+		return NULL;
+	}
+
+	DBG(("%s: handle=%d, tiling=%d\n", __FUNCTION__, tiling.handle, tiling.tiling_mode));
+
 	bo = __kgem_bo_alloc(open_arg.handle, open_arg.size / PAGE_SIZE);
 	if (bo == NULL) {
 		gem_close(kgem->fd, open_arg.handle);
 		return NULL;
 	}
 
+	bo->tiling = tiling.tiling_mode;
 	bo->reusable = false;
 	bo->flush = true;
-	bo->purged = true; /* no coherency guarrantees */
+	bo->purged = true; /* no coherency guarantees */
 
 	debug_alloc__bo(kgem, bo);
 	return bo;
@@ -4170,7 +4196,9 @@ struct kgem_bo *kgem_create_2d(struct kgem *kgem,
 
 	size = kgem_surface_size(kgem, kgem->has_relaxed_fencing, flags,
 				 width, height, bpp, tiling, &pitch);
-	assert(size && size <= kgem->max_object_size);
+	if (size == 0)
+		return NULL;
+
 	size /= PAGE_SIZE;
 	bucket = cache_bucket(size);
 
@@ -5403,6 +5431,7 @@ void *kgem_bo_map__async(struct kgem *kgem, struct kgem_bo *bo)
 	assert(bo->proxy == NULL);
 	assert(list_is_empty(&bo->list));
 	assert_tiling(kgem, bo);
+	assert(!bo->purged || !bo->reusable);
 
 	if (bo->tiling == I915_TILING_NONE && !bo->scanout && kgem->has_llc) {
 		DBG(("%s: converting request for GTT map into CPU map\n",
@@ -5443,6 +5472,7 @@ void *kgem_bo_map(struct kgem *kgem, struct kgem_bo *bo)
 	assert(list_is_empty(&bo->list));
 	assert(bo->exec == NULL);
 	assert_tiling(kgem, bo);
+	assert(!bo->purged || !bo->reusable);
 
 	if (bo->tiling == I915_TILING_NONE && !bo->scanout &&
 	    (kgem->has_llc || bo->domain == DOMAIN_CPU)) {
@@ -5508,6 +5538,7 @@ void *kgem_bo_map__gtt(struct kgem *kgem, struct kgem_bo *bo)
 	assert(bo->exec == NULL);
 	assert(list_is_empty(&bo->list));
 	assert_tiling(kgem, bo);
+	assert(!bo->purged || !bo->reusable);
 
 	ptr = MAP(bo->map__gtt);
 	if (ptr == NULL) {
@@ -5813,11 +5844,13 @@ struct kgem_bo *kgem_create_proxy(struct kgem *kgem,
 	bo->proxy = kgem_bo_reference(target);
 	bo->delta = offset;
 
+	/* Proxies are only tracked for busyness on the current rq */
 	if (target->exec && !bo->io) {
+		assert(RQ(target->rq) == kgem->next_request);
 		list_move_tail(&bo->request, &kgem->next_request->buffers);
 		bo->exec = &_kgem_dummy_exec;
+		bo->rq = target->rq;
 	}
-	bo->rq = target->rq;
 
 	return bo;
 }

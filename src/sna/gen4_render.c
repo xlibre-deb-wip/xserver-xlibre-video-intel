@@ -1577,7 +1577,7 @@ gen4_composite_picture(struct sna *sna,
 	y += dy + picture->pDrawable->y;
 
 	channel->is_affine = sna_transform_is_affine(picture->transform);
-	if (sna_transform_is_integer_translation(picture->transform, &dx, &dy)) {
+	if (sna_transform_is_imprecise_integer_translation(picture->transform, picture->filter, precise, &dx, &dy)) {
 		DBG(("%s: integer translation (%d, %d), removing\n",
 		     __FUNCTION__, dx, dy));
 		x += dx;
@@ -2852,6 +2852,7 @@ gen4_render_fill(struct sna *sna, uint8_t alu,
 	op->blt   = gen4_render_fill_op_blt;
 	op->box   = gen4_render_fill_op_box;
 	op->boxes = gen4_render_fill_op_boxes;
+	op->points = NULL;
 	op->done  = gen4_render_fill_op_done;
 	return true;
 }
