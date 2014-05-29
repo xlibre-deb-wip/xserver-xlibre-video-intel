@@ -2,6 +2,7 @@ xserver-xorg-video-intel (2:2.99.911+git20140529-1~exp1) UNRELEASED; urgency=low
 
   * New upstream prerelease.
   * Install new backlight helper.
+  * Add myself to Uploaders.
 
  -- maximilian attems <maks@debian.org>  Thu, 29 May 2014 17:16:30 +0200
 
