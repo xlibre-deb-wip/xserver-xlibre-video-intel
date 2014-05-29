@@ -564,6 +564,9 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 	if (xf86ReturnOptValBool(sna->Options, OPTION_TILING_FB, FALSE))
 		sna->tiling &= ~SNA_TILING_FB;
 
+	if (xf86ReturnOptValBool(sna->Options, OPTION_DELETE_DP12, FALSE))
+		sna->flags |= SNA_REMOVE_OUTPUTS;
+
 	if (!xf86ReturnOptValBool(sna->Options, OPTION_SWAPBUFFERS_WAIT, TRUE))
 		sna->flags |= SNA_NO_WAIT;
 	DBG(("%s: swapbuffer wait? %s\n", __FUNCTION__, sna->flags & SNA_NO_WAIT ? "disabled" : "enabled"));
@@ -613,9 +616,9 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 	xf86SetGamma(scrn, zeros);
 	xf86SetDpi(scrn, 0, 0);
 
-	sna->dri_available = false;
+	sna->dri2.available = false;
 	if (sna_option_cast_to_bool(sna, OPTION_DRI, TRUE))
-		sna->dri_available = !!xf86LoadSubModule(scrn, "dri2");
+		sna->dri2.available = !!xf86LoadSubModule(scrn, "dri2");
 
 	sna_acpi_init(sna);
 
@@ -625,6 +628,17 @@ cleanup:
 	scrn->driverPrivate = (void *)((uintptr_t)sna->info | 1);
 	free(sna);
 	return FALSE;
+}
+
+static bool has_shadow(struct sna *sna)
+{
+	if (!sna->mode.shadow_damage)
+		return false;
+
+	if (RegionNil(DamageRegion(sna->mode.shadow_damage)))
+		return false;
+
+	return sna->mode.shadow_flip == 0;
 }
 
 static void
@@ -642,7 +656,7 @@ sna_block_handler(BLOCKHANDLER_ARGS_DECL)
 
 	sna->BlockHandler(BLOCKHANDLER_ARGS);
 
-	if (*tv == NULL || ((*tv)->tv_usec | (*tv)->tv_sec))
+	if (*tv == NULL || ((*tv)->tv_usec | (*tv)->tv_sec) || has_shadow(sna))
 		sna_accel_block_handler(sna, tv);
 }
 
@@ -678,7 +692,7 @@ sna_handle_uevents(int fd, void *closure)
 	ScrnInfoPtr scrn = closure;
 	struct sna *sna = to_sna(scrn);
 	struct udev_device *dev;
-	const char *hotplug;
+	const char *str;
 	struct stat s;
 	dev_t udev_devnum;
 
@@ -689,21 +703,23 @@ sna_handle_uevents(int fd, void *closure)
 		return;
 
 	udev_devnum = udev_device_get_devnum(dev);
-	if (fstat(sna->kgem.fd, &s)) {
+	if (fstat(sna->kgem.fd, &s) || memcmp(&s.st_rdev, &udev_devnum, sizeof (dev_t))) {
 		udev_device_unref(dev);
 		return;
 	}
 
-	/*
-	 * Check to make sure this event is directed at our
-	 * device (by comparing dev_t values), then make
-	 * sure it's a hotplug event (HOTPLUG=1)
-	 */
+	str = udev_device_get_property_value(dev, "DISCOVER");
+	if (str && atoi(str) == 1) {
+		DBG(("%s: discover event (vtSema?=%d)\n",
+		     __FUNCTION__, sna->scrn->vtSema));
+		if (sna->scrn->vtSema)
+			sna_mode_discover(sna);
+		else
+			sna->flags |= SNA_REDISCOVER;
+	}
 
-	hotplug = udev_device_get_property_value(dev, "HOTPLUG");
-
-	if (memcmp(&s.st_rdev, &udev_devnum, sizeof (dev_t)) == 0 &&
-	    hotplug && atoi(hotplug) == 1) {
+	str = udev_device_get_property_value(dev, "HOTPLUG");
+	if (str && atoi(str) == 1) {
 		DBG(("%s: hotplug event (vtSema?=%d)\n",
 		     __FUNCTION__, sna->scrn->vtSema));
 		if (sna->scrn->vtSema) {
@@ -806,8 +822,6 @@ static void sna_leave_vt(VT_FUNC_ARGS_DECL)
 
 	DBG(("%s\n", __FUNCTION__));
 
-	xf86_hide_cursors(scrn);
-
 	sna_mode_reset(to_sna(scrn));
 
 	if (intel_put_master(scrn))
@@ -824,14 +838,12 @@ static Bool sna_early_close_screen(CLOSE_SCREEN_ARGS_DECL)
 
 	/* XXX Note that we will leak kernel resources if !vtSema */
 
-	xf86_hide_cursors(scrn);
 	sna_uevent_fini(scrn);
-
 	sna_mode_close(sna);
 
-	if (sna->dri_open) {
-		sna_dri_close(sna, screen);
-		sna->dri_open = false;
+	if (sna->dri2.open) {
+		sna_dri2_close(sna, screen);
+		sna->dri2.open = false;
 	}
 
 	if (sna->front) {
@@ -843,8 +855,6 @@ static Bool sna_early_close_screen(CLOSE_SCREEN_ARGS_DECL)
 		intel_put_master(scrn);
 		scrn->vtSema = FALSE;
 	}
-
-	xf86_cursors_fini(screen);
 
 	return sna->CloseScreen(CLOSE_SCREEN_ARGS);
 }
@@ -999,18 +1009,7 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
 	if (!miDCInitialize(screen, xf86GetPointerScreenFuncs()))
 		return FALSE;
 
-	if ((sna->flags & SNA_IS_HOSTED) == 0 &&
-	    xf86_cursors_init(screen,
-			      sna->mode.cursor_width,
-			      sna->mode.cursor_height,
-			      HARDWARE_CURSOR_TRUECOLOR_AT_8BPP |
-			      HARDWARE_CURSOR_BIT_ORDER_MSBFIRST |
-			      HARDWARE_CURSOR_INVERT_MASK |
-			      HARDWARE_CURSOR_SWAP_SOURCE_AND_MASK |
-			      HARDWARE_CURSOR_AND_SOURCE_WITH_MASK |
-			      HARDWARE_CURSOR_SOURCE_MASK_INTERLEAVE_64 |
-			      HARDWARE_CURSOR_UPDATE_UNHIDDEN |
-			      HARDWARE_CURSOR_ARGB))
+	if (sna_cursors_init(screen, sna))
 		xf86DrvMsg(scrn->scrnIndex, X_INFO, "HW Cursor enabled\n");
 
 	/* Must force it before EnterVT, so we are in control of VT and
@@ -1038,7 +1037,7 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
 	if (!miCreateDefColormap(screen))
 		return FALSE;
 
-	if (sna->mode.kmode &&
+	if (sna->mode.num_real_crtc &&
 	    !xf86HandleColormaps(screen, 256, 8, sna_load_palette, NULL,
 				 CMAP_RELOAD_ON_MODE_SWITCH |
 				 CMAP_PALETTED_TRUECOLOR))
@@ -1047,9 +1046,9 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
 	xf86DPMSInit(screen, xf86DPMSSet, 0);
 
 	sna_video_init(sna, screen);
-	if (sna->dri_available)
-		sna->dri_open = sna_dri_open(sna, screen);
-	if (sna->dri_open)
+	if (sna->dri2.available)
+		sna->dri2.open = sna_dri2_open(sna, screen);
+	if (sna->dri2.open)
 		xf86DrvMsg(scrn->scrnIndex, X_INFO,
 			   "direct rendering: DRI2 Enabled\n");
 
@@ -1097,8 +1096,12 @@ static Bool sna_enter_vt(VT_FUNC_ARGS_DECL)
 	if (intel_get_master(scrn))
 		return FALSE;
 
-	if (!sna_set_desired_mode(sna))
-		return FALSE;
+	if (sna->flags & SNA_REDISCOVER) {
+		DBG(("%s: reporting deferred discover event\n",
+		     __FUNCTION__));
+		sna_mode_discover(sna);
+		sna->flags &= ~SNA_REDISCOVER;
+	}
 
 	if (sna->flags & SNA_REPROBE) {
 		DBG(("%s: reporting deferred hotplug event\n",
@@ -1107,7 +1110,7 @@ static Bool sna_enter_vt(VT_FUNC_ARGS_DECL)
 		sna->flags &= ~SNA_REPROBE;
 	}
 
-	return TRUE;
+	return sna_set_desired_mode(sna);
 }
 
 static Bool sna_switch_mode(SWITCH_MODE_ARGS_DECL)

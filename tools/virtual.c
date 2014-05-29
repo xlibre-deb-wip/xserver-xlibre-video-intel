@@ -74,6 +74,7 @@
 #endif
 
 #define FORCE_FULL_REDRAW 0
+#define FORCE_16BIT_XFER 0
 
 struct display {
 	Display *dpy;
@@ -446,15 +447,44 @@ static void clone_update_edid(struct clone *clone)
 	}
 }
 
-static void disable_crtc(Display *dpy, XRRScreenResources *res, RRCrtc crtc)
+static int disable_crtc(Display *dpy, XRRScreenResources *res, RRCrtc crtc)
 {
 	XRRPanning panning;
 
-	if (crtc == 0)
-		return;
+	if (crtc) {
+		XRRSetPanning(dpy, res, crtc, memset(&panning, 0, sizeof(panning)));
 
-	XRRSetPanning(dpy, res, crtc, memset(&panning, 0, sizeof(panning)));
-	XRRSetCrtcConfig(dpy, res, crtc, CurrentTime, 0, 0, None, RR_Rotate_0, NULL, 0);
+		if (XRRSetCrtcConfig(dpy, res, crtc, CurrentTime, 0, 0, None, RR_Rotate_0, NULL, 0) != Success)
+			return 0;
+
+		if (XRRSetPanning(dpy, res, crtc, memset(&panning, 0, sizeof(panning))) != Success) {
+			DBG(("%s failed to clear panning on CRTC:%ld\n", DisplayString(dpy), (long)crtc));
+			if (EXTRA_DBG) {
+				XRRCrtcInfo *c;
+				XRRPanning *p;
+
+				c = XRRGetCrtcInfo(dpy, res, crtc);
+				if (c) {
+					DBG(("%s CRTC:%ld x=%d, y=%d, rotation=%d, mode=%ld\n",
+					     DisplayString(dpy), (long)crtc,
+					     c->x, c->y, c->rotation, c->mode));
+					XRRFreeCrtcInfo(c);
+				}
+
+				p = XRRGetPanning(dpy, res, crtc);
+				if (p) {
+					DBG(("%s CRTC:%ld panning (%d, %d)x(%d, %d), tracking (%d, %d)x(%d, %d), border (%d, %d),(%d, %d)\n",
+					     DisplayString(dpy), (long)crtc,
+					     p->left, p->top, p->width, p->height,
+					     p->track_left, p->track_top, p->track_width, p->track_height,
+					     p->border_left, p->border_top, p->border_right, p->border_bottom));
+					XRRFreePanning(p);
+				}
+			}
+		}
+	}
+
+	return 1;
 }
 
 static int clone_update_modes__randr(struct clone *clone)
@@ -527,10 +557,23 @@ static int clone_update_modes__randr(struct clone *clone)
 	if (from_info->crtc != clone->dst.rr_crtc) {
 		DBG(("%s(%s-%s): disabling active CRTC\n", __func__,
 		     DisplayString(clone->dst.dpy), clone->dst.name));
-		disable_crtc(clone->dst.dpy, from_res, from_info->crtc);
-		clone->dst.rr_crtc = 0;
-		clone->dst.mode.id = 0;
+		if (disable_crtc(clone->dst.dpy, from_res, from_info->crtc)) {
+			clone->dst.rr_crtc = 0;
+			clone->dst.mode.id = 0;
+		} else {
+			XRRCrtcInfo *c = XRRGetCrtcInfo(clone->dst.dpy, from_res, from_info->crtc);
+			if (c) {
+				clone->dst.x = c->x;
+				clone->dst.y = c->y;
+				clone->dst.rotation = c->rotation;
+				clone->dst.mode.id = c->mode;
+				XRRFreeCrtcInfo(c);
+			}
+		}
 	}
+
+	/* Create matching modes for the real output on the virtual */
+	XGrabServer(clone->src.dpy);
 
 	/* Clear all current UserModes on the output, including any active ones */
 	if (to_info->crtc) {
@@ -546,8 +589,6 @@ static int clone_update_modes__randr(struct clone *clone)
 
 	clone->src.rr_crtc = 0;
 
-	/* Create matching modes for the real output on the virtual */
-	XGrabServer(clone->src.dpy);
 	for (i = 0; i < from_info->nmode; i++) {
 		XRRModeInfo *mode, *old;
 		RRMode id;
@@ -743,6 +784,10 @@ static RROutput claim_virtual(struct display *display, char *output_name, int nc
 	XRRDeleteOutputMode(dpy, rr_output, id);
 	XRRDestroyMode(dpy, id);
 
+	/* And hide it again */
+	res = XRRGetScreenResources(dpy, display->root);
+	if (res != NULL)
+		XRRFreeScreenResources(res);
 out:
 	XUngrabServer(dpy);
 
@@ -825,6 +870,9 @@ static void output_init_xfer(struct clone *clone, struct output *output)
 {
 	if (output->use_shm_pixmap) {
 		DBG(("%s-%s: creating shm pixmap\n", DisplayString(output->dpy), output->name));
+		XSync(output->dpy, False);
+		_x_error_occurred = 0;
+
 		if (output->pixmap)
 			XFreePixmap(output->dpy, output->pixmap);
 		output->pixmap = XShmCreatePixmap(output->dpy, output->window,
@@ -833,6 +881,13 @@ static void output_init_xfer(struct clone *clone, struct output *output)
 		if (output->pix_picture) {
 			XRenderFreePicture(output->dpy, output->pix_picture);
 			output->pix_picture = None;
+		}
+
+		XSync(output->dpy, False);
+		if (_x_error_occurred) {
+			XFreePixmap(output->dpy, output->pixmap);
+			output->pixmap = None;
+			output->use_shm_pixmap = 0;
 		}
 	}
 	if (output->use_render) {
@@ -916,13 +971,13 @@ static int clone_init_xfer(struct clone *clone)
 
 	if (clone->src.use_shm) {
 		clone->src.shm = clone->shm;
-		clone->dst.shm.readOnly = False;
+		clone->src.shm.readOnly = False;
 		XShmAttach(clone->src.dpy, &clone->src.shm);
 		XSync(clone->src.dpy, False);
 	}
 	if (clone->dst.use_shm) {
 		clone->dst.shm = clone->shm;
-		clone->dst.shm.readOnly = True;
+		clone->dst.shm.readOnly = !clone->dst.use_shm_pixmap;
 		XShmAttach(clone->dst.dpy, &clone->dst.shm);
 		XSync(clone->dst.dpy, False);
 	}
@@ -1106,10 +1161,12 @@ static int context_update(struct context *ctx)
 					continue;
 
 				DBG(("%s: disabling output '%s'\n",
-				     DisplayString(dst->dpy), dst->name));
-				disable_crtc(dpy, res, dst->rr_crtc);
-				dst->rr_crtc = 0;
-				dst->mode.id = 0;
+				     DisplayString(display->dpy), dst->name));
+				assert(clone->dst.display == display);
+				if (disable_crtc(display->dpy, res, dst->rr_crtc)) {
+					dst->rr_crtc = 0;
+					dst->mode.id = 0;
+				}
 			}
 			goto free_res;
 		}
@@ -1130,10 +1187,12 @@ static int context_update(struct context *ctx)
 					continue;
 
 				DBG(("%s: disabling output '%s'\n",
-				     DisplayString(dst->dpy), dst->name));
-				disable_crtc(dpy, res, dst->rr_crtc);
-				dst->rr_crtc = 0;
-				dst->mode.id = 0;
+				     DisplayString(display->dpy), dst->name));
+				assert(clone->dst.display == display);
+				if (disable_crtc(display->dpy, res, dst->rr_crtc)) {
+					dst->rr_crtc = 0;
+					dst->mode.id = 0;
+				}
 			}
 
 			DBG(("%s: XRRSetScreenSize %dx%d\n", DisplayString(display->dpy), x2, y2));
@@ -1152,7 +1211,7 @@ static int context_update(struct context *ctx)
 			Status ret;
 
 			DBG(("%s: copying configuration from %s (mode=%ld: %dx%d) to %s\n",
-			     DisplayString(dst->dpy),
+			     DisplayString(display->dpy),
 			     src->name, (long)src->mode.id, src->mode.width, src->mode.height,
 			     dst->name));
 
@@ -1160,10 +1219,12 @@ static int context_update(struct context *ctx)
 err:
 				if (dst->rr_crtc) {
 					DBG(("%s: disabling unused output '%s'\n",
-					     DisplayString(dst->dpy), dst->name));
-					disable_crtc(dpy, res, dst->rr_crtc);
-					dst->rr_crtc = 0;
-					dst->mode.id = 0;
+					     DisplayString(display->dpy), dst->name));
+					assert(clone->dst.display == display);
+					if (disable_crtc(display->dpy, res, dst->rr_crtc)) {
+						dst->rr_crtc = 0;
+						dst->mode.id = 0;
+					}
 				}
 				continue;
 			}
@@ -1300,6 +1361,9 @@ ungrab:
 
 		if (clone->dst.rr_crtc == 0)
 			continue;
+
+		DBG(("%s-%s: added to active list\n",
+		     DisplayString(clone->dst.display->dpy), clone->dst.name));
 
 		clone->active = ctx->active;
 		ctx->active = clone;
@@ -1459,7 +1523,7 @@ static int clone_output_init(struct clone *clone, struct output *output,
 	DBG(("%s-%s use shm? %d (use shm pixmap? %d)\n",
 	     DisplayString(dpy), name, display->has_shm, display->has_shm_pixmap));
 
-	depth = output->use_shm ? display->depth : 16;
+	depth = output->use_shm && !FORCE_16BIT_XFER ? display->depth : 16;
 	if (depth < clone->depth)
 		clone->depth = depth;
 
@@ -1657,14 +1721,21 @@ done:
 
 static void clone_damage(struct clone *c, const XRectangle *rec)
 {
-	if (rec->x < c->damaged.x1)
-		c->damaged.x1 = rec->x;
-	if (rec->x + rec->width > c->damaged.x2)
-		c->damaged.x2 = rec->x + rec->width;
-	if (rec->y < c->damaged.y1)
-		c->damaged.y1 = rec->y;
-	if (rec->y + rec->height > c->damaged.y2)
-		c->damaged.y2 = rec->y + rec->height;
+	int v;
+
+	if ((v = rec->x) < c->damaged.x1)
+		c->damaged.x1 = v;
+	if ((v = (int)rec->x + rec->width) > c->damaged.x2)
+		c->damaged.x2 = v;
+	if ((v = rec->y) < c->damaged.y1)
+		c->damaged.y1 = v;
+	if ((v = (int)rec->y + rec->height) > c->damaged.y2)
+		c->damaged.y2 = v;
+
+	DBG(("%s-%s damaged: (%d, %d), (%d, %d)\n",
+	     DisplayString(c->dst.display->dpy), c->dst.name,
+	     c->damaged.x1, c->damaged.y1,
+	     c->damaged.x2, c->damaged.y2));
 }
 
 static void usage(const char *arg0)
@@ -1980,10 +2051,27 @@ static int add_display(struct context *ctx, Display *dpy)
 				       &display->shm_event,
 				       &display->shm_opcode,
 				       &display->has_shm_pixmap);
+	DBG(("%s: has_shm?=%d, event=%d, opcode=%d, has_pixmap?=%d\n",
+	     DisplayString(dpy),
+	     display->has_shm,
+	     display->shm_event,
+	     display->shm_opcode,
+	     display->has_shm_pixmap));
 
 	display->rr_active = XRRQueryExtension(dpy, &display->rr_event, &display->rr_error);
+	DBG(("%s: randr_active?=%d, event=%d, error=%d\n",
+	     DisplayString(dpy),
+	     display->rr_active,
+	     display->rr_event,
+	     display->rr_error));
+
 	if (XineramaQueryExtension(dpy, &display->xinerama_event, &display->xinerama_error))
 		display->xinerama_active = XineramaIsActive(dpy);
+	DBG(("%s: xinerama_active?=%d, event=%d, error=%d\n",
+	     DisplayString(dpy),
+	     display->xinerama_active,
+	     display->xinerama_event,
+	     display->xinerama_error));
 
 	/* first display (source) is slightly special */
 	if (!first_display) {
@@ -2768,9 +2856,14 @@ static void context_cleanup(struct context *ctx)
 			continue;
 		}
 	}
+	XRRFreeScreenResources(res);
+
+	/* And hide them again */
+	res = XRRGetScreenResources(dpy, ctx->display->root);
+	if (res != NULL)
+		XRRFreeScreenResources(res);
 
 	XUngrabServer(dpy);
-	XRRFreeScreenResources(res);
 
 	if (ctx->singleton)
 		XDeleteProperty(dpy, ctx->display->root, ctx->singleton);
@@ -2789,7 +2882,7 @@ int main(int argc, char **argv)
 	struct context ctx;
 	const char *src_name = NULL;
 	uint64_t count;
-	int daemonize = 1, bumblebee = 0, all = 0, singleton = 1;
+	int daemonize = !EXTRA_DBG, bumblebee = 0, all = 0, singleton = 1;
 	int i, ret, open, fail;
 
 	signal(SIGPIPE, SIG_IGN);
@@ -2959,7 +3052,7 @@ int main(int argc, char **argv)
 					     DisplayString(ctx.display->dpy),
 					     de->area.x, de->area.y, de->area.width, de->area.height));
 
-					for (clone = ctx.active; clone; clone = clone->next)
+					for (clone = ctx.active; clone; clone = clone->active)
 						clone_damage(clone, &de->area);
 
 					if (ctx.active)

@@ -35,6 +35,13 @@
 #include <pthread.h>
 #include <signal.h>
 
+#ifdef HAVE_VALGRIND
+#include <valgrind.h>
+static inline bool valgrind_active(void) { return RUNNING_ON_VALGRIND; }
+#else
+static inline bool valgrind_active(void) { return false; }
+#endif
+
 static int max_threads = -1;
 
 static struct thread {
@@ -131,6 +138,9 @@ void sna_threads_init(void)
 	if (max_threads != -1)
 		return;
 
+	if (valgrind_active())
+		goto bail;
+
 	max_threads = num_cores();
 	if (max_threads == 0)
 		max_threads = sysconf(_SC_NPROCESSORS_ONLN) / 2;
@@ -149,6 +159,7 @@ void sna_threads_init(void)
 		pthread_cond_init(&threads[n].cond, NULL);
 
 		threads[n].func = NULL;
+		threads[n].arg = NULL;
 		if (pthread_create(&threads[n].thread, NULL,
 				   __run__, &threads[n]))
 			goto bail;
@@ -180,6 +191,9 @@ void sna_threads_trap(int sig)
 {
 	pthread_t t = pthread_self();
 	int n;
+
+	if (max_threads == 0)
+		return;
 
 	if (t == threads[0].thread)
 		return;

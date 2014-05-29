@@ -258,7 +258,6 @@ struct kgem_bo *kgem_upload_source_image(struct kgem *kgem,
 					 const void *data,
 					 const BoxRec *box,
 					 int stride, int bpp);
-void kgem_proxy_bo_attach(struct kgem_bo *bo, struct kgem_bo **ptr);
 
 int kgem_choose_tiling(struct kgem *kgem,
 		       int tiling, int width, int height, int bpp);
@@ -553,6 +552,7 @@ static inline void kgem_bo_mark_busy(struct kgem_bo *bo, int ring)
 
 inline static void __kgem_bo_clear_busy(struct kgem_bo *bo)
 {
+	DBG(("%s: handle=%d\n", __FUNCTION__, bo->handle));
 	bo->rq = NULL;
 	list_del(&bo->request);
 

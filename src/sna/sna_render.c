@@ -565,7 +565,7 @@ static struct kgem_bo *upload(struct sna *sna,
 			assert(priv->gpu_damage == NULL);
 			assert(priv->gpu_bo == NULL);
 			assert(bo->proxy != NULL);
-			kgem_proxy_bo_attach(bo, &priv->gpu_bo);
+			priv->gpu_bo = kgem_bo_reference(bo);
 		}
 	}
 
@@ -708,7 +708,7 @@ static int sna_render_picture_downsample(struct sna *sna,
 	struct sna_pixmap *priv;
 	pixman_transform_t t;
 	PixmapPtr tmp;
-	int width, height, size;
+	int width, height, size, max_size;
 	int sx, sy, sw, sh;
 	int error, ret = 0;
 	BoxRec box, b;
@@ -789,6 +789,11 @@ fixup:
 	format = PictureMatchFormat(screen,
 				    pixmap->drawable.depth,
 				    picture->format);
+	if (format == NULL) {
+		DBG(("%s: invalid depth=%d, format=%08x\n",
+		     __FUNCTION__, pixmap->drawable.depth, picture->format));
+		goto fixup;
+	}
 
 	tmp_dst = CreatePicture(0, &tmp->drawable, format, 0, NULL,
 				serverClient, &error);
@@ -818,8 +823,12 @@ fixup:
 	ValidatePicture(tmp_src);
 
 	/* Use a small size to accommodate enlargement through tile alignment */
+	max_size = sna_max_tile_copy_size(sna, sna_pixmap(pixmap)->gpu_bo, priv->gpu_bo);
+	if (max_size == 0)
+		goto cleanup_dst;
+
 	size = sna->render.max_3d_size - 4096 / pixmap->drawable.bitsPerPixel;
-	while (size * size * 4 > sna->kgem.max_copy_tile_size)
+	while (size * size * 4 > max_size)
 		size /= 2;
 
 	sw = size / sx - 2 * sx;
@@ -1262,7 +1271,7 @@ sna_render_picture_extract(struct sna *sna,
 			assert(priv->gpu_damage == NULL);
 			assert(priv->gpu_bo == NULL);
 			assert(bo->proxy != NULL);
-			kgem_proxy_bo_attach(bo, &priv->gpu_bo);
+			priv->gpu_bo = kgem_bo_reference(bo);
 		}
 	}
 
@@ -1659,7 +1668,8 @@ do_fixup:
 		dst = pixman_image_create_bits(channel->pict_format,
 					       w, h, ptr, channel->bo->pitch);
 	else
-		dst = pixman_image_create_bits(picture->format, w, h, NULL, 0);
+		dst = pixman_image_create_bits((pixman_format_code_t)picture->format,
+					       w, h, NULL, 0);
 	if (!dst) {
 		kgem_bo_destroy(&sna->kgem, channel->bo);
 		return 0;
@@ -1846,7 +1856,7 @@ sna_render_picture_convert(struct sna *sna,
 		if (!sna_pixmap_move_to_cpu(pixmap, MOVE_READ))
 			return 0;
 
-		src = pixman_image_create_bits(picture->format,
+		src = pixman_image_create_bits((pixman_format_code_t)picture->format,
 					       pixmap->drawable.width,
 					       pixmap->drawable.height,
 					       pixmap->devPrivate.ptr,

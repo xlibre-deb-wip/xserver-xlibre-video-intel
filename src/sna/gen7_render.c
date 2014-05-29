@@ -92,6 +92,7 @@ struct gt_info {
 		int push_ps_size; /* in 1KBs */
 	} urb;
 	int gt;
+	uint32_t mocs;
 };
 
 static const struct gt_info ivb_gt_info = {
@@ -110,6 +111,7 @@ static const struct gt_info ivb_gt1_info = {
 	.max_wm_threads = (48-1) << IVB_PS_MAX_THREADS_SHIFT,
 	.urb = { 128, 512, 192, 8 },
 	.gt = 1,
+	.mocs = 3,
 };
 
 static const struct gt_info ivb_gt2_info = {
@@ -119,11 +121,11 @@ static const struct gt_info ivb_gt2_info = {
 	.max_wm_threads = (172-1) << IVB_PS_MAX_THREADS_SHIFT,
 	.urb = { 256, 704, 320, 8 },
 	.gt = 2,
+	.mocs = 3,
 };
 
 static const struct gt_info byt_gt_info = {
 	.name = "Baytrail (gen7)",
-	.urb = { 128, 64, 64 },
 	.max_vs_threads = 36,
 	.max_gs_threads = 36,
 	.max_wm_threads = (48-1) << IVB_PS_MAX_THREADS_SHIFT,
@@ -151,6 +153,7 @@ static const struct gt_info hsw_gt1_info = {
 		1 << HSW_PS_SAMPLE_MASK_SHIFT,
 	.urb = { 128, 640, 256, 8 },
 	.gt = 1,
+	.mocs = 5,
 };
 
 static const struct gt_info hsw_gt2_info = {
@@ -162,6 +165,7 @@ static const struct gt_info hsw_gt2_info = {
 		1 << HSW_PS_SAMPLE_MASK_SHIFT,
 	.urb = { 256, 1664, 640, 8 },
 	.gt = 2,
+	.mocs = 5,
 };
 
 static const struct gt_info hsw_gt3_info = {
@@ -173,6 +177,7 @@ static const struct gt_info hsw_gt3_info = {
 		1 << HSW_PS_SAMPLE_MASK_SHIFT,
 	.urb = { 512, 3328, 1280, 16 },
 	.gt = 3,
+	.mocs = 5,
 };
 
 inline static bool is_ivb(struct sna *sna)
@@ -519,9 +524,7 @@ gen7_emit_urb(struct sna *sna)
 static void
 gen7_emit_state_base_address(struct sna *sna)
 {
-	uint32_t mocs;
-
-	mocs = is_hsw(sna) ? 5 << 8 : 3 << 8;
+	uint32_t mocs = sna->render_state.gen7.info->mocs << 8;
 
 	OUT_BATCH(GEN7_STATE_BASE_ADDRESS | (10 - 2));
 	OUT_BATCH(0); /* general */
@@ -1310,7 +1313,7 @@ gen7_bind_bo(struct sna *sna,
 		 (height - 1) << GEN7_SURFACE_HEIGHT_SHIFT);
 	ss[3] = (bo->pitch - 1) << GEN7_SURFACE_PITCH_SHIFT;
 	ss[4] = 0;
-	ss[5] = (is_scanout || bo->io) ? 0 : is_hsw(sna) ? 5 << 16 : 3 << 16;
+	ss[5] = (is_scanout || bo->io) ? 0 : sna->render_state.gen7.info->mocs << 16;
 	ss[6] = 0;
 	ss[7] = 0;
 	if (is_hsw(sna))
@@ -1824,6 +1827,7 @@ gen7_render_video(struct sna *sna,
 		  PixmapPtr pixmap)
 {
 	struct sna_composite_op tmp;
+	struct sna_pixmap *priv = sna_pixmap(pixmap);
 	int dst_width = dstRegion->extents.x2 - dstRegion->extents.x1;
 	int dst_height = dstRegion->extents.y2 - dstRegion->extents.y1;
 	int src_width = frame->src.x2 - frame->src.x1;
@@ -1831,7 +1835,6 @@ gen7_render_video(struct sna *sna,
 	float src_offset_x, src_offset_y;
 	float src_scale_x, src_scale_y;
 	int nbox, pix_xoff, pix_yoff;
-	struct sna_pixmap *priv;
 	unsigned filter;
 	BoxPtr box;
 
@@ -1844,10 +1847,7 @@ gen7_render_video(struct sna *sna,
 	     REGION_EXTENTS(NULL, dstRegion)->x2,
 	     REGION_EXTENTS(NULL, dstRegion)->y2));
 
-	priv = sna_pixmap_force_to_gpu(pixmap, MOVE_READ | MOVE_WRITE);
-	if (priv == NULL)
-		return false;
-
+	assert(priv->gpu_bo);
 	memset(&tmp, 0, sizeof(tmp));
 
 	tmp.dst.pixmap = pixmap;
@@ -2022,6 +2022,7 @@ gen7_composite_picture(struct sna *sna,
 	channel->repeat = picture->repeat ? picture->repeatType : RepeatNone;
 	channel->filter = picture->filter;
 
+	assert(picture->pDrawable);
 	pixmap = get_drawable_pixmap(picture->pDrawable);
 	get_drawable_deltas(picture->pDrawable, pixmap, &dx, &dy);
 
@@ -2036,6 +2037,18 @@ gen7_composite_picture(struct sna *sna,
 		y += dy;
 		channel->transform = NULL;
 		channel->filter = PictFilterNearest;
+
+		if (channel->repeat ||
+		    (x >= 0 &&
+		     y >= 0 &&
+		     x + w < pixmap->drawable.width &&
+		     y + h < pixmap->drawable.height)) {
+			struct sna_pixmap *priv = sna_pixmap(pixmap);
+			if (priv && priv->clear) {
+				DBG(("%s: converting large pixmap source into solid [%08x]\n", __FUNCTION__, priv->clear_color));
+				return gen4_channel_init_solid(sna, channel, priv->clear_color);
+			}
+		}
 	} else
 		channel->transform = picture->transform;
 
@@ -2451,7 +2464,7 @@ gen7_render_composite(struct sna *sna,
 	tmp->op = op;
 	if (!gen7_composite_set_target(sna, tmp, dst,
 				       dst_x, dst_y, width, height,
-				       flags & COMPOSITE_PARTIAL || op > PictOpSrc || dst->pCompositeClip->data))
+				       flags & COMPOSITE_PARTIAL || op > PictOpSrc))
 		goto fallback;
 
 	switch (gen7_composite_picture(sna, src, &tmp->src,

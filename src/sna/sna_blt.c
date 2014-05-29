@@ -815,6 +815,26 @@ sna_picture_is_solid(PicturePtr picture, uint32_t *color)
 }
 
 static bool
+pixel_is_transparent(uint32_t pixel, uint32_t format)
+{
+	unsigned int abits;
+
+	abits = PICT_FORMAT_A(format);
+	if (!abits)
+		return false;
+
+	if (PICT_FORMAT_TYPE(format) == PICT_TYPE_A ||
+	    PICT_FORMAT_TYPE(format) == PICT_TYPE_BGRA) {
+		return (pixel & ((1 << abits) - 1)) == 0;
+	} else if (PICT_FORMAT_TYPE(format) == PICT_TYPE_ARGB ||
+		   PICT_FORMAT_TYPE(format) == PICT_TYPE_ABGR) {
+		unsigned int ashift = PICT_FORMAT_BPP(format) - abits;
+		return (pixel >> ashift) == 0;
+	} else
+		return false;
+}
+
+static bool
 pixel_is_opaque(uint32_t pixel, uint32_t format)
 {
 	unsigned int abits;
@@ -866,6 +886,16 @@ is_white(PicturePtr picture)
 		return fill->color == 0xffffffff;
 	} else
 		return pixel_is_white(get_pixel(picture), picture->format);
+}
+
+static bool
+is_transparent(PicturePtr picture)
+{
+	if (picture->pSourcePict) {
+		PictSolidFill *fill = (PictSolidFill *) picture->pSourcePict;
+		return fill->color == 0;
+	} else
+		return pixel_is_transparent(get_pixel(picture), picture->format);
 }
 
 bool
@@ -1113,11 +1143,28 @@ inline static void _sna_blt_fill_boxes(struct sna *sna,
 	} while (1);
 }
 
+static inline void _sna_blt_maybe_clear(const struct sna_composite_op *op, const BoxRec *box)
+{
+	if (box->x2 - box->x1 >= op->dst.width &&
+	    box->y2 - box->y1 >= op->dst.height) {
+		struct sna_pixmap *priv = sna_pixmap(op->dst.pixmap);
+		if (op->dst.bo == priv->gpu_bo) {
+			priv->clear = true;
+			priv->clear_color = op->u.blt.pixel;
+			DBG(("%s: pixmap=%ld marking clear [%08x]\n",
+			     __FUNCTION__,
+			     op->dst.pixmap->drawable.serialNumber,
+			     op->u.blt.pixel));
+		}
+	}
+}
+
 fastcall static void blt_composite_fill_box_no_offset(struct sna *sna,
 						      const struct sna_composite_op *op,
 						      const BoxRec *box)
 {
 	_sna_blt_fill_box(sna, &op->u.blt, box);
+	_sna_blt_maybe_clear(op, box);
 }
 
 static void blt_composite_fill_boxes_no_offset(struct sna *sna,
@@ -1208,6 +1255,7 @@ fastcall static void blt_composite_fill_box(struct sna *sna,
 			 box->y1 + op->dst.y,
 			 box->x2 - box->x1,
 			 box->y2 - box->y1);
+	_sna_blt_maybe_clear(op, box);
 }
 
 static void blt_composite_fill_boxes(struct sna *sna,
@@ -2343,6 +2391,71 @@ is_clear(PixmapPtr pixmap)
 	return priv && priv->clear;
 }
 
+static inline uint32_t
+over(uint32_t src, uint32_t dst)
+{
+	uint32_t a = ~src >> 24;
+
+#define G_SHIFT 8
+#define RB_MASK 0xff00ff
+#define RB_ONE_HALF 0x800080
+#define RB_MASK_PLUS_ONE 0x10000100
+
+#define UN8_rb_MUL_UN8(x, a, t) do {				\
+	t  = ((x) & RB_MASK) * (a);				\
+	t += RB_ONE_HALF;					\
+	x = (t + ((t >> G_SHIFT) & RB_MASK)) >> G_SHIFT;	\
+	x &= RB_MASK;						\
+} while (0)
+
+#define UN8_rb_ADD_UN8_rb(x, y, t) do {				\
+	t = ((x) + (y));					\
+	t |= RB_MASK_PLUS_ONE - ((t >> G_SHIFT) & RB_MASK);	\
+	x = (t & RB_MASK);					\
+} while (0)
+
+#define UN8x4_MUL_UN8_ADD_UN8x4(x, a, y) do {			\
+	uint32_t r1__, r2__, r3__, t__;				\
+	\
+	r1__ = (x);						\
+	r2__ = (y) & RB_MASK;					\
+	UN8_rb_MUL_UN8(r1__, (a), t__);				\
+	UN8_rb_ADD_UN8_rb(r1__, r2__, t__);			\
+	\
+	r2__ = (x) >> G_SHIFT;					\
+	r3__ = ((y) >> G_SHIFT) & RB_MASK;			\
+	UN8_rb_MUL_UN8(r2__, (a), t__);				\
+	UN8_rb_ADD_UN8_rb(r2__, r3__, t__);			\
+	\
+	(x) = r1__ | (r2__ << G_SHIFT);				\
+} while (0)
+
+	UN8x4_MUL_UN8_ADD_UN8x4(dst, a, src);
+
+	return dst;
+}
+
+static inline uint32_t
+add(uint32_t src, uint32_t dst)
+{
+#define UN8x4_ADD_UN8x4(x, y) do {				\
+	uint32_t r1__, r2__, r3__, t__;				\
+	\
+	r1__ = (x) & RB_MASK;					\
+	r2__ = (y) & RB_MASK;					\
+	UN8_rb_ADD_UN8_rb(r1__, r2__, t__);			\
+	\
+	r2__ = ((x) >> G_SHIFT) & RB_MASK;			\
+	r3__ = ((y) >> G_SHIFT) & RB_MASK;			\
+	UN8_rb_ADD_UN8_rb(r2__, r3__, t__);			\
+	\
+	x = r1__ | (r2__ << G_SHIFT);				\
+} while (0)
+
+	UN8x4_ADD_UN8x4(src, dst);
+	return src;
+}
+
 bool
 sna_blt_composite(struct sna *sna,
 		  uint32_t op,
@@ -2381,8 +2494,8 @@ sna_blt_composite(struct sna *sna,
 		return false;
 	}
 
-	was_clear = sna_drawable_is_clear(dst->pDrawable);
 	tmp->dst.pixmap = get_drawable_pixmap(dst->pDrawable);
+	was_clear = is_clear(tmp->dst.pixmap);
 
 	if (width | height) {
 		dst_box.x1 = dst_x;
@@ -2400,14 +2513,15 @@ sna_blt_composite(struct sna *sna,
 
 	if (op == PictOpClear) {
 clear:
-		if (was_clear)
+		if (was_clear && sna_pixmap(tmp->dst.pixmap)->clear_color == 0) {
+			sna_pixmap(tmp->dst.pixmap)->clear = true;
 			return prepare_blt_nop(sna, tmp);
+		}
 
 		hint = 0;
 		if (can_render(sna)) {
 			hint |= PREFER_GPU;
-			if (dst->pCompositeClip->data == NULL &&
-			    (flags & COMPOSITE_PARTIAL) == 0) {
+			if ((flags & COMPOSITE_PARTIAL) == 0) {
 				hint |= IGNORE_CPU;
 				if (width  == tmp->dst.pixmap->drawable.width &&
 				    height == tmp->dst.pixmap->drawable.height)
@@ -2430,8 +2544,10 @@ clear:
 			region.extents = dst_box;
 			region.data = NULL;
 
-			if (!sna_drawable_move_region_to_cpu(dst->pDrawable, &region,
-							     MOVE_INPLACE_HINT | MOVE_WRITE))
+			hint = MOVE_WRITE | MOVE_INPLACE_HINT;
+			if (flags & COMPOSITE_PARTIAL)
+				hint |= MOVE_READ;
+			if (!sna_drawable_move_region_to_cpu(dst->pDrawable, &region, hint))
 				return false;
 		}
 
@@ -2439,12 +2555,40 @@ clear:
 	}
 
 	if (is_solid(src)) {
+		if ((op == PictOpOver || op == PictOpAdd) && is_transparent(src)) {
+			sna_pixmap(tmp->dst.pixmap)->clear = was_clear;
+			return prepare_blt_nop(sna, tmp);
+		}
 		if (op == PictOpOver && is_opaque_solid(src))
 			op = PictOpSrc;
 		if (op == PictOpAdd && is_white(src))
 			op = PictOpSrc;
-		if (was_clear && (op == PictOpAdd || op == PictOpOver))
-			op = PictOpSrc;
+		if (was_clear && (op == PictOpAdd || op == PictOpOver)) {
+			if (sna_pixmap(tmp->dst.pixmap)->clear_color == 0)
+				op = PictOpSrc;
+			if (op == PictOpOver) {
+				color = over(get_solid_color(src, PICT_a8r8g8b8),
+					     color_convert(sna_pixmap(tmp->dst.pixmap)->clear_color,
+							   dst->format, PICT_a8r8g8b8));
+				op = PictOpSrc;
+				DBG(("%s: precomputing solid OVER (%08x, %08x) -> %08x\n",
+				     get_solid_color(src, PICT_a8r8g8b8),
+				     color_convert(sna_pixmap(tmp->dst.pixmap)->clear_color,
+						   dst->format, PICT_a8r8g8b8),
+				     color));
+			}
+			if (op == PictOpAdd) {
+				color = add(get_solid_color(src, PICT_a8r8g8b8),
+					    color_convert(sna_pixmap(tmp->dst.pixmap)->clear_color,
+							  dst->format, PICT_a8r8g8b8));
+				op = PictOpSrc;
+				DBG(("%s: precomputing solid ADD (%08x, %08x) -> %08x\n",
+				     get_solid_color(src, PICT_a8r8g8b8),
+				     color_convert(sna_pixmap(tmp->dst.pixmap)->clear_color,
+						   dst->format, PICT_a8r8g8b8),
+				     color));
+			}
+		}
 		if (op == PictOpOutReverse && is_opaque_solid(src))
 			goto clear;
 
@@ -2459,11 +2603,15 @@ fill:
 		if (color == 0)
 			goto clear;
 
+		if (was_clear && sna_pixmap(tmp->dst.pixmap)->clear_color == color) {
+			sna_pixmap(tmp->dst.pixmap)->clear = true;
+			return prepare_blt_nop(sna, tmp);
+		}
+
 		hint = 0;
 		if (can_render(sna)) {
 			hint |= PREFER_GPU;
-			if (dst->pCompositeClip->data == NULL &&
-			    (flags & COMPOSITE_PARTIAL) == 0) {
+			if ((flags & COMPOSITE_PARTIAL) == 0) {
 				hint |= IGNORE_CPU;
 				if (width  == tmp->dst.pixmap->drawable.width &&
 				    height == tmp->dst.pixmap->drawable.height)
@@ -2486,8 +2634,10 @@ fill:
 			region.extents = dst_box;
 			region.data = NULL;
 
-			if (!sna_drawable_move_region_to_cpu(dst->pDrawable, &region,
-							     MOVE_INPLACE_HINT | MOVE_WRITE))
+			hint = MOVE_WRITE | MOVE_INPLACE_HINT;
+			if (flags & COMPOSITE_PARTIAL)
+				hint |= MOVE_READ;
+			if (!sna_drawable_move_region_to_cpu(dst->pDrawable, &region, hint))
 				return false;
 		}
 
@@ -2539,9 +2689,14 @@ fill:
 
 	src_pixmap = get_drawable_pixmap(src->pDrawable);
 	if (is_clear(src_pixmap)) {
-		color = color_convert(sna_pixmap(src_pixmap)->clear_color,
-				      src->format, tmp->dst.format);
-		goto fill;
+		if (src->repeat ||
+		    (x >= 0 && y >= 0 &&
+		     x + width  < src_pixmap->drawable.width &&
+		     y + height < src_pixmap->drawable.height)) {
+			color = color_convert(sna_pixmap(src_pixmap)->clear_color,
+					      src->format, tmp->dst.format);
+			goto fill;
+		}
 	}
 
 	alpha_fixup = 0;
@@ -2622,8 +2777,7 @@ fill:
 	hint = 0;
 	if (bo || can_render(sna)) {
 		hint |= PREFER_GPU;
-		if (dst->pCompositeClip->data == NULL &&
-		    (flags & COMPOSITE_PARTIAL) == 0) {
+		if ((flags & COMPOSITE_PARTIAL) == 0) {
 			hint |= IGNORE_CPU;
 			if (width  == tmp->dst.pixmap->drawable.width &&
 			    height == tmp->dst.pixmap->drawable.height)
@@ -2671,7 +2825,7 @@ put:
 
 		if (tmp->dst.bo == NULL) {
 			hint = MOVE_INPLACE_HINT | MOVE_WRITE;
-			if (dst->pCompositeClip->data)
+			if (flags & COMPOSITE_PARTIAL)
 				hint |= MOVE_READ;
 
 			region.extents = dst_box;

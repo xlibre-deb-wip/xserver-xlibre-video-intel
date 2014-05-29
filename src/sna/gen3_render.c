@@ -3093,6 +3093,18 @@ gen3_composite_picture(struct sna *sna,
 		y += dy;
 		channel->transform = NULL;
 		channel->filter = PictFilterNearest;
+
+		if (channel->repeat ||
+		    (x >= 0 &&
+		     y >= 0 &&
+		     x + w < pixmap->drawable.width &&
+		     y + h < pixmap->drawable.height)) {
+			struct sna_pixmap *priv = sna_pixmap(pixmap);
+			if (priv && priv->clear) {
+				DBG(("%s: converting large pixmap source into solid [%08x]\n", __FUNCTION__, priv->clear_color));
+				return gen3_init_solid(channel, priv->clear_color);
+			}
+		}
 	} else {
 		channel->transform = picture->transform;
 		channel->is_affine = sna_transform_is_affine(picture->transform);
@@ -3503,7 +3515,7 @@ gen3_render_composite(struct sna *sna,
 
 	if (!gen3_composite_set_target(sna, tmp, dst,
 				       dst_x, dst_y, width, height,
-				       flags & COMPOSITE_PARTIAL || op > PictOpSrc || dst->pCompositeClip->data)) {
+				       flags & COMPOSITE_PARTIAL || op > PictOpSrc)) {
 		DBG(("%s: unable to set render target\n",
 		     __FUNCTION__));
 		goto fallback;
@@ -5386,9 +5398,8 @@ gen3_render_video(struct sna *sna,
 	DBG(("%s: src:%dx%d (frame:%dx%d) -> dst:%dx%d\n", __FUNCTION__,
 	     src_width, src_height, frame->width, frame->height, dst_width, dst_height));
 
+	assert(priv->gpu_bo);
 	dst_bo = priv->gpu_bo;
-	if (dst_bo == NULL)
-		return false;
 
 	bilinear = src_width != dst_width || src_height != dst_height;
 

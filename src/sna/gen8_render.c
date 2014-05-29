@@ -640,8 +640,13 @@ static void
 gen8_emit_null_depth_buffer(struct sna *sna)
 {
 	OUT_BATCH(GEN8_3DSTATE_DEPTH_BUFFER | (8 - 2));
+#if 0
 	OUT_BATCH(SURFACE_NULL << DEPTH_BUFFER_TYPE_SHIFT |
 		  DEPTHFORMAT_D32_FLOAT << DEPTH_BUFFER_FORMAT_SHIFT);
+#else
+	OUT_BATCH(SURFACE_2D << DEPTH_BUFFER_TYPE_SHIFT |
+		  DEPTHFORMAT_D16_UNORM << DEPTH_BUFFER_FORMAT_SHIFT);
+#endif
 	OUT_BATCH64(0);
 	OUT_BATCH(0);
 	OUT_BATCH(0);
@@ -769,11 +774,7 @@ gen8_emit_invariant(struct sna *sna)
 	OUT_BATCH(1);
 
 #if SIM
-	OUT_BATCH(GEN8_3DSTATE_SAMPLE_PATTERN | (9 - 2));
-	OUT_BATCH(0);
-	OUT_BATCH(0);
-	OUT_BATCH(0);
-	OUT_BATCH(0);
+	OUT_BATCH(GEN8_3DSTATE_SAMPLE_PATTERN | (5 - 2));
 	OUT_BATCH(0);
 	OUT_BATCH(0);
 	OUT_BATCH(0);
@@ -1813,6 +1814,18 @@ gen8_composite_picture(struct sna *sna,
 		y += dy;
 		channel->transform = NULL;
 		channel->filter = PictFilterNearest;
+
+		if (channel->repeat ||
+		    (x >= 0 &&
+		     y >= 0 &&
+		     x + w < pixmap->drawable.width &&
+		     y + h < pixmap->drawable.height)) {
+			struct sna_pixmap *priv = sna_pixmap(pixmap);
+			if (priv && priv->clear) {
+				DBG(("%s: converting large pixmap source into solid [%08x]\n", __FUNCTION__, priv->clear_color));
+				return gen4_channel_init_solid(sna, channel, priv->clear_color);
+			}
+		}
 	} else
 		channel->transform = picture->transform;
 
@@ -2209,7 +2222,7 @@ gen8_render_composite(struct sna *sna,
 	tmp->op = op;
 	if (!gen8_composite_set_target(sna, tmp, dst,
 				       dst_x, dst_y, width, height,
-				       flags & COMPOSITE_PARTIAL || op > PictOpSrc || dst->pCompositeClip->data))
+				       flags & COMPOSITE_PARTIAL || op > PictOpSrc))
 		goto fallback;
 
 	switch (gen8_composite_picture(sna, src, &tmp->src,
@@ -3631,6 +3644,7 @@ gen8_render_video(struct sna *sna,
 		  PixmapPtr pixmap)
 {
 	struct sna_composite_op tmp;
+	struct sna_pixmap *priv = sna_pixmap(pixmap);
 	int dst_width = dstRegion->extents.x2 - dstRegion->extents.x1;
 	int dst_height = dstRegion->extents.y2 - dstRegion->extents.y1;
 	int src_width = frame->src.x2 - frame->src.x1;
@@ -3638,7 +3652,6 @@ gen8_render_video(struct sna *sna,
 	float src_offset_x, src_offset_y;
 	float src_scale_x, src_scale_y;
 	int nbox, pix_xoff, pix_yoff;
-	struct sna_pixmap *priv;
 	unsigned filter;
 	BoxPtr box;
 
@@ -3651,10 +3664,7 @@ gen8_render_video(struct sna *sna,
 	     REGION_EXTENTS(NULL, dstRegion)->x2,
 	     REGION_EXTENTS(NULL, dstRegion)->y2));
 
-	priv = sna_pixmap_force_to_gpu(pixmap, MOVE_READ | MOVE_WRITE);
-	if (priv == NULL)
-		return false;
-
+	assert(priv->gpu_bo);
 	memset(&tmp, 0, sizeof(tmp));
 
 	tmp.dst.pixmap = pixmap;
