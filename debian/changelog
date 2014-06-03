@@ -4,6 +4,8 @@ xserver-xorg-video-intel (2:2.99.911+git20140529-1~exp2) experimental; urgency=m
   * Install intel-virtual-output. (Closes: #749925)
     - New build-deps added: libxinerama-dev, libxrandr-dev, libxdamage-dev,
       libxcursor-dev, libxtst-dev, libxrender-dev, libpixman-1-dev
+  * Stop overriding default upstream acceleration method (i.e. default to SNA
+    instead of UXA).
 
  -- Vincent Cheng <vcheng@debian.org>  Mon, 02 Jun 2014 23:47:23 -0700
 
