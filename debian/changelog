@@ -1,6 +1,9 @@
 xserver-xorg-video-intel (2:2.99.911+git20140529-1~exp2) experimental; urgency=medium
 
   * Add myself to Uploaders.
+  * Install intel-virtual-output. (Closes: #749925)
+    - New build-deps added: libxinerama-dev, libxrandr-dev, libxdamage-dev,
+      libxcursor-dev, libxtst-dev, libxrender-dev, libpixman-1-dev
 
  -- Vincent Cheng <vcheng@debian.org>  Mon, 02 Jun 2014 23:47:23 -0700
 
