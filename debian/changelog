@@ -1,3 +1,9 @@
+xserver-xorg-video-intel (2:2.99.911+git20140529-1~exp2) experimental; urgency=medium
+
+  * Add myself to Uploaders.
+
+ -- Vincent Cheng <vcheng@debian.org>  Mon, 02 Jun 2014 23:47:23 -0700
+
 xserver-xorg-video-intel (2:2.99.911+git20140529-1~exp1) experimental; urgency=low
 
   * New upstream prerelease. (closes: #748753)
