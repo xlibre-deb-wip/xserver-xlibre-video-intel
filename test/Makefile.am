@@ -30,6 +30,12 @@ stress_TESTS += \
 	$(NULL)
 endif
 
+if X11_DRI3
+stress_TESTS += \
+	dri3-test \
+	present-test \
+	$(NULL)
+endif
 check_PROGRAMS = $(stress_TESTS)
 
 noinst_PROGRAMS = lowlevel-blt-bench
@@ -51,6 +57,15 @@ libtest_la_SOURCES += \
 	dri2.c \
 	dri2.h \
 	$(NULL)
+endif
+
+if X11_DRI3
+libtest_la_SOURCES += \
+	dri3.c \
+	dri3.h \
+	$(NULL)
+AM_CFLAGS += $(X11_DRI3_CFLAGS)
+LDADD += $(X11_DRI3_LIBS)
 endif
 
 vsync.avi: mkvsync.sh

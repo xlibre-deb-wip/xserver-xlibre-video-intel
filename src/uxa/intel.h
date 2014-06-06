@@ -78,6 +78,10 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <libudev.h>
 #endif
 
+#if HAVE_DRI3
+#include "misync.h"
+#endif
+
 /* remain compatible to xorg-server 1.6 */
 #ifndef MONITOR_EDID_COMPLETE_RAWDATA
 #define MONITOR_EDID_COMPLETE_RAWDATA EDID_COMPLETE_RAWDATA
@@ -162,7 +166,7 @@ enum last_3d {
 enum dri_type {
 	DRI_DISABLED,
 	DRI_NONE,
-	DRI_DRI2
+	DRI_ACTIVE
 };
 
 typedef struct intel_screen_private {
@@ -324,9 +328,8 @@ typedef struct intel_screen_private {
 	/* 965 render acceleration state */
 	struct gen4_render_state *gen4_render_state;
 
-	enum dri_type directRenderingType;	/* DRI enabled this generation. */
-
-	Bool directRenderingOpen;
+	/* DRI enabled this generation. */
+	enum dri_type dri2, dri3;
 	int drmSubFD;
 	char *deviceName;
 
@@ -356,6 +359,11 @@ typedef struct intel_screen_private {
 	pointer uevent_handler;
 #endif
 	Bool has_prime_vmap_flush;
+
+#if HAVE_DRI3
+	SyncScreenFuncsRec save_sync_screen_funcs;
+#endif
+	void (*flush_rendering)(struct intel_screen_private *intel);
 } intel_screen_private;
 
 #define INTEL_INFO(intel) ((intel)->info)
@@ -399,11 +407,34 @@ extern void intel_mode_disable_unused_functions(ScrnInfoPtr scrn);
 extern void intel_mode_remove_fb(intel_screen_private *intel);
 extern void intel_mode_close(intel_screen_private *intel);
 extern void intel_mode_fini(intel_screen_private *intel);
+extern int intel_mode_read_drm_events(intel_screen_private *intel);
+
+typedef void (*intel_drm_handler_proc)(ScrnInfoPtr scrn,
+                                       xf86CrtcPtr crtc,
+                                       uint64_t seq,
+                                       uint64_t usec,
+                                       void *data);
+
+typedef void (*intel_drm_abort_proc)(ScrnInfoPtr scrn,
+                                     xf86CrtcPtr crtc,
+                                     void *data);
+
+extern uint32_t intel_drm_queue_alloc(ScrnInfoPtr scrn, xf86CrtcPtr crtc, void *data, intel_drm_handler_proc handler, intel_drm_abort_proc abort);
+extern void intel_drm_abort(ScrnInfoPtr scrn, Bool (*match)(void *data, void *match_data), void *match_data);
 
 extern int intel_get_pipe_from_crtc_id(drm_intel_bufmgr *bufmgr, xf86CrtcPtr crtc);
 extern int intel_crtc_id(xf86CrtcPtr crtc);
 extern int intel_output_dpms_status(xf86OutputPtr output);
 extern void intel_copy_fb(ScrnInfoPtr scrn);
+
+int
+intel_get_crtc_msc_ust(ScrnInfoPtr scrn, xf86CrtcPtr crtc, uint64_t *msc, uint64_t *ust);
+
+uint32_t
+intel_crtc_msc_to_sequence(ScrnInfoPtr scrn, xf86CrtcPtr crtc, uint64_t expect);
+
+uint64_t
+intel_sequence_to_crtc_msc(xf86CrtcPtr crtc, uint32_t sequence);
 
 enum DRI2FrameEventType {
 	DRI2_SWAP,
@@ -416,6 +447,12 @@ enum DRI2FrameEventType {
 typedef void (*DRI2SwapEventPtr)(ClientPtr client, void *data, int type,
 				 CARD64 ust, CARD64 msc, CARD64 sbc);
 #endif
+
+typedef void (*intel_pageflip_handler_proc) (uint64_t frame,
+                                             uint64_t usec,
+                                             void *data);
+
+typedef void (*intel_pageflip_abort_proc) (void *data);
 
 typedef struct _DRI2FrameEvent {
 	struct intel_screen_private *intel;
@@ -439,7 +476,11 @@ typedef struct _DRI2FrameEvent {
 
 extern Bool intel_do_pageflip(intel_screen_private *intel,
 			      dri_bo *new_front,
-			      DRI2FrameEventPtr flip_info, int ref_crtc_hw_id);
+			      int ref_crtc_hw_id,
+			      Bool async,
+			      void *pageflip_data,
+			      intel_pageflip_handler_proc pageflip_handler,
+			      intel_pageflip_abort_proc pageflip_abort);
 
 static inline intel_screen_private *
 intel_get_screen_private(ScrnInfoPtr scrn)
@@ -484,6 +525,9 @@ void I830DRI2FrameEventHandler(unsigned int frame, unsigned int tv_sec,
 			       unsigned int tv_usec, DRI2FrameEventPtr flip_info);
 void I830DRI2FlipEventHandler(unsigned int frame, unsigned int tv_sec,
 			      unsigned int tv_usec, DRI2FrameEventPtr flip_info);
+
+/* intel_dri3.c */
+Bool intel_dri3_screen_init(ScreenPtr screen);
 
 extern Bool intel_crtc_on(xf86CrtcPtr crtc);
 int intel_crtc_to_pipe(xf86CrtcPtr crtc);
@@ -690,5 +734,29 @@ static inline Bool intel_pixmap_is_offscreen(PixmapPtr pixmap)
 	struct intel_pixmap *priv = intel_get_pixmap_private(pixmap);
 	return priv && priv->offscreen;
 }
+
+#if HAVE_DRI3
+Bool intel_sync_init(ScreenPtr screen);
+void intel_sync_close(ScreenPtr screen);
+#else
+static inline Bool intel_sync_init(ScreenPtr screen) { return 0; }
+void intel_sync_close(ScreenPtr screen);
+#endif
+
+/*
+ * intel_present.c
+ */
+
+#if 0
+#define DebugPresent(x) ErrorF x
+#else
+#define DebugPresent(x)
+#endif
+
+#if HAVE_PRESENT
+Bool intel_present_screen_init(ScreenPtr screen);
+#else
+static inline Bool intel_present_screen_init(ScreenPtr screen) { return 0; }
+#endif
 
 #endif /* _I830_H_ */

@@ -777,7 +777,7 @@ static int sna_render_picture_downsample(struct sna *sna,
 		goto fixup;
 	}
 
-	if (!sna_pixmap_force_to_gpu(pixmap, MOVE_SOURCE_HINT | MOVE_READ)) {
+	if (!sna_pixmap_move_to_gpu(pixmap, MOVE_SOURCE_HINT | MOVE_READ)) {
 fixup:
 		DBG(("%s: unable to create GPU bo for target or temporary pixmaps\n",
 		     __FUNCTION__));
@@ -2034,7 +2034,6 @@ sna_render_composite_redirect(struct sna *sna,
 			}
 
 			assert(op->dst.bo != t->real_bo);
-			op->dst.bo->unique_id = kgem_get_unique_id(&sna->kgem);
 			op->dst.bo->pitch = t->real_bo->pitch;
 
 			op->dst.x -= box.x1;

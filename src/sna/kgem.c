@@ -1503,7 +1503,7 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 }
 
 /* XXX hopefully a good approximation */
-uint32_t kgem_get_unique_id(struct kgem *kgem)
+static uint32_t kgem_get_unique_id(struct kgem *kgem)
 {
 	uint32_t id;
 	id = ++kgem->unique_id;
@@ -1584,16 +1584,16 @@ static uint32_t kgem_surface_size(struct kgem *kgem,
 		if (tiling) {
 			if (kgem->gen < 030) {
 				tile_width = 128;
-				tile_height = 32;
+				tile_height = 16;
 			} else {
 				tile_width = 512;
-				tile_height = 16;
+				tile_height = 8;
 			}
 		} else {
 			tile_width = 2 * bpp >> 3;
 			tile_width = ALIGN(tile_width,
 					   kgem_pitch_alignment(kgem, flags));
-			tile_height = 2;
+			tile_height = 1;
 		}
 	} else switch (tiling) {
 	default:
@@ -1601,22 +1601,27 @@ static uint32_t kgem_surface_size(struct kgem *kgem,
 		tile_width = 2 * bpp >> 3;
 		tile_width = ALIGN(tile_width,
 				   kgem_pitch_alignment(kgem, flags));
-		tile_height = 2;
+		tile_height = 1;
 		break;
 
-		/* XXX align to an even tile row */
 	case I915_TILING_X:
 		tile_width = 512;
-		tile_height = 16;
+		tile_height = 8;
 		break;
 	case I915_TILING_Y:
 		tile_width = 128;
-		tile_height = 64;
+		tile_height = 32;
 		break;
 	}
+	/* XXX align to an even tile row */
+	if (!kgem->has_relaxed_fencing)
+		tile_height *= 2;
 
 	*pitch = ALIGN(width * bpp / 8, tile_width);
 	height = ALIGN(height, tile_height);
+	DBG(("%s: tile_width=%d, tile_height=%d => aligned pitch=%d, height=%d\n",
+	     __FUNCTION__, tile_width, tile_height, *pitch, height));
+
 	if (kgem->gen >= 040)
 		return PAGE_ALIGN(*pitch * height);
 
@@ -1647,13 +1652,54 @@ static uint32_t kgem_surface_size(struct kgem *kgem,
 	return tile_width;
 }
 
+bool kgem_check_surface_size(struct kgem *kgem,
+			     uint32_t width,
+			     uint32_t height,
+			     uint32_t bpp,
+			     uint32_t tiling,
+			     uint32_t pitch,
+			     uint32_t size)
+{
+	uint32_t min_size, min_pitch;
+	int tile_width, tile_height, tile_size;
+
+	DBG(("%s(width=%d, height=%d, bpp=%d, tiling=%d, pitch=%d, size=%d)\n",
+	     __FUNCTION__, width, height, bpp, tiling, pitch, size));
+
+	if (pitch & 3)
+		return false;
+
+	min_size = kgem_surface_size(kgem, kgem->has_relaxed_fencing, 0,
+				     width, height, bpp, tiling,
+				     &min_pitch);
+
+	DBG(("%s: min_pitch=%d, min_size=%d\n", __FUNCTION__, min_pitch, min_size));
+
+	if (size < min_size)
+		return false;
+
+	if (pitch < min_pitch)
+		return false;
+
+	kgem_get_tile_size(kgem, tiling, min_pitch,
+			   &tile_width, &tile_height, &tile_size);
+
+	DBG(("%s: tile_width=%d, tile_size=%d\n", __FUNCTION__, tile_width, tile_size));
+	if (pitch & (tile_width - 1))
+		return false;
+	if (size & (tile_size - 1))
+		return false;
+
+	return true;
+}
+
 static uint32_t kgem_aligned_height(struct kgem *kgem,
 				    uint32_t height, uint32_t tiling)
 {
 	uint32_t tile_height;
 
 	if (kgem->gen <= 030) {
-		tile_height = tiling ? kgem->gen < 030 ? 32 : 16 : 1;
+		tile_height = tiling ? kgem->gen < 030 ? 16 : 8 : 1;
 	} else switch (tiling) {
 		/* XXX align to an even tile row */
 	default:
@@ -1661,12 +1707,16 @@ static uint32_t kgem_aligned_height(struct kgem *kgem,
 		tile_height = 1;
 		break;
 	case I915_TILING_X:
-		tile_height = 16;
+		tile_height = 8;
 		break;
 	case I915_TILING_Y:
-		tile_height = 64;
+		tile_height = 32;
 		break;
 	}
+
+	/* XXX align to an even tile row */
+	if (!kgem->has_relaxed_fencing)
+		tile_height *= 2;
 
 	return ALIGN(height, tile_height);
 }
@@ -1758,6 +1808,17 @@ static void kgem_bo_binding_free(struct kgem *kgem, struct kgem_bo *bo)
 	}
 }
 
+static void kgem_bo_rmfb(struct kgem *kgem, struct kgem_bo *bo)
+{
+	if (bo->scanout && bo->delta) {
+		DBG(("%s: releasing fb=%d for handle=%d\n",
+		     __FUNCTION__, bo->delta, bo->handle));
+		/* XXX will leak if we are not DRM_MASTER. *shrug* */
+		do_ioctl(kgem->fd, DRM_IOCTL_MODE_RMFB, &bo->delta);
+		bo->delta = 0;
+	}
+}
+
 static void kgem_bo_free(struct kgem *kgem, struct kgem_bo *bo)
 {
 	DBG(("%s: handle=%d, size=%d\n", __FUNCTION__, bo->handle, bytes(bo)));
@@ -1772,6 +1833,7 @@ static void kgem_bo_free(struct kgem *kgem, struct kgem_bo *bo)
 #endif
 
 	kgem_bo_binding_free(kgem, bo);
+	kgem_bo_rmfb(kgem, bo);
 
 	if (IS_USER_MAP(bo->map__cpu)) {
 		assert(bo->rq == NULL);
@@ -1830,8 +1892,6 @@ inline static void kgem_bo_move_to_inactive(struct kgem *kgem,
 	assert_tiling(kgem, bo);
 	ASSERT_IDLE(kgem, bo->handle);
 
-	kgem->need_expire = true;
-
 	if (bucket(bo) >= NUM_CACHE_BUCKETS) {
 		if (bo->map__gtt) {
 			munmap(MAP(bo->map__gtt), bytes(bo));
@@ -1857,6 +1917,8 @@ inline static void kgem_bo_move_to_inactive(struct kgem *kgem,
 			kgem->vma[1].count++;
 		}
 	}
+
+	kgem->need_expire = true;
 }
 
 static struct kgem_bo *kgem_bo_replace_io(struct kgem_bo *bo)
@@ -1960,7 +2022,6 @@ static void kgem_bo_move_to_scanout(struct kgem *kgem, struct kgem_bo *bo)
 {
 	assert(bo->refcnt == 0);
 	assert(bo->scanout);
-	assert(bo->delta);
 	assert(!bo->flush);
 	assert(!bo->snoop);
 	assert(!bo->io);
@@ -1980,11 +2041,15 @@ static void kgem_bo_move_to_scanout(struct kgem *kgem, struct kgem_bo *bo)
 		list_move_tail(&bo->list, &kgem->scanout);
 	else
 		list_move(&bo->list, &kgem->scanout);
+
+	kgem->need_expire = true;
+
 }
 
 static void kgem_bo_move_to_snoop(struct kgem *kgem, struct kgem_bo *bo)
 {
 	assert(bo->reusable);
+	assert(!bo->scanout);
 	assert(!bo->flush);
 	assert(!bo->needs_flush);
 	assert(bo->refcnt == 0);
@@ -2002,6 +2067,31 @@ static void kgem_bo_move_to_snoop(struct kgem *kgem, struct kgem_bo *bo)
 
 	DBG(("%s: moving %d to snoop cachee\n", __FUNCTION__, bo->handle));
 	list_add(&bo->list, &kgem->snoop);
+	kgem->need_expire = true;
+}
+
+static bool kgem_bo_move_to_cache(struct kgem *kgem, struct kgem_bo *bo)
+{
+	bool retired = false;
+
+	DBG(("%s: release handle=%d\n", __FUNCTION__, bo->handle));
+
+	if (bo->prime) {
+		DBG(("%s: discarding imported prime handle=%d\n",
+		     __FUNCTION__, bo->handle));
+		kgem_bo_free(kgem, bo);
+	} else if (bo->snoop) {
+		kgem_bo_move_to_snoop(kgem, bo);
+	} else if (bo->scanout) {
+		kgem_bo_move_to_scanout(kgem, bo);
+	} else if ((bo = kgem_bo_replace_io(bo))->reusable &&
+		   kgem_bo_set_purgeable(kgem, bo)) {
+		kgem_bo_move_to_inactive(kgem, bo);
+		retired = true;
+	} else
+		kgem_bo_free(kgem, bo);
+
+	return retired;
 }
 
 static struct kgem_bo *
@@ -2085,6 +2175,46 @@ void kgem_bo_undo(struct kgem *kgem, struct kgem_bo *bo)
 	assert(bo->exec == NULL);
 }
 
+void kgem_bo_pair_undo(struct kgem *kgem, struct kgem_bo *a, struct kgem_bo *b)
+{
+	if (kgem->nexec > 2)
+		return;
+
+	if (kgem->nexec == 1) {
+		if (a)
+			kgem_bo_undo(kgem, a);
+		if (b)
+			kgem_bo_undo(kgem, b);
+		return;
+	}
+
+	if (a == NULL || b == NULL)
+		return;
+	if (a->exec == NULL || b->exec == NULL)
+		return;
+
+	DBG(("%s: only handles in batch, discarding last operations for handle=%d and handle=%d\n",
+	     __FUNCTION__, a->handle, b->handle));
+
+	assert(a->exec == &kgem->exec[0] || a->exec == &kgem->exec[1]);
+	assert(a->handle == kgem->exec[0].handle || a->handle == kgem->exec[1].handle);
+	assert(RQ(a->rq) == kgem->next_request);
+	assert(b->exec == &kgem->exec[0] || b->exec == &kgem->exec[1]);
+	assert(b->handle == kgem->exec[0].handle || b->handle == kgem->exec[1].handle);
+	assert(RQ(b->rq) == kgem->next_request);
+
+	a->refcnt++;
+	b->refcnt++;
+	kgem_reset(kgem);
+	b->refcnt--;
+	a->refcnt--;
+
+	assert(kgem->nreloc == 0);
+	assert(kgem->nexec == 0);
+	assert(a->exec == NULL);
+	assert(b->exec == NULL);
+}
+
 static void __kgem_bo_destroy(struct kgem *kgem, struct kgem_bo *bo)
 {
 	DBG(("%s: handle=%d, size=%d\n", __FUNCTION__, bo->handle, bytes(bo)));
@@ -2092,11 +2222,15 @@ static void __kgem_bo_destroy(struct kgem *kgem, struct kgem_bo *bo)
 	assert(list_is_empty(&bo->list));
 	assert(bo->refcnt == 0);
 	assert(bo->proxy == NULL);
+	assert(bo->active_scanout == 0);
 	assert_tiling(kgem, bo);
 
 	bo->binding.offset = 0;
 
 	if (DBG_NO_CACHE)
+		goto destroy;
+
+	if (bo->prime)
 		goto destroy;
 
 	if (bo->snoop && !bo->flush) {
@@ -2112,7 +2246,7 @@ static void __kgem_bo_destroy(struct kgem *kgem, struct kgem_bo *bo)
 	if (!IS_USER_MAP(bo->map__cpu))
 		bo->flush = false;
 
-	if (bo->scanout && bo->delta) {
+	if (bo->scanout) {
 		kgem_bo_move_to_scanout(kgem, bo);
 		return;
 	}
@@ -2223,16 +2357,7 @@ static bool kgem_retire__flushing(struct kgem *kgem)
 		if (bo->refcnt)
 			continue;
 
-		if (bo->snoop) {
-			kgem_bo_move_to_snoop(kgem, bo);
-		} else if (bo->scanout && bo->delta) {
-			kgem_bo_move_to_scanout(kgem, bo);
-		} else if ((bo = kgem_bo_replace_io(bo))->reusable &&
-			   kgem_bo_set_purgeable(kgem, bo)) {
-			kgem_bo_move_to_inactive(kgem, bo);
-			retired = true;
-		} else
-			kgem_bo_free(kgem, bo);
+		retired |= kgem_bo_move_to_cache(kgem, bo);
 	}
 #if HAS_DEBUG_FULL
 	{
@@ -2285,19 +2410,7 @@ static bool __kgem_retire_rq(struct kgem *kgem, struct kgem_request *rq)
 		if (bo->refcnt)
 			continue;
 
-		if (bo->snoop) {
-			kgem_bo_move_to_snoop(kgem, bo);
-		} else if (bo->scanout && bo->delta) {
-			kgem_bo_move_to_scanout(kgem, bo);
-		} else if ((bo = kgem_bo_replace_io(bo))->reusable &&
-			   kgem_bo_set_purgeable(kgem, bo)) {
-			kgem_bo_move_to_inactive(kgem, bo);
-			retired = true;
-		} else {
-			DBG(("%s: closing %d\n",
-			     __FUNCTION__, bo->handle));
-			kgem_bo_free(kgem, bo);
-		}
+		retired |= kgem_bo_move_to_cache(kgem, bo);
 	}
 
 	assert(rq->bo->rq == NULL);
@@ -2823,18 +2936,7 @@ void kgem_reset(struct kgem *kgem)
 			if (bo->refcnt || bo->rq)
 				continue;
 
-			if (bo->snoop) {
-				kgem_bo_move_to_snoop(kgem, bo);
-			} else if (bo->scanout && bo->delta) {
-				kgem_bo_move_to_scanout(kgem, bo);
-			} else if ((bo = kgem_bo_replace_io(bo))->reusable &&
-				   kgem_bo_set_purgeable(kgem, bo)) {
-				kgem_bo_move_to_inactive(kgem, bo);
-			} else {
-				DBG(("%s: closing %d\n",
-				     __FUNCTION__, bo->handle));
-				kgem_bo_free(kgem, bo);
-			}
+			kgem_bo_move_to_cache(kgem, bo);
 		}
 
 		if (rq != &kgem->static_request) {
@@ -3179,7 +3281,8 @@ void _kgem_submit(struct kgem *kgem)
 				if (DEBUG_SYNC) {
 					int fd = open("/tmp/batchbuffer", O_WRONLY | O_CREAT | O_APPEND, 0666);
 					if (fd != -1) {
-						write(fd, kgem->batch, batch_end*sizeof(uint32_t));
+						int ignored = write(fd, kgem->batch, batch_end*sizeof(uint32_t));
+						assert(ignored == batch_end*sizeof(uint32_t));
 						close(fd);
 					}
 
@@ -3269,8 +3372,8 @@ void kgem_clean_scanout_cache(struct kgem *kgem)
 		bo = list_first_entry(&kgem->scanout, struct kgem_bo, list);
 
 		assert(bo->scanout);
-		assert(bo->delta);
 		assert(!bo->refcnt);
+		assert(!bo->prime);
 		assert(bo->proxy == NULL);
 
 		if (bo->exec || __kgem_busy(kgem, bo->handle))
@@ -3280,9 +3383,7 @@ void kgem_clean_scanout_cache(struct kgem *kgem)
 		     __FUNCTION__, bo->handle, bo->delta, bo->reusable));
 		list_del(&bo->list);
 
-		/* XXX will leak if we are not DRM_MASTER. *shrug* */
-		do_ioctl(kgem->fd, DRM_IOCTL_MODE_RMFB, &bo->delta);
-		bo->delta = 0;
+		kgem_bo_rmfb(kgem, bo);
 		bo->scanout = false;
 
 		if (!bo->purged) {
@@ -3793,9 +3894,10 @@ struct kgem_bo *kgem_create_for_name(struct kgem *kgem, uint32_t name)
 		return NULL;
 	}
 
+	bo->unique_id = kgem_get_unique_id(kgem);
 	bo->tiling = tiling.tiling_mode;
 	bo->reusable = false;
-	bo->flush = true;
+	bo->prime = true;
 	bo->purged = true; /* no coherency guarantees */
 
 	debug_alloc__bo(kgem, bo);
@@ -3831,8 +3933,16 @@ struct kgem_bo *kgem_create_for_prime(struct kgem *kgem, int name, uint32_t size
 
 	/* Query actual size, overriding specified if available */
 	seek = lseek(args.fd, 0, SEEK_END);
-	if (seek != -1)
+	DBG(("%s: estimated size=%ld, actual=%lld\n",
+	     __FUNCTION__, (long)size, (long long)seek));
+	if (seek != -1) {
+		if (size > seek) {
+			DBG(("%s(name=%d) estimated required size [%d] is larger than actual [%ld]\n", __FUNCTION__, name, size, (long)seek));
+			gem_close(kgem->fd, args.handle);
+			return NULL;
+		}
 		size = seek;
+	}
 
 	DBG(("%s: new handle=%d, tiling=%d\n", __FUNCTION__,
 	     args.handle, tiling.tiling_mode));
@@ -3845,6 +3955,7 @@ struct kgem_bo *kgem_create_for_prime(struct kgem *kgem, int name, uint32_t size
 	bo->unique_id = kgem_get_unique_id(kgem);
 	bo->tiling = tiling.tiling_mode;
 	bo->reusable = false;
+	bo->prime = true;
 	bo->domain = DOMAIN_NONE;
 
 	/* is this a special bo (e.g. scanout or CPU coherent)? */
@@ -4220,10 +4331,8 @@ static void __kgem_bo_make_scanout(struct kgem *kgem,
 	arg.depth = scrn->depth;
 	arg.handle = bo->handle;
 
-	if (gem_set_caching(kgem->fd, bo->handle, DISPLAY) &&
-	    do_ioctl(kgem->fd, DRM_IOCTL_MODE_ADDFB, &arg) == 0) {
+	if (gem_set_caching(kgem->fd, bo->handle, DISPLAY)) {
 		bo->scanout = true;
-		bo->delta = arg.fb_id;
 
 		/* Pre-emptively move the object into the mappable
 		 * portion to avoid rebinding later when busy.
@@ -4234,6 +4343,12 @@ static void __kgem_bo_make_scanout(struct kgem *kgem,
 			*(uint32_t *)bo->map__gtt = 0;
 			bo->domain = DOMAIN_GTT;
 		}
+	}
+
+	if (do_ioctl(kgem->fd, DRM_IOCTL_MODE_ADDFB, &arg) == 0) {
+		DBG(("%s: attached fb=%d to handle=%d\n",
+		     __FUNCTION__, arg.fb_id, arg.handle));
+		bo->delta = arg.fb_id;
 	}
 }
 
@@ -4276,7 +4391,6 @@ struct kgem_bo *kgem_create_2d(struct kgem *kgem,
 
 		list_for_each_entry_reverse(bo, &kgem->scanout, list) {
 			assert(bo->scanout);
-			assert(bo->delta);
 			assert(!bo->flush);
 			assert_tiling(kgem, bo);
 
@@ -4287,7 +4401,7 @@ struct kgem_bo *kgem_create_2d(struct kgem *kgem,
 				/* No tiling/pitch without recreating fb */
 				continue;
 
-			if (!check_scanout_size(kgem, bo, width, height)) {
+			if (bo->delta && !check_scanout_size(kgem, bo, width, height)) {
 				if (first == NULL)
 					first = bo;
 				continue;
@@ -4329,33 +4443,34 @@ struct kgem_bo *kgem_create_2d(struct kgem *kgem,
 				DBG(("%s: recreate fb %dx%d@%d/%d\n",
 				     __FUNCTION__, width, height, scrn->depth, scrn->bitsPerPixel));
 
-				if (bo->tiling != tiling ||
-				    (tiling != I915_TILING_NONE && bo->pitch != pitch)) {
-					if (gem_set_tiling(kgem->fd, bo->handle,
+				if (first->tiling != tiling ||
+				    (tiling != I915_TILING_NONE && first->pitch != pitch)) {
+					if (gem_set_tiling(kgem->fd, first->handle,
 							   tiling, pitch)) {
-						bo->tiling = tiling;
-						bo->pitch = pitch;
+						first->tiling = tiling;
+						first->pitch = pitch;
 					}
 				}
 
-				if (bo->tiling == tiling && bo->pitch == pitch) {
+				if (first->tiling == tiling && first->pitch == pitch) {
 					struct drm_mode_fb_cmd arg;
 
 					VG_CLEAR(arg);
 					arg.width = width;
 					arg.height = height;
-					arg.pitch = bo->pitch;
+					arg.pitch = first->pitch;
 					arg.bpp = scrn->bitsPerPixel;
 					arg.depth = scrn->depth;
-					arg.handle = bo->handle;
+					arg.handle = first->handle;
 
-					do_ioctl(kgem->fd, DRM_IOCTL_MODE_RMFB, &bo->delta);
+					kgem_bo_rmfb(kgem, first);
 					if (do_ioctl(kgem->fd, DRM_IOCTL_MODE_ADDFB, &arg)) {
-						bo->scanout = false;
-						kgem_bo_free(kgem, bo);
+						kgem_bo_free(kgem, first);
 					} else {
-						bo->delta = arg.fb_id;
-						return bo;
+						DBG(("%s: attached fb=%d to handle=%d\n",
+						     __FUNCTION__, arg.fb_id, arg.handle));
+						first->delta = arg.fb_id;
+						return first;
 					}
 				}
 			}
@@ -5718,13 +5833,6 @@ uint32_t kgem_bo_flink(struct kgem *kgem, struct kgem_bo *bo)
 
 	kgem_bo_unclean(kgem, bo);
 
-	/* Henceforth, we need to broadcast all updates to clients and
-	 * flush our rendering before doing so.
-	 */
-	bo->flush = true;
-	if (bo->exec)
-		kgem->flush = 1;
-
 	return flink.name;
 }
 
@@ -5764,6 +5872,7 @@ struct kgem_bo *kgem_create_map(struct kgem *kgem,
 		return NULL;
 	}
 
+	bo->unique_id = kgem_get_unique_id(kgem);
 	bo->snoop = !kgem->has_llc;
 	debug_alloc__bo(kgem, bo);
 

@@ -74,6 +74,7 @@ struct kgem_bo {
 	uint32_t handle;
 	uint32_t target_handle;
 	uint32_t delta;
+	uint32_t active_scanout;
 	union {
 		struct {
 			uint32_t count:27;
@@ -95,6 +96,7 @@ struct kgem_bo {
 	uint32_t io : 1;
 	uint32_t flush : 1;
 	uint32_t scanout : 1;
+	uint32_t prime : 1;
 	uint32_t purged : 1;
 };
 #define DOMAIN_NONE 0
@@ -267,7 +269,13 @@ unsigned kgem_can_create_2d(struct kgem *kgem, int width, int height, int depth)
 #define KGEM_CAN_CREATE_LARGE	0x4
 #define KGEM_CAN_CREATE_GTT	0x8
 
-uint32_t kgem_get_unique_id(struct kgem *kgem);
+bool kgem_check_surface_size(struct kgem *kgem,
+			     uint32_t width,
+			     uint32_t height,
+			     uint32_t bpp,
+			     uint32_t tiling,
+			     uint32_t pitch,
+			     uint32_t size);
 
 struct kgem_bo *
 kgem_replace_bo(struct kgem *kgem,
@@ -541,6 +549,7 @@ static inline bool kgem_bo_is_snoop(struct kgem_bo *bo)
 }
 
 void kgem_bo_undo(struct kgem *kgem, struct kgem_bo *bo);
+void kgem_bo_pair_undo(struct kgem *kgem, struct kgem_bo *a, struct kgem_bo *b);
 
 bool __kgem_busy(struct kgem *kgem, int handle);
 
@@ -684,14 +693,22 @@ static inline bool kgem_bo_can_map__cpu(struct kgem *kgem,
 					struct kgem_bo *bo,
 					bool write)
 {
+	DBG(("%s: handle=%d\n", __FUNCTION__, bo->handle));
 	assert(bo->refcnt);
 
-	if (bo->purged || (bo->scanout && write))
+	if (bo->purged || (bo->scanout && write)) {
+		DBG(("%s: no, writing to scanout? %d, or is stolen [inaccessible via CPU]? %d\n",
+		     __FUNCTION__, bo->scanout && write, bo->purged));
 		return false;
+	}
 
-	if (kgem->has_llc)
+	if (kgem->has_llc) {
+		DBG(("%s: yes, has LLC and target is in LLC\n", __FUNCTION__));
 		return true;
+	}
 
+	DBG(("%s: non-LLC - CPU domain? %d, clean? %d\n",
+	     __FUNCTION__, bo->domain == DOMAIN_CPU, !write || bo->exec == NULL));
 	if (bo->domain != DOMAIN_CPU)
 		return false;
 
