@@ -2313,10 +2313,27 @@ static void kgem_bo_unref(struct kgem *kgem, struct kgem_bo *bo)
 		__kgem_bo_destroy(kgem, bo);
 }
 
-static bool kgem_retire__buffers(struct kgem *kgem)
+static void kgem_buffer_release(struct kgem *kgem, struct kgem_buffer *bo)
 {
-	bool retired = false;
+	assert(bo->base.io);
+	while (!list_is_empty(&bo->base.vma)) {
+		struct kgem_bo *cached;
 
+		cached = list_first_entry(&bo->base.vma, struct kgem_bo, vma);
+		assert(cached->proxy == &bo->base);
+		assert(cached != &bo->base);
+		list_del(&cached->vma);
+
+		assert(*(struct kgem_bo **)cached->map__gtt == cached);
+		*(struct kgem_bo **)cached->map__gtt = NULL;
+		cached->map__gtt = NULL;
+
+		kgem_bo_destroy(kgem, cached);
+	}
+}
+
+void kgem_retire__buffers(struct kgem *kgem)
+{
 	while (!list_is_empty(&kgem->active_buffers)) {
 		struct kgem_buffer *bo =
 			list_last_entry(&kgem->active_buffers,
@@ -2333,11 +2350,9 @@ static bool kgem_retire__buffers(struct kgem *kgem)
 		DBG(("%s: releasing upload cache for handle=%d? %d\n",
 		     __FUNCTION__, bo->base.handle, !list_is_empty(&bo->base.vma)));
 		list_del(&bo->base.list);
+		kgem_buffer_release(kgem, bo);
 		kgem_bo_unref(kgem, &bo->base);
-		retired = true;
 	}
-
-	return retired;
 }
 
 static bool kgem_retire__flushing(struct kgem *kgem)
@@ -2495,7 +2510,6 @@ bool kgem_retire(struct kgem *kgem)
 
 	retired |= kgem_retire__flushing(kgem);
 	retired |= kgem_retire__requests(kgem);
-	retired |= kgem_retire__buffers(kgem);
 
 	DBG(("%s -- retired=%d, need_retire=%d\n",
 	     __FUNCTION__, retired, kgem->need_retire));
@@ -2525,7 +2539,6 @@ bool __kgem_ring_is_idle(struct kgem *kgem, int ring)
 	     __FUNCTION__, ring, rq->bo->handle));
 
 	kgem_retire__requests_ring(kgem, ring);
-	kgem_retire__buffers(kgem);
 
 	assert(list_is_empty(&kgem->requests[ring]));
 	return true;
@@ -2968,7 +2981,7 @@ static int compact_batch_surface(struct kgem *kgem)
 	int size, shrink, n;
 
 	if (!kgem->has_relaxed_delta)
-		return kgem->batch_size;
+		return kgem->batch_size * sizeof(uint32_t);
 
 	/* See if we can pack the contents into one or two pages */
 	n = ALIGN(kgem->batch_size, 1024);
@@ -4387,7 +4400,7 @@ struct kgem_bo *kgem_create_2d(struct kgem *kgem,
 	bucket = cache_bucket(size);
 
 	if (flags & CREATE_SCANOUT) {
-		struct kgem_bo *last = NULL, *first = NULL;
+		struct kgem_bo *last = NULL;
 
 		list_for_each_entry_reverse(bo, &kgem->scanout, list) {
 			assert(bo->scanout);
@@ -4401,11 +4414,8 @@ struct kgem_bo *kgem_create_2d(struct kgem *kgem,
 				/* No tiling/pitch without recreating fb */
 				continue;
 
-			if (bo->delta && !check_scanout_size(kgem, bo, width, height)) {
-				if (first == NULL)
-					first = bo;
+			if (bo->delta && !check_scanout_size(kgem, bo, width, height))
 				continue;
-			}
 
 			if (flags & CREATE_INACTIVE && bo->rq) {
 				last = bo;
@@ -4435,44 +4445,60 @@ struct kgem_bo *kgem_create_2d(struct kgem *kgem,
 			return last;
 		}
 
-		if (first) {
-			ScrnInfoPtr scrn =
-				container_of(kgem, struct sna, kgem)->scrn;
+		if (container_of(kgem, struct sna, kgem)->scrn->vtSema) {
+			ScrnInfoPtr scrn = container_of(kgem, struct sna, kgem)->scrn;
 
-			if (scrn->vtSema) {
-				DBG(("%s: recreate fb %dx%d@%d/%d\n",
-				     __FUNCTION__, width, height, scrn->depth, scrn->bitsPerPixel));
+			list_for_each_entry_reverse(bo, &kgem->scanout, list) {
+				struct drm_mode_fb_cmd arg;
 
-				if (first->tiling != tiling ||
-				    (tiling != I915_TILING_NONE && first->pitch != pitch)) {
-					if (gem_set_tiling(kgem->fd, first->handle,
+				assert(bo->scanout);
+
+				if (size > num_pages(bo) || num_pages(bo) > 2*size)
+					continue;
+
+				if (flags & CREATE_INACTIVE && bo->rq)
+					continue;
+
+				list_del(&bo->list);
+
+				if (bo->tiling != tiling || bo->pitch != pitch) {
+					if (bo->delta) {
+						kgem_bo_rmfb(kgem, bo);
+						bo->delta = 0;
+					}
+
+					if (gem_set_tiling(kgem->fd, bo->handle,
 							   tiling, pitch)) {
-						first->tiling = tiling;
-						first->pitch = pitch;
-					}
-				}
-
-				if (first->tiling == tiling && first->pitch == pitch) {
-					struct drm_mode_fb_cmd arg;
-
-					VG_CLEAR(arg);
-					arg.width = width;
-					arg.height = height;
-					arg.pitch = first->pitch;
-					arg.bpp = scrn->bitsPerPixel;
-					arg.depth = scrn->depth;
-					arg.handle = first->handle;
-
-					kgem_bo_rmfb(kgem, first);
-					if (do_ioctl(kgem->fd, DRM_IOCTL_MODE_ADDFB, &arg)) {
-						kgem_bo_free(kgem, first);
+						bo->tiling = tiling;
+						bo->pitch = pitch;
 					} else {
-						DBG(("%s: attached fb=%d to handle=%d\n",
-						     __FUNCTION__, arg.fb_id, arg.handle));
-						first->delta = arg.fb_id;
-						return first;
+						kgem_bo_free(kgem, bo);
+						break;
 					}
 				}
+
+				VG_CLEAR(arg);
+				arg.width = width;
+				arg.height = height;
+				arg.pitch = bo->pitch;
+				arg.bpp = scrn->bitsPerPixel;
+				arg.depth = scrn->depth;
+				arg.handle = bo->handle;
+
+				if (do_ioctl(kgem->fd, DRM_IOCTL_MODE_ADDFB, &arg)) {
+					kgem_bo_free(kgem, bo);
+					break;
+				}
+
+				bo->delta = arg.fb_id;
+				bo->unique_id = kgem_get_unique_id(kgem);
+
+				DBG(("  2:from scanout: pitch=%d, tiling=%d, handle=%d, id=%d\n",
+				     bo->pitch, bo->tiling, bo->handle, bo->unique_id));
+				assert(bo->pitch*kgem_aligned_height(kgem, height, bo->tiling) <= kgem_bo_size(bo));
+				assert_tiling(kgem, bo);
+				bo->refcnt = 1;
+				return bo;
 			}
 		}
 
@@ -6758,6 +6784,17 @@ struct kgem_bo *kgem_upload_source_image(struct kgem *kgem,
 
 	sigtrap_put();
 	return bo;
+}
+
+void kgem_proxy_bo_attach(struct kgem_bo *bo,
+			  struct kgem_bo **ptr)
+{
+	DBG(("%s: handle=%d\n", __FUNCTION__, bo->handle));
+	assert(bo->map__gtt == NULL);
+	assert(bo->proxy);
+	list_add(&bo->vma, &bo->proxy->vma);
+	bo->map__gtt = ptr;
+	*ptr = kgem_bo_reference(bo);
 }
 
 void kgem_buffer_read_sync(struct kgem *kgem, struct kgem_bo *_bo)

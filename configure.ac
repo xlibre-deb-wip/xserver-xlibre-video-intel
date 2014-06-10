@@ -23,7 +23,7 @@
 # Initialize Autoconf
 AC_PREREQ([2.60])
 AC_INIT([xf86-video-intel],
-        [2.99.911],
+        [2.99.912],
         [https://bugs.freedesktop.org/enter_bug.cgi?product=xorg],
         [xf86-video-intel])
 AC_CONFIG_SRCDIR([Makefile.am])
@@ -69,11 +69,20 @@ case $host_os in
     ;;
 esac
 
+AC_ARG_ENABLE(backlight,
+              AS_HELP_STRING([--disable-backlight],
+			     [Enable control over the backlight [default=yes]]),
+              [backlight="$enableval"],
+              [backlight="yes"])
+if test "x$backlight" = "xyes"; then
+	AC_DEFINE(USE_BACKLIGHT, 1, [Enable control of the backlight])
+fi
+
 AC_ARG_ENABLE(backlight-helper,
               AS_HELP_STRING([--disable-backlight-helper],
 			     [Enable building the backlight helper executable for running X under a normal user [default=auto]]),
               [backlight_helper="$enableval"],)
-AM_CONDITIONAL(BUILD_BACKLIGHT_HELPER, [test "x$backlight_helper" = "xyes"])
+AM_CONDITIONAL(BUILD_BACKLIGHT_HELPER, [test "x$backlight" = "xyes" -a "x$backlight_helper" = "xyes"])
 if test "x$backlight_helper" = "xyes"; then
 	tools_msg="$tools_msg xf86-video-intel-backlight-helper"
 	AC_DEFINE(USE_BACKLIGHT_HELPER, 1, [Enable use of the backlight helper interfaces])
@@ -667,6 +676,16 @@ fi
 AC_MSG_RESULT($accel)
 
 xp_msg=""
+
+AC_ARG_ENABLE(tear-free,
+	      AS_HELP_STRING([--enable-tear-free],
+			     [Enable use of TearFree by default [default=no]]),
+	      [TEARFREE="$enableval"],
+	      [TEARFREE="no"])
+if test "x$TEARFREE" = "xyes"; then
+	AC_DEFINE(TEARFREE,1,[Enable "TearFree" by default])
+	xp_msg="$xp_msg TearFree"
+fi
 
 AC_ARG_ENABLE(rendernode,
 	      AS_HELP_STRING([--enable-rendernode],

@@ -71,6 +71,12 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "git_version.h"
 #endif
 
+#ifdef TEARFREE
+#define ENABLE_TEAR_FREE TRUE
+#else
+#define ENABLE_TEAR_FREE FALSE
+#endif
+
 DevPrivateKeyRec sna_pixmap_key;
 DevPrivateKeyRec sna_gc_key;
 DevPrivateKeyRec sna_window_key;
@@ -627,10 +633,6 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 		sna->flags |= SNA_TRIPLE_BUFFER;
 	DBG(("%s: triple buffer? %s\n", __FUNCTION__, sna->flags & SNA_TRIPLE_BUFFER ? "enabled" : "disabled"));
 
-	if ((sna->flags & (SNA_NO_VSYNC | SNA_NO_FLIP)) == 0 &&
-	    xf86ReturnOptValBool(sna->Options, OPTION_TEAR_FREE, FALSE))
-		sna->flags |= SNA_TEAR_FREE;
-
 	if (xf86ReturnOptValBool(sna->Options, OPTION_CRTC_PIXMAPS, FALSE))
 		sna->flags |= SNA_FORCE_SHADOW;
 
@@ -638,8 +640,6 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 		   sna->tiling & SNA_TILING_FB ? "tiled" : "linear");
 	xf86DrvMsg(scrn->scrnIndex, X_CONFIG, "Pixmaps %s\n",
 		   sna->tiling & SNA_TILING_2D ? "tiled" : "linear");
-	xf86DrvMsg(scrn->scrnIndex, X_CONFIG, "\"Tear free\" %sabled\n",
-		   sna->flags & SNA_TEAR_FREE ? "en" : "dis");
 	xf86DrvMsg(scrn->scrnIndex, X_CONFIG, "Forcing per-crtc-pixmaps? %s\n",
 		   sna->flags & SNA_FORCE_SHADOW ? "yes" : "no");
 
@@ -653,6 +653,12 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 		goto cleanup;
 	}
 	scrn->currentMode = scrn->modes;
+
+	if (sna->flags & SNA_HAS_FLIP &&
+	    xf86ReturnOptValBool(sna->Options, OPTION_TEAR_FREE, ENABLE_TEAR_FREE))
+		sna->flags |= SNA_TEAR_FREE;
+	xf86DrvMsg(scrn->scrnIndex, X_CONFIG, "TearFree %sabled\n",
+		   sna->flags & SNA_TEAR_FREE ? "en" : "dis");
 
 	xf86SetGamma(scrn, zeros);
 	xf86SetDpi(scrn, 0, 0);
