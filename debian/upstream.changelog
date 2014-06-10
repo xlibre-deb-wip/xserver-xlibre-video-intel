@@ -1,3 +1,3318 @@
+commit cb7b27a705b477ae1b369786eea13fb14506d54a
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 2 09:36:13 2014 +0100
+
+    2.99.912 snapshot
+
+commit 52e2aa0939eee3566e4d6ee3a34f8acd93570530
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 10 08:49:41 2014 +0100
+
+    sna: Queue a flip after fixing up a failed flip
+    
+    After a flip fails, we try to update the CRTC manually to new fb.
+    However, the caller is still expecting to receive an event though the
+    drm device to notify when the flips are complete. In order to maintain
+    that ABI, we need to queue another flip after the fixup (to the
+    currently bound fb).
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 68ac3039e4170b318952213311534cd213cbaff7
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 9 22:01:05 2014 +0100
+
+    sna: Fix the typo in the last commit
+    
+    Rewording the sentence and reordering the arguments was a mistake!
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit fdb8f490441b0ba91fdf530b982cedc2f2acf122
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 9 21:46:37 2014 +0100
+
+    sna: Add an extra error message before disabling a CRTC
+    
+    One of the error paths to disable a pipe was lacking a log message.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c1154ae1070806b8da1aad29f75c9659f2a403df
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 9 17:04:47 2014 +0100
+
+    configure: Allow disabling control over the backlight
+    
+    Some OS prefer to control the backlight themselves through another
+    daemon and so do not want X interfering.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit bb2d5e3696b52835770a62a951f7ed7e51291f88
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 9 16:30:15 2014 +0100
+
+    sna: Defer the copy back from the shadow CRTC bo until we allocate the target
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b00a60b41736c399f849217626f246e6e7d1f7eb
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 9 15:03:23 2014 +0100
+
+    sna: Fix cut'n'paste DBG error
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8901a99afb7be4f6f377a8e84e62e5d768c8443d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 9 14:56:02 2014 +0100
+
+    sna/dri2: Avoid trying to flip between bo with different pitches
+    
+    It could happen that we create front/back buffers with different
+    pitches. The kernel refuses to flip between such buffers, and so we will
+    hit some fallback paths that try to fix up the failed flips. Circumvent
+    such by avoiding the flip.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 16574754a99c4472c1c90c426d9c1665a898f1d6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 9 14:54:26 2014 +0100
+
+    sna: Fixup normal flips between different pitches
+    
+    Apply the manual CRTC fixup in case pageflipping fails. This can happen
+    if the pitches between the front and back differ for example.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 3932e97057fca16615adaefbc1eb25a0d51a1d8b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 9 08:58:15 2014 +0100
+
+    sna/dri2: Allow TearFree flipping to individual CRTC
+    
+    Baby step. We first take advantage of TearFree to allow us to redirect a
+    single CRTC to the DRI2 frontbuffer and so allow a fullscreen game
+    covering a single monitor to avoid expensive blits when running in a
+    multi-monitor setup.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit af3130cbba8375b9060a3a8cef5b03189d01c419
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 9 13:13:25 2014 +0100
+
+    sna: Do not rely on udev_monitor_receive_device() being non-blocking
+    
+    The libudev documentation says that is it non-blocking by default, but
+    experience shows otherwise.
+    
+    Reported-by: Sedat Dilek <sedat.dilek@gmail.com>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 981af18190be772b469761bc124b9f46c19d5093
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 8 16:55:07 2014 +0100
+
+    uxa: Do not FreePixmap(screen->devPrivate)
+    
+    Prevent the crash caused by
+    
+    commit 444a1f7a8802999e27ecf5f6eb598df2206f7277
+    Author: Brendan King <brendan.king@imgtec.com>
+    Date:   Thu Apr 24 11:37:45 2014 +0100
+    
+        fb: fix screen pixmap leak on server reset
+    
+        Call FreePixmap() instead of free() to destroy the screen pixmap in
+        fbCloseScreen().
+    
+        Signed-off-by: Frank Binns <frank.binns@imgtec.com>
+        Reviewed-by: Keith Packard <keithp@keithp.com>
+        Signed-off-by: Keith Packard <keithp@keithp.com>
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 86f2cae45048158154eb2b1dbb181c3e1d6a8bf7
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 8 15:18:34 2014 +0100
+
+    sna/dri2: DBG compile fix
+    
+    Typo in DBG message.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6153141fa6e1328a007efe6862ff2d7b4adaaf83
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 8 14:48:20 2014 +0100
+
+    sna/dri2: Allow xchg to replace the frontbuffer when all outputs are off
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 9306a148cbf1a2471540f3301136d57e93197593
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 8 09:40:19 2014 +0100
+
+    sna/dri2: Use xchg for offscreen drawables where applicable
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 22cd7c873edd0b641e54e81d643ec6b0ea921f88
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 8 08:46:27 2014 +0100
+
+    sna/dri2: Explicitly drain the pending event queue before swapping
+    
+    As there may be some latency between the wakeup and the queue, do a
+    final check if there is a pending vblank event before we decide whether
+    to chain up or perform an immediate flip.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 258e0cda1d69f74736d0e0be014996173e275543
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 8 08:21:38 2014 +0100
+
+    sna/dri2: Mark frames under construction
+    
+    As we may recurse into the vblank handler whilst waiting for the
+    TearFree shadow, we need to be careful that we do not queue the frame
+    from the vblank handler that we are in the process of constructing.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit eb8f3a9b345c75023b49512c2db57527d906db7f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 8 07:45:52 2014 +0100
+
+    sna/dri2: Check the xchg against the Pixmap size
+    
+    As the Window may be resized between the client sending the swap request
+    and the xchg being processed, we need to validate the swap against the
+    final target not the buffers supplied originally by the client.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit fc64ba821749ed0a0197a69d9bae81957aceb55f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jun 7 23:27:49 2014 +0100
+
+    sna: Restore backlight when switching to VT
+    
+    fbcon doesn't adjust the backlight when it takes over. Therefore if X
+    performs a VT switch whilst its outputs are off, fbcon wakes up with no
+    backlight and users are unhappy. Make the assumption that whoever takes
+    over the VT will set the outputs as it desires, and that the failsafe
+    value is to then turn the backlight to full.
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=67025
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ecd80a3a997b11307445c50621d4e86e241a5b22
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jun 7 14:57:10 2014 +0100
+
+    sna: Fix reporting of TearFree
+    
+    The switch was moved after we checked whether pageflips are supported,
+    but the log message was left in the old location.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 035be60f332e4729fb90261605ef6c06a9d9c903
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jun 7 13:26:12 2014 +0100
+
+    sna: Release CRTC on VT switch
+    
+    In order to free up memory and improve our bookkeeping when the X server
+    is switched away from the current VT, disable the CRTC.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 717e00facd27696c6b8a1a6c343b2f94bfa2b59b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jun 7 09:07:16 2014 +0100
+
+    sna: Allow TearFree to be enabled by default via configure
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit dcb64b55092ea3da6adf357305d65b58d848db7b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jun 7 08:30:38 2014 +0100
+
+    sna: Fix TearFree for non-compositors
+    
+    The tearfree code forgot to update the shadow bo, so after the first
+    flip it would be rendering to the scanout anyway and flip to itself
+    periodically.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c65fab07402a338f015c2b339e996beca783c2bf
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 6 22:07:44 2014 +0100
+
+    sna: Fix no relaxed delta path for gen4+
+    
+    This is for debug purposes only.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a378196fddcf3043257a7e56225060e5e36cfa7b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 6 16:58:45 2014 +0100
+
+    sna: Auto-retire upload proxies
+    
+    This was disabled in
+    
+    commit 9f4f855ba37966fb91d31e9081d03cf72affb154
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Mon May 26 07:06:18 2014 +0100
+    
+        sna: Implicit release of upload buffers considered bad
+    
+    as retiring the buffers during the command setup could free one of the
+    earlier bo used in the command. But discarding the snooped bo could
+    still be advantageous. So restore the automatic discard of upload
+    proxies, but make sure we only do between operations.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+    Cc: Matti Hämäläinen <ccr@tnsp.org>
+
+commit 23840bd329cf4da3a4bdd5a1a466125a95473534
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 6 16:10:29 2014 +0100
+
+    sna: Only allow the inplace copy to replace a complete overwritten GPU bo
+    
+    And double check after recreating the new GPU bo that is still mappable.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 283ff8cbe4137f46cc027dd6aadc69d0270cb33d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 6 15:04:25 2014 +0100
+
+    sna: Rearrange scanout_flush checking to avoid potential crash
+    
+    With a shadow, we may never attach a GPU bo to the frontbuffer, so be
+    careful when checking the scanout not to dereference that NULL pointer.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 694ff54aca16ccf39e94d505942eb857b3101d7d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 6 13:34:18 2014 +0100
+
+    sna: Report KMS driver version
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0ebcef4f2ebe82e9b90589aa4266a9228e2b5fdb
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 6 11:39:57 2014 +0100
+
+    man: Update notes about TearFree
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1f943a7d92d0e3a8895ba7d539cfc5e726bcc8b7
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 6 11:25:47 2014 +0100
+
+    sna/dri2: Restore flush on front buffers after swapping bo
+    
+    Fallout from commit 8369166349c92a20d9a2e7d0256e63f66fe2682b
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Wed Jun 4 08:29:51 2014 +0100
+    
+        sna/dri2: Enable immediate buffer exchanges
+    
+    We set the flush hint too early, as we may need to swap the GPU bo for a
+    more appropriate buffer for DRI.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c6cd10f536e099277cdc46643725a5a50ea8b525
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 5 22:43:37 2014 +0100
+
+    sna: Hook up a backlight udev monitor for external changes
+    
+    Changes to the backlights are notified through uevents. Hooking up a
+    udev monitor to listen out for external changes to the backlight (e.g.
+    through ACPI function keys, or by the user writing to
+    /sys/class/backlight directly) is easier than enabling polling on the
+    backlight sysfs file using X's select() mechanism.
+    
+    Since we listen to backlight changes, we have to be careful not to
+    confuse the side-effects of disabling connectors (which may cause either
+    ourselves or the kernel to turn off the backlight) with the user value.
+    
+    Many thanks to Alexander Mezin for the suggestion to use udev for
+    tracking the notifications for external changes to the backlight.
+    
+    Reported-by: Alexander Mezin <mezin.alexander@gmail.com>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=79699
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b545e10c50cbb2dd6f9fd53369667bed0d8f1b51
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 5 15:54:32 2014 +0100
+
+    sna: When the output is off, report the cached backlight value
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f0b8720807d9c1994e6db91a607efe4711b0d1ca
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 5 15:31:54 2014 +0100
+
+    sna: Inline calls to save/restore backlight around output DPMS
+    
+    The intertwined logic was a little confusing to read mixed between the
+    functions, so inline it.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 9f7775158341c8384da870e06cab200deddf48c1
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 5 15:31:27 2014 +0100
+
+    sna: Set initial output DPMS state from kernel
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 9e02fe269dc79ff867d1d2cb3a8673ee2861bd56
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 5 15:49:03 2014 +0100
+
+    sna: Make sure we recompute the vblank interval after reconfiguring the CRTC
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 51909f37ed6405c38f1c46a4012952be79031994
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 5 14:54:55 2014 +0100
+
+    sna: Skip marking the CRTC as damaged for TearFree
+    
+    As we have reorder the application of damage on a TearFree frontbuffer
+    to before we attach the CRTC, we do not need to then schedule the update
+    afterwards (until it gets drawn by the client).
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c7efe88a895a692e5f840562a09dac385508db57
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 5 14:50:04 2014 +0100
+
+    sna: Fix DBG compilation
+    
+    Update the DBG to reflect the new arguments to sna_damage_reduce_all()
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 9566fc0ccc71bc4fcd6bf83b567a41cc5366f5ee
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 5 12:26:23 2014 +0100
+
+    sna: Curry parameters to sna_damage_all()
+    
+    It is far easily to pass the PixmapPtr into the function and have it
+    pluck out the width and height than do so in all callers.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1327918f91dce2051b809594db5a3ed555934612
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 5 12:04:29 2014 +0100
+
+    sna: Mark CPU as all damaged when discarding a busy GPU bo
+    
+    When we discard a GPU bo, we need to make sure that the remaining
+    content is marked as only accessible via the CPU shadow pointer.
+    
+    Regression from commit 65301412ecf2d55ab55a2d7faeaa048d4ee8b1d0
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Sat May 17 20:59:38 2014 +0100
+    
+        sna: Discard active GPU buffers before uploading into them
+    
+    Reported-by: Jan Alexander Steffens <jan.steffens@gmail.com>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=79517
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8369166349c92a20d9a2e7d0256e63f66fe2682b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 4 08:29:51 2014 +0100
+
+    sna/dri2: Enable immediate buffer exchanges
+    
+    The primary benefit of this is avoid the extra blit when using a
+    compositor and instead propagate the compositor flip on the frontbuffer
+    to the scanout, or equivalently allows a fullscreen game to flip onto
+    the scanout without intervention by TearFree.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 08148896196443a8582c30b47ff546acca78d69c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 3 15:48:55 2014 +0100
+
+    configure: XORG_DRIVER_CHECK_EXT does not create CFLAGS/LIBS variables
+    
+    XORG_DRIVER_CHECK_EXT only adds the package name to the list of
+    REQUIRED_MODULES (which is later passed to pkg-config). For our optional
+    dependencies, we must do a later call to pkg-config to verify the
+    package is available and then remember to include the includes with the
+    CFLAGS.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0c81041e9b42f9df0c86c88c8648dd20ed26d0ab
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 3 15:39:50 2014 +0100
+
+    configure: Remove xf86driproto from REQUIRED_MODULES
+    
+    We only depend upon the original DRI1 infrastructure when building i810
+    with DRI support. So unless that is true, do not throw an error if the
+    legacy protocol is absent.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 689ee76a14da7e5f98997ac427f457af840dea3f
+Author: Adam Jackson <ajax@redhat.com>
+Date:   Tue Jun 3 10:26:46 2014 -0400
+
+    configure: Don't link the driver against libX11
+    
+    78dc0c04745ad4485b994f67833f4a155749f01d added REQUIRED_MODULES to the
+    driver link line for... some reason.  That pulled in the libs from the
+    XF86DRI check, which near as I can tell has always been wrong, all of
+    the other extension checks just look for the protocol module and
+    xextproto doesn't define dri1 protocol in any case.
+    
+    Signed-off-by: Adam Jackson <ajax@redhat.com>
+
+commit 8297c969ae749ef58d259b2ded2231b928efba43
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 3 09:47:27 2014 +0100
+
+    sna: Replace the bo for tiled uploads if not suitable and being replaced
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1c55d0447dba5bbde5be3903b273e04e3c9d084f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 3 12:43:51 2014 +0100
+
+    sna: Allow replacements to cancel operations between both bo under a Pixmap
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a82bfb033448eb61bf8cc7f5358be019f0cc28e6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 3 09:28:24 2014 +0100
+
+    sna: Discard unwanted damage when promoting to a full CPU migration
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4cafd1fbb1a2441a9ba5dac7f2a0e1b3f5957c62
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 2 16:01:10 2014 +0100
+
+    sna: Fix early return in download using the GPU
+    
+    In commit 961139f5878572ebea268a0bbf47caf05af9093f
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Fri May 30 09:45:15 2014 +0100
+    
+        sna: Use manual detiling for downloads
+    
+    the code for deciding when to use the GPU was refactored into a new
+    function that also performed the transfer, but failed to notice the
+    early return.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d6a412812c19fe4698752d2589ead4965048b107
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 2 10:32:11 2014 +0100
+
+    sna: Use CPU mmappings for linear uploads
+    
+    The other half of the commit that accidentally got included with
+    
+    commit bb49222a514b1d6041f3d9530a22f5701377118b
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Mon Jun 2 08:25:52 2014 +0100
+    
+        sna: Add DBG hints for using inplace CPU mmappings
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 454367f5945dd17a7cfc566b1986654fc976cabe
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 2 09:25:01 2014 +0100
+
+    Only enable the new Cursor API for the next pre-release of Xorg
+    
+    Make sure we can compile against the pre-release tarballs at the expense
+    of an innocuous compile warning if compiled against xserver.git
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ff36e1f7546e0ac4d6e831e5cf8d1317792ed7af
+Author: Keith Packard <keithp@keithp.com>
+Date:   Tue Nov 19 15:20:44 2013 -0800
+
+    uxa: Add Present extension support
+    
+    Signed-off-by: Keith Packard <keithp@keithp.com>
+    Reviewed-by: Eric Anholt <eric@anholt.net>
+    
+    Conflicts:
+    	configure.ac
+    	src/uxa/intel.h
+    	src/uxa/intel_driver.c
+
+commit 14ff08c2827d36f7f08256dc57b84aaf80d17ab4
+Author: Keith Packard <keithp@keithp.com>
+Date:   Tue Nov 19 23:20:38 2013 -0800
+
+    uxa: Restructure DRM event handling.
+    
+    This refactors the drm interrupt handling logic quite a bit, both to
+    allow for either DRI2 or Present handlers, but also to eliminate
+    passing pointers through the kernel. Passing pointers left the kernel
+    holding the only reference to some internal X server data structures.
+    
+    After a server reset, the X server would end up using stale pointers
+    stored in those structures. Using simple integers makes it possible to
+    empty the queue of pending interrupt data and then ignore the stale
+    kernel data.
+    
+    Signed-off-by: Keith Packard <keithp@keithp.com>
+    Reviewed-by: Eric Anholt <eric@anholt.net>
+
+commit 7f28b1cfa20eb4fc11c1a9c1e0c0fac7847be72e
+Author: Keith Packard <keithp@keithp.com>
+Date:   Tue Nov 19 22:58:33 2013 -0800
+
+    uxa: Support 64-bit MSC values. Handle kernel vageries about MSC reporting
+    
+    The kernel sometimes reports bogus MSC values, especially when
+    suspending and resuming the machine. Deal with this by tracking an
+    offset to ensure that the MSC seen by applications increases
+    monotonically, and at a reasonable pace.
+    
+    Also, provide a full 64 bits of MSC value by noticing wrapping and
+    tracking the high 32-bits of MSC separately.
+    
+    Signed-off-by: Keith Packard <keithp@keithp.com>
+    Reviewed-by: Eric Anholt <eric@anholt.net>
+    
+    Conflicts:
+    	src/uxa/intel_dri.c
+
+commit dd6db82680b05cde4a47116b7096c054f3837e20
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 9 20:26:19 2014 +0100
+
+    uxa: Add DRI3 and miSyncShm support
+    
+    Based on a patch by Keith Packard.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 975b9798be77b30cbed485583d0ccb48318708f7
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 21 08:58:24 2014 +0100
+
+    sna: Add support for Present
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d8eb87f84f88ad2df42c6fed1d93df76589a14e3
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 8 16:25:32 2014 +0100
+
+    sna: Add support for DRI3
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0fbe8995d51b4643f1cf06c07da8b4b5ac5ae7c3
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 22 11:17:35 2014 +0100
+
+    sna: Relax tiling height restrictions
+    
+    Only force the even-tile-row alignment if we have an old GPU with an old
+    kernel that doesn't perform conservative alignment for us (as required).
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 67b37332bd45dd4cea297107bfdc9df21984fdcd
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue May 20 15:37:13 2014 +0100
+
+    intel-virtual-output: Add DRI3 xfer path
+    
+    Just as proof-of-principle.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 9cf6cd9726ed5ba73bb8c38c06f7b5c78706309b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 21 12:52:18 2014 +0100
+
+    Add rudimentary tests for Present
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6ab6734369fbd902a23109f4c3626df9d529891c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 9 11:08:15 2014 +0100
+
+    Add rudimentary tests for DRI3
+    
+    This is a simple little test to create a pixmap from a local bo, copy it
+    to a normal pixmap, then read it back by importing it into anther local
+    bo. It tests the fundamental mechanisms of opening a DRI3 render device,
+    importing into pixmaps, exporting into /buffers and a read-barrier.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d6240d197be1e752c0de26fbf84fc8fa8d55383c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 14 07:55:03 2014 +0100
+
+    intel: Clear structs for valgrind
+    
+    When probing the module, clear structs passed into unknown ioctls to
+    keep valgrind quiet.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d27c948a4382c4024ce5e76f1ea82103fc8e9d66
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 9 13:58:37 2014 +0100
+
+    intel: Add common routines and configure probing for DRI3
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8a02886a24c8699374a39a9363e72bec0e7bbe30
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 30 21:09:34 2014 +0100
+
+    sna/dri2: Use real async flips
+    
+    Presuming that we have both kernel support and Xorg support, of course.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c17d704a5baa0c902994f035d3da39d77d31fef3
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 30 21:21:00 2014 +0100
+
+    sna: Enable kernel support for asynchronous flips
+    
+    If a flip fails, attempt to restore the previous working configuration
+    (using a modeset) then disable further flipping.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c95a4002d1d27937731c59e84254ccb3b1246ccd
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 1 08:44:13 2014 +0100
+
+    sna/dri2: Hide MSC reported as going backwards
+    
+    OML_sync_control mandates that MSC must be monotonic, so if the kernel
+    reports that they go backwards, lie.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b1c07c20a371795a8dc4102f83fe542d62d8a4e6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat May 31 21:58:13 2014 +0100
+
+    sna/dri2: Always force the async blits to be immediate
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1b5f91e14226799ef4ec6461de93fa9193ef2ebc
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat May 31 21:41:45 2014 +0100
+
+    sna/dri2: Decouple spent flip
+    
+    If the flip is already completed before we finish the previous flip, the
+    drawable has been replaced already and we can unchain the flip queue.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0ee1940a4ffc1901534fa3bf15adb427527a8c20
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat May 31 13:21:04 2014 +0100
+
+    sna/dri2: Mark queued flip MSC as the one after next
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2df4466adae7f299eac3f7fd3e5f33ee4b22e53f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 30 13:27:32 2014 +0100
+
+    sna/gen8: Clear all URB push constant allocations
+    
+    A little paranoia to clear the unused portion of the URB and dedicate it
+    to VS entries.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1618d6cfa63e31ebaedadf575dcbdf5b07451bde
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 30 12:14:40 2014 +0100
+
+    sna/gen8: Set GT level
+    
+    We use the GT level to decide how favourable it is to use the GPU in
+    various circumstances, now set it.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit bb49222a514b1d6041f3d9530a22f5701377118b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 2 08:25:52 2014 +0100
+
+    sna: Add DBG hints for using inplace CPU mmappings
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 487df2e7b105b996c4d620ec2af6331ebc167f47
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 2 08:30:57 2014 +0100
+
+    sna: Silence a DBG compiler warning
+    
+    kgem.c: In function '_kgem_submit':
+    kgem.c:3243:12: warning: ignoring return value of 'write', declared with attribute warn_unused_result [-Wunused-result]
+           write(fd, kgem->batch, batch_end*sizeof(uint32_t));
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ffbe0aa1851c35cc2403633ca493e9fc6a471fd4
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 30 18:41:39 2014 +0100
+
+    sna: Reuse the first scanout bo
+    
+    The path of last resort is meant to reuse the first scanout bo if they
+    all busy (since it will be the oldest). It chased a dangling pointer
+    instead.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 40fe1f2c09a98ac75b05db3663d29ee1a64ed280
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 30 18:30:47 2014 +0100
+
+    sna: Do not allow imported buffers to be cached
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit fc1f9b91ae2c761e4b126daecab13e13ae2534d3
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 30 18:11:16 2014 +0100
+
+    sna: Mark all caches for expiration
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 3dac734bb0fb0ae1febfef9a9289cf830a87be1c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 30 10:31:37 2014 +0100
+
+    test: Only compute the masked pixel value if depth!=32
+    
+    Minor saving for when we use a8r8g8b8.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 961139f5878572ebea268a0bbf47caf05af9093f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 30 09:45:15 2014 +0100
+
+    sna: Use manual detiling for downloads
+    
+    If we can CPU mmap the GPU bo, prefer to do so for migration to the CPU
+    as this saves an extra serialisation step.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 93d3df493d359f76ea710441d891a0333e755fb8
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 30 22:49:05 2014 +0100
+
+    sna: Unexport kgem_get_unique_id()
+    
+    This should always be set during bo creation
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 792584fa740dbc81b72fd4f4bdf27d65b9c046cf
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 28 14:00:26 2014 +0100
+
+    sna/dri2: Reorder declarations to compile on old Xorg
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 562c47fc21b9029ebff29b53d2be590df4329264
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 28 12:51:18 2014 +0100
+
+    Silence CLang (almost)
+    
+    Fix up all the warnings about implicit enum conversions. The
+    container_of() macro remains defunct.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6282fc9d0d3b2899be52ca4a43a3d9313e9049a6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 28 10:42:58 2014 +0100
+
+    sna/dri2: Fix the continuation mode for old style triple buffering
+    
+    Otherwise we end up sending too many SwapCompletes back to the client
+    and confusing ourselves.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 916354164bcb149e1323a3219d85e7bba6e61e04
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue May 27 20:16:55 2014 +0100
+
+    sna: Fix the depth/format on the temporary shadow Pictures
+    
+    When scaling the output, we re-render onto the scanout using a call to
+    Composite, for which we create temporary Pictures. In most cases, the
+    mismatching depth/format goes unnoticed, but along one particular
+    fallback path, we use those to create a new Picture but the mismatching
+    format results in a segfault.
+    
+    Reported-by: Matti Hämäläinen <ccr@tnsp.org>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=79320
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d8360bd74f5b62a27c019c65ed9001cac8bf43ed
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue May 27 20:14:02 2014 +0100
+
+    sna: Handle bad picture format/depth mismatches
+    
+    Scaling the output feed in an invalid picture->format/depth combination
+    which causes the fallback downsampling function to explode. Whilst this
+    is a bug in the higher layer, we can handle the error anyway.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=79320
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 93b319cf9a355e8400b864046cdb4cfb56b657a0
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 23 13:16:50 2014 +0100
+
+    uxa: Silence the compiler over a couple of unused variables
+    
+    intel_driver.c: In function 'I830LeaveVT':
+    intel_driver.c:1085:24: warning: unused variable 'intel' [-Wunused-variable]
+      intel_screen_private *intel = intel_get_screen_private(scrn);
+                            ^
+    intel_driver.c: In function 'I830EnterVT':
+    intel_driver.c:1102:24: warning: unused variable 'intel' [-Wunused-variable]
+      intel_screen_private *intel = intel_get_screen_private(scrn);
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e6ee0679374f8fc80cb34693f80affe6ea676ddb
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 23 14:29:42 2014 +0100
+
+    uxa: Silence compiler for warnings in Cursor API changes
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4321e8decd7be9daaa49c6ab4e8bb9bd66faae31
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 23 14:29:42 2014 +0100
+
+    sna: Silence compiler for warnings in Cursor API changes
+    
+    The API changed again in the RC, so update to keep the compiler quiet.
+    At the same time, protect against the ARGB_CURSOR struct changes.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2a0dc7ed4961d5bda08bb583a7a6a2cc633b27e4
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon May 26 08:23:45 2014 +0100
+
+    sna/dri2: Move scanout processing from frame event to global
+    
+    The scanout is a global property, track it as so. The primary benefit to
+    this is it strengthens our assertions that we never hand out an active
+    scanout for use as a back buffer.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 05f149285b429c7b3f25ac8049477230aaef512c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun May 25 07:14:53 2014 +0100
+
+    sna/dri2: Defer reallocation of backbuffer until request
+    
+    If we defer the reallocation of the backbuffer until the client requests
+    the set of current buffers (with GetBuffers), then we can often avoid
+    allocating the fresh backbuffer as the flip often retires before the
+    client is ready.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e8d8f754ebf77f17a4666c8f649907bee50313bd
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 23 15:52:20 2014 +0100
+
+    sna/dri2: Make the swap-limit transitions more obvious
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 9f4f855ba37966fb91d31e9081d03cf72affb154
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon May 26 07:06:18 2014 +0100
+
+    sna: Implicit release of upload buffers considered bad
+    
+    Currently upload buffers are automatically decoupled when the buffer is
+    retired. As retiring can happen during command setup after we have
+    selected which bo to render with, this can free the bo we plan to use.
+    Which is bad.
+    
+    Instead of making the release of upload buffers automatic, we manually
+    check whether the buffer is idle before use as a source to consider
+    scrapping it and replacing it with a real GPU bo. This is likely to keep
+    upload buffers alive for longer (limiting reuse between Pixmaps but
+    making reuse of the buffer within a Pixmap more likely) which is both
+    good and bad. (Good - may improve the content cache, bad - may increase
+    the amount of memory used by upload buffers for arbitrary long periods.)
+    
+    Reported-by: Matti Hämäläinen <ccr@tnsp.org>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=79238
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b508d8f3318c42a2a87b7731789b1d03610e9b46
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon May 26 06:54:03 2014 +0100
+
+    sna: Assert that we do not replace active IO buffers
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=79238
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 605fcd9050efc816ac8163e8d626f466d98261c2
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 23 13:34:38 2014 +0100
+
+    sna/dri2: Handle allocation failure adding frame events gracefully
+    
+    Now that we do not preallocate the storage for the chain in the Window
+    devPrivates, we need to check for an allocation failure.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 36a4a654da87b22f7ce31d1ca99389cedb57eee8
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 23 12:48:10 2014 +0100
+
+    sna/dri2: Tidy add/remove chain to use the common DRI2 private
+    
+    The code is more readable directly updating the private rather than
+    hiding the pointer chasing through the opaque lookups.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 417997f3892b3a5fe43f5951dbde1476092ec82c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 23 12:40:10 2014 +0100
+
+    sna/dri2: Handle offscreen Window and Pixmap with CRTC tracking
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d3781e19cfc3edf61b69617cd60da1e421de8ffc
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 23 11:16:56 2014 +0100
+
+    test/dri2: Restore original configuration after testing
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1d6106c2893f2783611715960a0f5099ef54b4a0
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 23 10:11:10 2014 +0100
+
+    sna/dri2: Combine the DRI2 Window privates together into a single struct
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d6c4e72f1a8008818fc0e5c19c9dc147f1794777
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 23 10:03:39 2014 +0100
+
+    sna/dri2: Free the private CRTC tracker on each window
+    
+    Remember to clean up our privates when the window is destroyed.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 43fd06ee7d95db4114ce7b0261685380a48a8708
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 23 09:03:17 2014 +0100
+
+    sna/dri2: Adjust current msc / target seq between CRTCs
+    
+    The target_msc supplied by the client is required to be monotonic. Since
+    the client does not know which CRTC the window is on, they do not
+    control from which pipe we derive the MSC, and so we need to adjust the
+    hardware values such that the client only ever sees a monotonic value.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c8decdbccdefa87b635d871a8295608961f0d22e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 23 09:13:31 2014 +0100
+
+    test/dri2: Check validity of MSC across CRTC
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a6613a8fe3908433ee33a167f57a0fae4e785a22
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 22 23:48:20 2014 +0100
+
+    sna/dri2: Queue the flip immediately for the next frame
+    
+    If we compute that we want to flip on the next frame, queue it
+    immediately rather than take a round trip through the kernel and risk
+    missing the vblank.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 24443c6c897278a8a196bf4a8df9fab4485f38b4
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 22 22:47:35 2014 +0100
+
+    sna/dri2: Tidy computation of target sequence
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a767ad2e50a503e2b979c976a502ff358064b820
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 22 21:18:10 2014 +0100
+
+    sna/dri2: Use the timestamps stored on the CRTC
+    
+    Now that we store the information for the swap completion on the CRTC,
+    we don't need to pass it around inside the frame event.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 5d80af306677b6d0c52487707bbbcf8de065803b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 22 13:04:31 2014 +0100
+
+    sna/dri2: Tweak flip continuation
+    
+    Minor tidying to the returned target_msc and a useful assertion.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8d1e9afb60a61bf490a282a16db1c15a9ad7d077
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 22 12:34:05 2014 +0100
+
+    intel-virtual-output: Probe after claiming virtual output
+    
+    Rerun a detection cycle after claiming the virtual output so that it is
+    hidden again.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=78293
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0f0cd87c66a4e373ab9b26626514d43b5f4978e5
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 22 10:04:09 2014 +0100
+
+    sna/dri2: DBG fixes
+    
+    Update the DBG statements to match current code.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 80dfbaa3c39e1c56aaa9f8951e3bbcc30a9b748d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 22 00:24:07 2014 +0100
+
+    sna/dri2: Move fixed array allocations to per-crtc
+    
+    Replace the fixed size MAX_PIPES array by moving the vblank handling to
+    per-crtc.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 9b21237a1caa369133e6ba972e2ec39feac21bcc
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 21 23:40:36 2014 +0100
+
+    sna/dri2: Maintain sequence calculation in 64bits
+    
+    Avoid casting down to 32bits at the begining of the calculation to only
+    then compare against the full 64bit values later.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c548f231c1d59f578dfb113c549b5b6e015e7c5a
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 21 23:35:19 2014 +0100
+
+    sna/dri2: Fix WaitMSC to maintain the vblank counters
+    
+    Fix WaitMSC to also use 64 bit counters and maintain the last vblank
+    notifications.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1f237bb6db9724358eca0467362c03dc6a41dc4a
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 21 23:02:52 2014 +0100
+
+    sna/dri2: Apply a margin of error to the sequence wrap detection
+    
+    If we have a queue of events, we may set the msc from a recent vblank
+    query only to then process an older vblank event and declare the counter
+    wrapped.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 00d9396f6bf0bbbdfca7cdb1cbdbde8f0b2ad59c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 21 20:00:56 2014 +0100
+
+    sna: Fix attachment of the default monitor to the first output
+    
+    Broke during code motion in
+    
+    commit add84cd8a8dc6d285912d0ea3a3a3e7faa9e0942
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Fri May 2 13:21:02 2014 +0100
+    
+        sna: Perform dynamic connector discovery
+    
+    Reported-and-tested-by: Jay Little <jaylittle@jaylittle.com>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=79015
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 5168a160a1385c23d275d616f2649d5cae7c15d9
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 21 19:16:32 2014 +0100
+
+    sna/dri2: Decouple queued events
+    
+    Becareful when reaping a chain on a destroyed window as some events may
+    be queued ahead.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 66e14c96d0ddede90e36084a80a97c3f16c2b386
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 21 18:38:36 2014 +0100
+
+    sna/dri2: Limit pending swaps to 1 when queueing a future blit
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit bf4475d29de589a0d0e71dfb895d19a635f8cc3e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 21 11:31:29 2014 +0100
+
+    sna/dri2: Tidy conditional use of XORG_CAN_TRIPLE_BUFFER
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0b3ea29727075bf2b0d86bbeca7dd78201936913
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 21 08:26:21 2014 +0100
+
+    sna/dri2: Tidy recording of the last swap sequence number and time
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 183a0728ba52be9d052f5a5f6e6b54c4a9ee8253
+Author: Dave Airlie <airlied@redhat.com>
+Date:   Wed May 21 12:41:58 2014 +1000
+
+    uxa: fix getmsc to not fail hard
+    
+    If some outputs go away we race with this call and apps
+    get X errors and fall over. Do what SNA does and don't
+    bother trying.
+    
+    Signed-off-by: Dave Airlie <airlied@redhat.com>
+
+commit 2dbe76c4925e02b8ec20b986069e2ff38cea5bba
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 21 07:38:35 2014 +0100
+
+    sna/dri2: Tidy computation of 64bit ust
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a82f6a7594ee13170aba5bac7fb57cd5550b27ee
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue May 20 12:20:38 2014 +0100
+
+    sna/dri2: Client cannot be NULL, so drop the checks
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c548427e6d3a3fb50acec4b405b9d0ea977d3cc9
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue May 20 16:36:31 2014 +0100
+
+    sna: Only mark the scanout as being busy for writes (not solitary reads)
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 61df0ffc0be8d934d86ac45c67da910479998cc7
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue May 20 12:07:50 2014 +0100
+
+    sna/dri2: Verify that the reference pipe is still active for flipping
+    
+    We rely on the reference pipe to drive the event wake up. If we issue a
+    deferred flip, there is a chance that the user could rearrange the
+    screen on another crtc whilst otherwise preserving the screen geometry.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 197ab0cda06c44aa1a2b17bf69ac08612811b107
+Author: Dave Airlie <airlied@gmail.com>
+Date:   Tue May 20 07:45:14 2014 +0100
+
+    uxa: fix pageflips on 3 head scenarios
+    
+    While fixing up UXA for MST I eventually fell over this bug.
+    
+    Signed-off-by: Dave Airlie <airlied@redhat.com>
+    [ickle: replace constant with macro to track pipe-dependent code]
+
+commit bfd0e41d5c7b8bff28ff429b26f4c977e4c37d12
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon May 19 12:31:49 2014 +0100
+
+    sna: Fix assertions for combining shadow transforms and TearFree
+    
+    When the RandR shadow buffer is enabled we set the sna_crtc->transform
+    flag. We set the crtc->transform_in_use only when coordinate transforms
+    are required - i.e. we may enable the shadow buffer if a CRTC is out of
+    bounds, but otherwise has no transformation. That confused the asserts.
+    
+    Reported-by: Zdenek Kabelac <zkabelac@redhat.com>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1a84875c21b7113f55e6ce0c4a1f914524aa3f97
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 16 15:05:31 2014 +0100
+
+    sna: Switch iterators over to real CRTCs only
+    
+    Many loops only want to walk the real CRTCs, so update the loop bounds
+    to be explicit and assert that they are the real ones.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 65301412ecf2d55ab55a2d7faeaa048d4ee8b1d0
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat May 17 20:59:38 2014 +0100
+
+    sna: Discard active GPU buffers before uploading into them
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f5e43058465d33025d99d83927d1ce6a8e103ff9
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 16 22:45:45 2014 +0100
+
+    sna: Do not mark an upload as a potential replace if the dst is pinned
+    
+    This saves us from trying to optimise for an operation that cannot
+    happen as we cannot replace the destination buffer.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit df297e9fafe1a7de1036f3151f93de67661c2a4e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 16 18:20:06 2014 +0100
+
+    sna: Userptr lands upstream, enable.
+    
+    No longer an optional feature of an experimental kernel!
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 89e8f2b35bbbcaac23dd1d3fc42e83d8214a9130
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 16 10:14:57 2014 +0100
+
+    sna/dri2: Update the swap type for chained flips
+    
+    We stash the pending flip mode into the closure, but failed to copy that
+    over to the right field when continuing with a chain of flips. The
+    impact was that we would fail to issue the required SwapComplete to
+    unblock the clients.
+    
+    Fixes regression from
+    commit 96ce362ba40bf9560fb1aa27a6ae5fdd2a8bd428
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Tue May 13 09:46:45 2014 +0100
+    
+        sna/dri2: Do not rate-limit vblank=0 swaps
+    
+    Reported-by: francisbrwn
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e73d51247be5018fe53346f991e2f178c917cb13
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 15 23:00:53 2014 +0100
+
+    sna/video: Only migrate the destination window
+    
+    By using move-area-to-gpu and specifying that we overwrite the target
+    area, we can optimize away any needless damage migration.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 10c18b1a4631ebab5508f4308c73129f2111e964
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 15 21:50:41 2014 +0100
+
+    intel-virtual-output: Mark the source SHMPixmap as writeable
+    
+    This is fortunately a no-op, as it gets initialized to zero already
+    (that is the pixmap is writeable). However, we may as well do the right
+    thing...
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b21fc65b23fcbb2b9a04eb92e3719d88e2d026dc
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 15 11:23:16 2014 +0100
+
+    intel: Update PCI IDs for Cherryview
+    
+    Copied from kernel commit 7d87a7f709650bde4d7d63117f25ee1c095da5dd
+    Author: Ville Syrjälä <ville.syrjala@linux.intel.com>
+    Date:   Wed Apr 9 18:19:04 2014 +0300
+    
+        srm/i915/chv: Add Cherryview PCI IDs
+    
+    and also includes non-functional changes from
+    
+    commit fd3c269f8ff940cc0fbb3b7f7e84c0572f6f759a
+    Author: Zhao Yakui <yakui.zhao@intel.com>
+    Date:   Thu Apr 17 10:37:35 2014 +0800
+    
+        drm/i915: Split the BDW device definition to prepare for dual BSD rings on BDW GT3
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2afeef0c3ffeae768198fc08c9f365ccd28b7f5d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 15 11:28:48 2014 +0100
+
+    sna: Mark the CHV vsync method as unknown
+    
+    Similar to the story with Baytrail, vsync is a lost art.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d33e77d58a6f6f23e87943530197f8dc2b076981
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 16 09:59:25 2014 +0100
+
+    sna: Handle driver failures more gracefully
+    
+    Avoid busy-spinning waiting for the cache to expire after a failure. Try
+    to free up any overdue expiration, then if we still fail, we free the
+    entire cache. Currently, it would spin over the expiration until all
+    items were overdue and then freed.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0625185f4772f1c7f8e8d7f265432fd77cdd27fc
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 14 12:40:18 2014 +0100
+
+    intel-virtual-output: Make it possible to disable building via configure
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c179003b10845b43a7a8958a99b1bf1c6617252c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 14 16:15:24 2014 +0100
+
+    sna/dri2: Ensure new immediate blits are queued behind outstanding swaps
+    
+    OML_sync_control:
+        If there are multiple outstanding swaps for the same window, at most
+        one such swap can be satisfied per increment of MSC.  The order of
+        satisfying outstanding swaps of a window must be the order they were
+        issued.
+    
+    The only challenge is to keep both this behaviour and vblank_mode=0
+    benchmarking.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 84d0790453089be5d1034037065df1ea37ad48fe
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 14 11:37:51 2014 +0100
+
+    sna: After disabling the TearFree shadow, flush any pending flips
+    
+    If we complete a flip after resizing and recreating the TearFree shadow,
+    we may process the flip completion events whilst the output is only
+    partially reconfigured.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 68181f0b530934d74f48cb36022c17b29a76cb75
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 14 07:46:43 2014 +0100
+
+    sna/dri2: Carefully check for a completed swap
+    
+    We have to open-code kgem_bo_is_busy() in order to avoid prematurely
+    retiring the rq->bo. The unfortunate outcome here is that the bo may be
+    recycled for a new batch before it is finally released from the request.
+    
+    Reported-by: Zdenek Kabelac <zkabelac@redhat.com>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 9f76133e71f1a7cb44ed2f98762ba8626f1e85e6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue May 13 12:46:39 2014 +0100
+
+    sna/dri2: Tighten reporting of faked flip events
+    
+    GetDrawableMSC is specified as returning the frame counter and timestamp
+    of the last flip event associated with the drawable, not the current
+    hardware timestamp.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 96ce362ba40bf9560fb1aa27a6ae5fdd2a8bd428
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue May 13 09:46:45 2014 +0100
+
+    sna/dri2: Do not rate-limit vblank=0 swaps
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b7316feeda552a88245dadde9dadd9b40b8a4992
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 14 07:46:00 2014 +0100
+
+    sna: Add some DBG to track rogue requests
+    
+    In particular allow the pointer cache to be disabled for valgrind.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 692555cc03c3a3632d2eaacdbbe800afdefd9f77
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 8 15:22:44 2014 +0100
+
+    sna: Rename DRI2 files, functions and variables
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 09e26d38e9eca33e27fd0b30524e75814d5d3ad9
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 14 08:42:48 2014 +0100
+
+    sna: Avoid promoting SHM Pixmaps for DRI
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 7303c6c75df135d2d01f126f240a270ad26201c6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon May 12 09:56:51 2014 +0100
+
+    sna: Check for PRIME scanouts
+    
+    Query the cache level on imported dma-bufs to see if they need special
+    handling.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ad01e1c8700caeaf0288b72450646d7ebe7cce93
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 8 13:02:15 2014 +0100
+
+    sna: Fix another assignment inside an assert
+    
+    Another recent introduction, spotted by Rinat Ibragimov.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e78a00c5da922024ac64270fae0797d98d1d6e57
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 8 06:45:43 2014 +0100
+
+    sna: Add an xorg.conf option for removing unused outputs
+    
+    Clients are not yet ready for outputs that disappear at runtime, often
+    unexpectedly dieing with asynchronous BadOutput errors. A simple
+    workaround is to not remove any output just yet - but allow users to opt
+    in via xorg.conf, i.e.
+    
+    Section "Device"
+      Option "DeleteUnusedDP12Displays" "true"
+    EndSection
+    
+    The name chosen is to be consistent with the nvidia driver, which did
+    MST first and encountered all of these issues first, and has also been
+    adopted for -modesetting. If this is combined with persistent output
+    naming (i.e. based on DisplayPort branch topology), the number of
+    outputs presented to the user should be static.
+    
+    Instead of removing the outputs, we have to mark them detached instead
+    to avoid throwing errors from the kernel.
+    
+    Based on the patch for -modesetting by Dave Airlie.
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a93157587a82c699e7df76fb482c49569f0686b9
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 7 21:20:56 2014 +0100
+
+    sna: Tidy thread handling under valgrind
+    
+    If valgrind is running, keep it simple and avoid using unknown
+    instructions (causing valgrind to die with SIGILL).
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit efd9e9c3eeb83b9e5725fa642066925d608c059d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 7 21:19:57 2014 +0100
+
+    sna/dri: Use move-area-to-gpu to handle clipped regions more efficiently
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1385ca9eeb26b0b82b623da619a65036830ccceb
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 7 21:19:32 2014 +0100
+
+    sna: Initialize value read through ioctl to please valgrind
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 7d516589ba9d0325e57e08d41becff64f81e2d00
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 7 17:49:15 2014 +0100
+
+    sna/dri: Implement TripleBuffering using DRI2SwapLimit
+    
+    An addition to DRI2 that was overlooked at the time, was the support
+    added for having multiple outstanding swap requests in the core. The
+    importance of this is that we can then send the SwapComplete reply after
+    the pageflip is completed and not before as we currently do to fake
+    triple buffering - in clear violation of OML_sync_control.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 18416b5162e6d6e5415916c55c935b08c980d7f3
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 7 13:49:13 2014 +0100
+
+    sna: Don't assign in an assert
+    
+    That just nullifies the point of the assert in the first place.
+    
+    Spotted-by: Joakim Tjernlund
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0250a4f4ba5b765fe4e9be585e03c92aa2376402
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 7 12:40:01 2014 +0100
+
+    sna: Fix bogus assertion about conn->encoder_id
+    
+    The connector's encoder_id is only set if the output is active.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c410f0cd982cad8de440727b0ad7d9268b89a704
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 7 11:04:10 2014 +0100
+
+    sna: Set desired mode after rediscover during VT switch
+    
+    When switching back to the VT, rerun the output discovery (if such an
+    event was pending) before we attempt to set the desired modes.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c38512e12e879ae8932528a9cac5ffbf4ea138c0
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 7 11:01:30 2014 +0100
+
+    sna: Run output discovery before modes query
+    
+    If we keep the separate discovery uevent, we need to run it first in the
+    cases where we get combined discovery+hotplug events.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 7aefd003bb65cc52a74dfcfd8af4b67a364343ff
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 7 10:13:53 2014 +0100
+
+    sna: Fix unattached outputs for ZaphodHeads
+    
+    We need to preserve possible_crtcs for the later check that we can use
+    the output with the particular ZaphodHead (which owns a CRTC).
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c5bad6daaaa60fa8970eaf4a1ce485cd4c72c2fd
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed May 7 07:53:11 2014 +0100
+
+    intel-virtual-output: Disable remote CRTC using the remote Display!
+    
+    Reported-by: Kirill Müller <mail@kirill-mueller.de>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=78293
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 632d3dfe215c38f2dd052625ea8ec34582dfafef
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue May 6 12:24:37 2014 +0100
+
+    sna: Treat encoder id array as invariant
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f62dfd8f518bb4117d395f81b684340dc4f1ede5
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue May 6 07:37:59 2014 +0100
+
+    sna: Allow connectors without an associated encoder
+    
+    In the future, we may see a setup where connectors are created without
+    being attached to a specific encoder, instead associated with multiple
+    generic encoders - such as DP MST sink devices. To handle this, we need
+    to recheck their active encoder at runtime after branch configuration
+    events (or possibly hotplug).
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ea602f7e10c6319c4213776b49f2ae25739af316
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue May 6 06:58:35 2014 +0100
+
+    sna: Discard the TearFree damage when doing a full CPU migration
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b8d71e029cec5c8d1c7e344331b86d2e27f6bc24
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon May 5 20:59:24 2014 +0100
+
+    sna: Tidy computation of clone/crtcs for fake outputs
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 77507909a18b687698f6d4e436ef66d942308fc3
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon May 5 19:43:25 2014 +0100
+
+    intel-virtual-output: Grab the server whilst cleanging up the local output
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 56126d00503fd9bc6fe30781ecddb2fb67de817b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon May 5 18:17:01 2014 +0100
+
+    sna: Refine hints to allow inplace writes whilst compositing aligned traps
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 464ef44ab1d691a4bffecbe88be8182adf9fd4ff
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon May 5 14:49:31 2014 +0100
+
+    intel-virtual-output: Copy existing CRTC information
+    
+    If we fail to disable the remote output during initialisation, copy the
+    current configuration in order to try and keep the bookkeeping in order.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 194f9332d35601178ae3595bc17a3f52f5644cb9
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon May 5 14:29:16 2014 +0100
+
+    intel-virtual-output: Try disabling Panning after disabling CRTC
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 5279ebf56449a9b9edd28ff23e9c8a20af792795
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon May 5 13:06:11 2014 +0100
+
+    intel-virtual-output: Mark ShmPixmap destinations as writeable
+    
+    In order to prevent a subsequent BadAccess when we try to use it as a
+    ShmPixmap, we need to mark the segment as writeable.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=78293
+
+commit a93d2d4f910dc66fe7114a4f44bf8098e3f7ae7a
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon May 5 13:03:14 2014 +0100
+
+    intel-virtual-output: Check for errors whilst creating ShmPixmaps
+    
+    Creating a ShmPixmap may cause an asynchronous BadAccess error, so wrap
+    the construction with XSync and check for an error before proceeding.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=78293
+
+commit 45892b3a63613af67e249e9ad006f2b2002570c0
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon May 5 12:41:06 2014 +0100
+
+    intel-virtual-output: Record shm/randr/xinerama queries in DBG log
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6c9f216d7ce7c329b1008cb09c9de55396e0e6b1
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon May 5 12:38:51 2014 +0100
+
+    intel-virtual-output: Check error state when disabling CRTC
+    
+    Only mark an output as disabled if we do successfully disable it. This
+    will require a little more work to make sure that such errors are
+    cleanly propagated back to the host...
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ef178f7d6955e12383c64ad9ee706db0e931992e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon May 5 09:37:56 2014 +0100
+
+    sna: Fix loop iteration whilst deleting connectors
+    
+    If we remove a connector/output, we need to not advance the iterator or
+    else we skip over an output (as the array is reduces inside the loop).
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8fd13a52072c2f8f12f934deaba1ef9ddb16d5f9
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon May 5 09:32:59 2014 +0100
+
+    sna: Reorder connector initialisation to avoid leak
+    
+    If the output was ignored, we would leak the allocations. However, we
+    can check the output name after the first GETCONNECTOR/GETENCODER
+    request before any allocations.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 55f567f9d8dd1bbc21acf30f02d394e54ddc8157
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun May 4 12:13:25 2014 +0100
+
+    sna/dri: Report the last known MSC whilst the pipe is off
+    
+    From OML_sync_control:
+    "The graphics MSC value is incremented once for each screen refresh.
+    For a non-interlaced display, this means that the graphics MSC value
+    is incremented for each frame."
+    
+    When the pipe is disabled, return the last known MSC such that the
+    reported value is always monotonic and consistent with the pipe when it
+    is active again. That also is consistent with OML_sync_control which
+    says that the MSC is a vertical refresh counter, and by implication does
+    not increase whilst the pipe is off.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 080e9f99857081bca063c67afb7c98854d1f61f4
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun May 4 11:59:40 2014 +0100
+
+    sna: Prefer PrimaryOutput for timing signals
+    
+    If the drawable is even partially on the PrimaryOutput, use that pipe
+    for determining synchronisation counters and synchronised updates.
+    
+    OML_sync_control:
+    	"For a multi-monitor system, the monitor used to
+    	 determine MSC is screen 0 of <display>."
+    
+    The PrimaryOutput is the nearest approximation we have to "screen 0". We
+    also deviate in handling what hapens when that screen is off, which is
+    not mentioned at all in OML_sync_control.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 828bd9e250b7d9dd1dc4185c0179237e9b21d8bf
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 2 17:13:29 2014 +0100
+
+    sna: Reorder cursor initialisation
+    
+    It helps to initialise the cursors after we setup one of the values we
+    depend on.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 38f82655e0bc8f26250f56e9a25aedd30b46360c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 2 12:30:43 2014 +0100
+
+    sna: Remove incorrect cursor assertion
+    
+    Ideally, we want to assert that we have sufficient stashed cursors to
+    allocate for the unused CRTCS, so something like
+    assert(num_stash + num_active_cursors >= 0);
+    
+    Reported-by: Zdenek Kabelac <zkabelac@redhat.com>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 430152da82f496ac47f33ce1eca65d154af38752
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 2 16:57:27 2014 +0100
+
+    compat: Add missing wrapper for RegionSubtract
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit add84cd8a8dc6d285912d0ea3a3a3e7faa9e0942
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 2 13:21:02 2014 +0100
+
+    sna: Perform dynamic connector discovery
+    
+    One of the side-effects of MST is that we need to support dynamic
+    attachment and removal of displays as the branch hierachy changes.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 3123dec3dfc55fbca32d32eaaa8ac29396b28c49
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 2 10:40:47 2014 +0100
+
+    sna: Do not stash drmModeResPtr
+    
+    In the near future we will be dealing with dynamic discovery of
+    connectors, and so we cannot assume that the mode resources will be
+    static for our lifetime. The first step is to not keep that struct
+    around, but pull out the useful information and discard it.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 7b072074aa2b08c09a3d920d67f38ae73009ced6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri May 2 08:27:07 2014 +0100
+
+    sna: Refactor hints for GPU promotion of composite fills
+    
+    The major change here is not do a full promotion if we are filling
+    through a clip region. The original intention was to catch doing the
+    initial clear of the background, but it was also triggering for drawing
+    rectangular outlines etc.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 81608b4da5b35993cd2071098235c14920b7236d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 1 13:15:11 2014 +0100
+
+    sna: Do not discard damage when using the CPU to perform BLT spans
+    
+    The BLT paths are only taken when we know we are overwriting the target
+    contents, and so we do not have to worry about reads along those paths.
+    However, in terms of migrating the damage for a pixmap, we have to be
+    careful in case we do not write to the full area of the composite
+    rectangle, in which case we have to treat it as a read to that area and
+    migrate the damage.
+    
+    Regression from
+    commit a13781d19defc97af6a279c11a85e33ef825020e [2.20.10]
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Sun Aug 19 09:45:12 2012 +0100
+    
+        sna: Enable BLT composite functions to target CPU buffers
+    
+        Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+    
+    Reported-by: Matti Hämäläinen
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 150458c402f2a93e87924dacd3d0e99def512b85
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 1 09:42:07 2014 +0100
+
+    sna: Refactor migration DBG code
+    
+    And add a new DBG option to disable partial-cpu migrations.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ca57ee723497b07396646e567fd87dfce8d779fa
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 1 09:15:28 2014 +0100
+
+    sna: Add some DBG for tracing vblanks across modeset/resume
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit bcbb2f222c39ab8732bf1daa248c77ce22cc173e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 30 14:43:01 2014 +0100
+
+    sna/dri: Tidy call to vblank ioctl for MSC waiting
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4430703619dc6012407ab703f211dc1181ba6ec8
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 30 11:10:49 2014 +0100
+
+    sna: Be more lenient and allow tiled uploads to replace CPU buffers
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2fd1a05ac50ac4ba7cf09225f9133a8141aef302
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Apr 29 13:51:33 2014 +0100
+
+    sna/video: Initialise pitch before query
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 41a573c15ca1a1e775a2060be117374a5bc6f9b9
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Apr 29 13:30:14 2014 +0100
+
+    sna: Discard TearFree damage on partial migration
+    
+    If we are overwriting part of the framebuffer, we know we do not need to
+    read that portion back from the scanout.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d75501572a4ea95fc126314718468345630723a1
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Apr 29 13:29:45 2014 +0100
+
+    sna: Preserve cpu hint for compatible mmapping of the GPU bo
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 94e39323772ef6561efcc0620f67cabd2462a0d0
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Apr 29 09:02:50 2014 +0100
+
+    sna: Recycle physical cursors
+    
+    A side-effect of the workaround for incoherent physical cursors is that
+    we never reused a cursor after disabling. As such moving the cursor off
+    the pipe and back on would eventually consume all the preallocated
+    structs leading to a segfault.
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=78002
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0b23011c27736d0ae2b33d8ea147c16b909baa57
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Apr 28 15:59:18 2014 +0100
+
+    sna: Tweaks to cursor DBG logging
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d4bd452caa335a54076fa003ee616c2efe93bca3
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Apr 28 14:01:43 2014 +0100
+
+    sna: Assert against underflows in BLT command lengths
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2a993c8aa9e8594c32d5e67329b0dbed0d92c761
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Apr 28 12:53:00 2014 +0100
+
+    sna: Initialise pointer before use
+    
+    commit 534a0e6433a37c95f7181f7ce9046a4e7c82532d
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Mon Apr 28 07:53:13 2014 +0100
+    
+        sna: Factor in destination sizes for choosing intermediate tiling bo size
+    
+    assumed that the target bo was being initialisation for the tiling
+    composite; it was not.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f0042850494ac16149ba310c910ca08f86c191fa
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Apr 28 08:37:11 2014 +0100
+
+    sna: Rearrange final aperture check
+    
+    If we cross the high water mark, first flush the batch, then check the
+    remaining pages to see if they fit into the aperture.
+    
+    Reported-by: Bruno Prémont
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 7a685d1d7b63a1589ba0fd09168d4f95d18fcae5
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Apr 28 08:31:59 2014 +0100
+
+    sna: Add a minor DBG for tiled copies
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 3e330f3980b7bacad30b25ff144e4162acc854bb
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Apr 28 08:15:35 2014 +0100
+
+    sna: Refine fence packing estimates
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 534a0e6433a37c95f7181f7ce9046a4e7c82532d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Apr 28 07:53:13 2014 +0100
+
+    sna: Factor in destination sizes for choosing intermediate tiling bo size
+    
+    When tiling, factor in the destination usage of the aperture in case
+    that reduces the available aperture for the intermediate bo.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 11cc397cb1cded40f7ab43c1add3fd00b97c6bdc
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Apr 27 07:55:09 2014 +0100
+
+    sna: Preallocate cursors
+    
+    We need to avoid all allocations within the signal handlers, so
+    preallocate the cursor structs.
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=77975
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 9417f13cc4074ea6e5dad88e054337e93b461a4c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Apr 27 07:55:09 2014 +0100
+
+    sna: Preallocate pwrite scratch buffer for old fashioned cursor updates
+    
+    We need to avoid all allocations within the signal handlers, so
+    preallocate the transfer buffer.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=77975
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 795cebf053e8457b998522ab7eea80b0819cb46b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Apr 27 07:52:14 2014 +0100
+
+    sna: Replace cursor gen test with feature flag
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1b76a1f6fb046353b1e2f553dfcb03978807272d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Apr 27 08:32:17 2014 +0100
+
+    sna: Initialise cursors after checking for KMS
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b3c5a524965958b5b11a1195e773d10ac9fc6611
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 23 14:23:55 2014 +0100
+
+    sna: Tweak use inplace CPU maps for writing
+    
+    Allow us to write into a GPU bo without any pending CPU damage.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c872be6cbef3b07dc79fc8f83d719543c0adcdee
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 23 14:23:55 2014 +0100
+
+    sna: INPLACE has early exits in move-to-cpu
+    
+    We can update the priv->cpu flag more accurately by accounting for the
+    early exits for the INPLACE accessors.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 05cf93287419992208493f5098fc7b089e95b20c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 23 14:21:39 2014 +0100
+
+    sna: Be more selective of reusing bo for inplace uploads on !LLC
+    
+    On older architectures, we can only do the inplace upload into a GPU bo
+    into a new unused bo (that is still in the GPU domain).
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit cf7efedb32b63901f7e42a90f756899b9ba60e65
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 23 14:20:47 2014 +0100
+
+    sna: Tweak untiled limits
+    
+    Allow more small pixmaps to use untiled for linear mmappings.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 5fbbfd4dd35c5e5381897b7e5d4c16c1f182ef2b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 23 11:34:06 2014 +0100
+
+    sna/video: Show sprites across all outputs
+    
+    If an overlay video (using the sprite interface) is visible on multiple
+    outputs, we have to create and show a sprite for each.
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=77802
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 3508f809c40bc59d67deb7182807664bc0648639
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 23 11:46:12 2014 +0100
+
+    sna: Fix assertions for mmapping stolen buffers
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit aec3cbb1aba8bae5537534754ea57d21896d591b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 23 09:17:22 2014 +0100
+
+    sna: Reuse any output not explicitly disconnected
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=77768
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4ed733d16a6ce35b1426bddd993a360f0a7387a8
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 23 09:17:01 2014 +0100
+
+    sna: Improve DBG messages for rejecting outputs during initial config
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit bb5b21e34f6cbe44a249e566471754b45c500e60
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Apr 22 21:22:37 2014 +0100
+
+    sna: Apply defense against a rogue call to move a SW cursor
+    
+    So the sna_set_cursor_postion() assertion was reported to have caught us
+    trying to adjust the position of an absent cursor. That should be
+    impossible as we should only arrive there if we claim we can support a
+    HW cursor and so have a registered cursor. However, changing the
+    assertion into a guard is trivial, and preserves peace of mind.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b12bc035fb8ee40bb382e66604e869b729270189
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Apr 22 12:30:29 2014 +0100
+
+    sna: Add a DBG aide to disable hardware execution
+    
+    Submit a dummy batch so that we still build, submit batches and perform
+    relocations, but do not actually invoke the GPU. This can be useful when
+    looking at mysterious hardware hangs.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=77263
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f6bc0e390bcba97f7aacab4d87251867ca309c17
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Apr 22 09:41:21 2014 +0100
+
+    sna: Use a global pixman glyph cache
+    
+    In Zaphod mode, we use a common pool of glyph images but insert them
+    individually into a cache for each head. However, we only remove the
+    image from the first cache, leaving a stale slot in the second head.
+    Upon subsequent reuse of the glyph id, the second head renders garbage.
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=54707
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b259cbffcfb41a20c8b0cf1c32f6ff3e9872a472
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Apr 20 16:39:37 2014 +0100
+
+    sna: Avoid copying from tiled source for an overwritten fill
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 935ec0abcb3b92b1aad00885be59644bf775f5dd
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Apr 21 08:20:39 2014 +0100
+
+    uxa: Remove misnomer from ATI logs
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 08e71e1820d6fcb6829b4ebd360beadc1f250295
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Apr 19 16:27:49 2014 +0100
+
+    sna: Initialise thread->arg
+    
+    If we launch less than the maximum number of threads, we may read the
+    thread->arg value never having set it after a malloc.
+    
+    ==8207== Conditional jump or move depends on uninitialised value(s)
+    ==8207==    at 0xA986B7F: sna_threads_wait (sna_threads.c:216)
+    ==8207==    by 0xA986EFE: sna_image_composite (sna_threads.c:350)
+    ==8207==    by 0xA93DD0D: sna_composite_fb (sna_composite.c:598)
+    ==8207==    by 0xA93E66C: sna_composite (sna_composite.c:742)
+    ==8207==    by 0x23A773: damageComposite (damage.c:503)
+    ==8207==    by 0x2309A9: ProcRenderComposite (render.c:708)
+    ==8207==    by 0x15D86D: Dispatch (dispatch.c:433)
+    ==8207==    by 0x161689: dix_main (main.c:294)
+    ==8207==    by 0x6FB1B44: (below main) (libc-start.c:287)
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 58a757b64927d8e27c4ac38cc15f8291037ec905
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 18 09:28:02 2014 +0100
+
+    sna: Do not reuse physical cursors for the kernel is broken, harder
+    
+    commit 154f7e9668bffdf565b6914a3a3e5bdfe17aa1b9
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Fri Apr 18 09:28:02 2014 +0100
+    
+        sna: Do not reuse physical cursors for the kernel is broken
+    
+    was insufficient as it ended up reusing a stale cursor that was still
+    attached, and so after updating the cursor the second pipe found itself
+    with a valid cursor. Hey presto, we had a shared physical cursor, once
+    again demonstrating the buggy kernel.
+    
+    This time, disable all cursor reuse except for the once currently
+    attached to the pipe - this should prevent all sharing.
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=77351
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit fb0ed43cbc6f34bde670ab846e7ba9e7dbf9b660
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 18 20:55:49 2014 +0100
+
+    sna: Refine detection of when shadow is active during BlockHandler
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2d9ae02c647f93be58d3f77168752774868008f5
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 18 11:43:45 2014 +0100
+
+    sna/video: Provide a fallback path for pwrite failure
+    
+    Stranger things have happened.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit fdc28205d590d560a6f3886189ef974d1d00f2cd
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 18 11:34:07 2014 +0100
+
+    sna: Always flush the shadow scanout
+    
+    When the shadow scanout is active, make sure we call the BlockHandler
+    every time, not just when we about to sleep. This is in case we are
+    swamped by clients trying to render and forgo the important step of
+    ensuring that their output reaches the screen.
+    
+    Reported-by: Ildar Nurislamov <absorbb@gmail.com>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=77436
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 924237efbddb167efc7f9f3bde42b32ffc538ee3
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 18 11:33:42 2014 +0100
+
+    sna: Fix some DBG formats
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit fa56f1062b926b15e554f46eb268a69b43dd8b9f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 18 09:52:26 2014 +0100
+
+    sna/video: Only try to set the color key once
+    
+    So that we only report the error to the user a single time, and not
+    every frame.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 154f7e9668bffdf565b6914a3a3e5bdfe17aa1b9
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 18 09:28:02 2014 +0100
+
+    sna: Do not reuse physical cursors for the kernel is broken
+    
+    Big bug in the kernel that prevents the sharing of cursors across pipes
+    when they are backed by a phys_obj. To prevent hitting that bug, don't
+    do that!
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=77351
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 83f49767f8ed9dd49c40ebc65ed22c288a386edd
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Apr 15 16:27:44 2014 +0100
+
+    sna: Pre-emptively bind framebuffers into the GTT
+    
+    In order to avoid rendering to the bo and then stalling before we can
+    pin it the display plane, bind the framebuffer into the GTT (by using a
+    GTT mmap) during the initial allocation.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=77436
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit fd0579016be9e0385c0cdd07a9f9e17f93b93a4f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Apr 15 16:27:44 2014 +0100
+
+    sna: Pre-emptively move framebuffers into the DISPLAY cache domain
+    
+    In order to avoid rendering to the bo and then stalling before we can
+    pin it the display plane, allocate bo for fb from uncached and change
+    the cache level during the initial allocation.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=77436
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b0472af1f3c6832838b0cfea38e261c908afd04e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Apr 15 16:31:08 2014 +0100
+
+    sna: Mark partial composite operations upfront
+    
+    Rather than guess in the backend when we are going to be called for
+    multiple boxes, rely on the frontend declaring it correctly.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 49e72bd4e59085aa940e5af63381c5394ee670ad
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Apr 15 11:24:10 2014 +0100
+
+    sna: Discard TearFree readback when overdrawing
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=77436
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 13054a00dadedae6495eb5cdf586b7916b82053e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Apr 15 10:28:32 2014 +0100
+
+    sna: Fix up cut'n'paste typo in assertion
+    
+    sna_display.c:3176:43: error: 'struct <anonymous>' has no member named 'rotation'
+          assert(cursor->rotation != sna->cursor.rotation);
+    
+    Reported-by: Ildar Nurislamov
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1ed8647aef012d30c602f86fc6f97a0a92d7710f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Apr 15 06:55:26 2014 +0100
+
+    sna: Add a cursor DBG for a failed pwrite update
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit cb35b397395cff8ff7f5155759f58c1840bfeeb5
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Apr 14 17:12:37 2014 +0100
+
+    sna: Rearrange cursor reuse to avoid sharing rotations
+    
+    Try not to steal a rotated cursor that is currently in use, or else we
+    may see a brief flash of corruption.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit fd700c37ee2a68262b1ccfff332dd41ba8599e2c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Apr 14 16:48:05 2014 +0100
+
+    sna: Add some bounds checking asserts to damage
+    
+    References: https://bugs.launchpad.net/ubuntu/+source/xserver-xorg-video-intel/+bug/1300640
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 9ae82134ad14085e80d93592e155978a5056f44a
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 11 18:36:16 2014 +0100
+
+    sna: Restrict WHOLE hint to PutImage on a complete Pixmap
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6883f5a64498880425d47871323642409282d9ab
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 11 08:02:49 2014 +0100
+
+    sna: Perform 2-color to ARGB cursor conversion inplace
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2eddc60a5fe1fabefcad93783d58354570132af3
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 11 07:52:30 2014 +0100
+
+    sna: Don't redraw cursor if the fg/bg colors do not change
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a79eb2e29a158910785580409c51a585f25876a7
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Apr 10 20:41:57 2014 +0100
+
+    sna/gen2: Fix CA/a8 blend factors
+    
+    This is a revert of
+    
+    commit 142f8461944b294dbc3fb0a7bf607bccf0bccc1f [2.99.911]
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Mon Mar 10 15:20:16 2014 +0000
+    
+        sna/gen2: Tidy blend factor selection for the source
+    
+    as that broke glyph rendering in firefox for instance.
+    
+    Reported-by: Carl Eitsger <4607vrfcr84spd21f08@weg-werf-email.de>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=77201
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 25fa4f5bb4c9ed12755edfeec38b9bdc134736f1
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Apr 10 23:14:32 2014 +0100
+
+    sna: Don't set cursor bits to an invalid pointer
+    
+    The xf86Cursor core simply frees it, so it has to be NULL.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 7b2753f9cc6a1a7ca353f57d78bdf3d52f32864b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Apr 10 23:11:18 2014 +0100
+
+    sna: Only mark the transform_in_use when required for shadow fb
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4950bc4fea80d44dde798f3f8b5a07eee1555a63
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Apr 10 22:26:42 2014 +0100
+
+    sna: Only reload an active HW cursor
+    
+    Do not attempt to restore the cursor handle if a SW cursor is currently
+    active. In particular, this prevents a crash after modesetting if we
+    never had a real cursor (for example output offloading).
+    
+    Reported-by: Tomas Pruzina <pruzinat@gmail.com>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=77283
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8e6e7dbc9257a223ab284198e92f263a1a8b5553
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Apr 10 21:44:35 2014 +0100
+
+    sna: Don't create slave pixmaps for the virtual CRTC
+    
+    They only exist as placeholders for remote outputs in the framebuffer
+    and do not need to take part in actually output offloading, so we can
+    forgo creating slave pixmaps and remove the stub function entirely.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f94684db1a694820ff508d8aec77bf19cea86fbd
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Apr 10 16:08:48 2014 +0100
+
+    sna: Validate the cursor everytime for hw support
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d364a881effb2fd87f11648b10d126eb18fcb6be
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Apr 10 09:12:02 2014 +0100
+
+    configure: Report which version (lib or module) of glamor is used
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b771b41f0a945fc580d532524cc744b01dd36d5f
+Author: Eric Anholt <eric@anholt.net>
+Date:   Wed Apr 9 15:24:23 2014 -0700
+
+    uxa: Fix load_cursor_argb for the new Xorg ABI.
+    
+    Returning an undefined value meant we might get sw cursors.
+
+commit d812afc1d4476ba987883fad2ef8b7c002638077
+Author: Eric Anholt <eric@anholt.net>
+Date:   Wed Apr 9 15:24:22 2014 -0700
+
+    Use fbpict.h instead of defining its prototypes ourselves.
+    
+    fbpict.h has been an installed header since 2008, shortly after uxa
+    landed.  This fixes compiler warnings when other headers happen to
+    include fbpict.h.
+
+commit a6919aa980883cf2828dc0cf813f315e3035d0cf
+Author: Eric Anholt <eric@anholt.net>
+Date:   Wed Apr 9 15:24:21 2014 -0700
+
+    Update for glamor in the 1.16 server.
+    
+    We should link against the server's copy, insted of using the external
+    library.
+
+commit be7c166a017cee3ef8a1b7b290b7fb14b4009314
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Apr 10 08:22:02 2014 +0100
+
+    sna: Remove defunct Cursor interface on fake CRTC
+    
+    As we no longer user the xf86Cursor helper, we can forgo filling in stub
+    routines for the fake CRTC.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1d2872dd0830c8858621402328aa1a9322b66ea8
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Apr 10 07:35:50 2014 +0100
+
+    sna: Prepare for an upcoming Cursor API change
+    
+    1.16 now expects load-cursor-argb to return a boolean reporting
+    success/failure.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f9a279b2dc8417b6504478ac96514125d6136523
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 9 22:15:19 2014 +0100
+
+    intel-virtual-output: Fix damage bounds
+    
+    Sigh. A serious mixup of integer promotion rules and wraparound caused
+    the damage computation for small regions to be completely bogus.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e0c93a3e53a624beb5d3a15631237ac33b8c92cd
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 9 18:51:23 2014 +0100
+
+    intel: If a non-root user starts X, don't release master
+    
+    SET_MASTER and DROP_MASTER are only available to the root user. If we
+    are started as an ordinary user, and we are master by virtue of being
+    the first user of the device, never release our fd or master.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit dba43d370b984e262f6fe5920b38b433f4bd392b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 9 16:11:26 2014 +0100
+
+    sna: Use pwrite to update physical cursors
+    
+    Older hardware uses physical addresses for its cursor, which are
+    implemented by the kernel in an incoherent fashion. Maybe with stolen
+    support this would be different...
+    
+    Fixes regression on [845g, 945g] from
+    commit 25ca8f136cef9e1bdf06967bf8e78c87b54ffce2
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Thu Mar 27 14:15:30 2014 +0000
+    
+        sna: Support variable sized cursors
+    
+    Reported-by: Knut Petersen <Knut_Petersen@t-online.de>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f14d6cbff3b9766f5fa834282a4eca6636b6fd7d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 9 13:14:37 2014 +0100
+
+    sna: Handle clipped PutImage uploads more carefully
+    
+    If the upload is clipped, we do not want to apply the WHOLE migration hints.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=77178
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 510e5cf3fa4e1db8297be62461b602b13d18d8fc
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 9 12:26:53 2014 +0100
+
+    sna: Tweak application of WHOLE hint for uploads
+    
+    This help with the continuing saga of
+    commit 1de1104064b5898cbed37e836901694a381c1266 [2.99.911]
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Fri Feb 21 22:43:04 2014 +0000
+    
+        sna: Use a hint to do whole image uploads inplace
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=77178
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f05552cd7a43ea46ac1a37b68b05be2a82abaeb1
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 9 11:54:49 2014 +0100
+
+    sna: Add some DBG for whole CPU pixmap migration
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit cf4eb827861bf70d4d45a2ffe062d4c05a1564a6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 9 10:22:49 2014 +0100
+
+    sna: Restore empty region checking
+    
+    commit 8ef81d676c52e42a6d9048fd92b2843470b62945
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Mon Apr 7 07:59:42 2014 +0100
+    
+        sna: Simplify checking for singular damage
+    
+    overlooked that we were also checking for empty regions as well as
+    singular regions.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 9f40d7e91281b74df43f49885472ee352ea4b389
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Apr 8 18:28:46 2014 +0100
+
+    sna: Fix build for older Xorg without OsBlockSIGIO support
+    
+    OsBlockSIGIO/OsReleaseSIGIO was only introduced in xorg-server-1.13.0,
+    so we need a compat layer.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 5db8717b8d9f089412b9a7529725c9c41e3e44fb
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Apr 8 18:00:47 2014 +0100
+
+    sna: Refactor 3 similar CPU migration promotion checks into one
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=77178
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 617e96f3af861dd797f98d5a74978f9ba595a981
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Apr 8 08:47:05 2014 +0100
+
+    sna: Add more assertions before dereferencing sna_crtc
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e6b03269d01e61527641639c6fb7b796205e6ed8
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Apr 8 08:44:56 2014 +0100
+
+    sna: Continue to reprobe for ZaphodHeads with a mixed up configuration
+    
+    Fixes regresion from
+    commit 35b03b3fe6213eb3e08f05efe3428bd6bc5421d2
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Fri Mar 28 09:14:59 2014 +0000
+    
+        sna: Virtual CRTCs are last, so break loops early
+    
+    as the conflicting Zaphod detection requires on searching all potential
+    CRTCs without finding the match. By breaking early on the virtual CRTC,
+    we concluded that the setup was actually valid, but disabled.
+    
+    Reported-by: Nick Bowler <nbowler@draconx.ca>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=77156
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit bf1875139817c5b00d63a743e262c8f3552058ab
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Apr 7 08:28:55 2014 +0100
+
+    intel-virtual-output: Fixup DBG messages
+    
+    Use the right variables and it may even compile.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8ef81d676c52e42a6d9048fd92b2843470b62945
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Apr 7 07:59:42 2014 +0100
+
+    sna: Simplify checking for singular damage
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f5014b3fddf6c79f5ca01a91eec5ca92184c8829
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Apr 7 07:59:01 2014 +0100
+
+    sna: Avoid double application of pixel widening for degenerate lines
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=77074
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 3310ee89c1f1a663de5f5b12b8125809a213996f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Apr 5 12:18:31 2014 +0100
+
+    sna: Avoid discarding damage when applying WHOLE hint to pixmap migration
+    
+    Once again, we must be careful when promoting from a region to whole
+    pixmap migration that we do not discard required damage.
+    
+    Fixes regression from
+    commit 27ac9f574f65cbd535751c925e9b2e2d7c8a6b3a [2.99.911]
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Thu Feb 27 08:33:52 2014 +0000
+    
+        sna: Avoid promoting region-to-whole migration and discarding damage
+    
+    Reported-by: gedgon@gmail.com
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=77063
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 7e9ff48ddbe61ad2edbaefde7b94c84637a85291
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Apr 5 10:44:48 2014 +0100
+
+    sna/gen8: Shrink 3DSTATE_SAMPLE_PATTERN packet
+    
+    This is now smaller than originally specified.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 878ed2d6250701e9ccceacb102b5542986976437
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Apr 5 10:43:25 2014 +0100
+
+    sna/gen8: w/a for NULL depth buffer
+    
+    Instead of using a NULL type depth buffer, it is strongly suggested to
+    use a 1x1 16-bit depth buffer instead (with address 0).
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 02862faeae21bd445d61006c9aeb966fbe6a7670
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 4 16:03:08 2014 +0100
+
+    sna: Remove unitialized use of 'cursor'
+    
+    The earlier query of cursor (simply to find out the hw size) was
+    replaced by an invariant determined when the cursor was first set.
+    However, not all uses of cursor->size were fixed.
+    
+    Fixes regression from
+    commit f98b2e164637292c2425f6e6d2c22bd9a2800f8e
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Wed Apr 2 08:36:14 2014 +0100
+    
+        sna: Prevent signal re-entrancy into cursor update routines
+    
+    Reported-by: Christoph Haag <haagch.christoph@googlemail.com>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=77053
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 938eea6dee0be153fcf007549a50213f6c957305
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 4 15:56:38 2014 +0100
+
+    sna/gen2+: Beware the unattached ShmPixmap
+    
+    When dereferences priv, make sure it exists first. ShmPixmaps for
+    example, may not have one, nor do very small buffers.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 564e4a9878503c880e0cbd09d88b4c246a0267b6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 4 14:04:38 2014 +0100
+
+    sna/gen7: Move constants MOCS into chipset specific info blocks
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6e86e84da1c8049a150eb6b5780526fea57e0f9d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 4 12:41:25 2014 +0100
+
+    sna: Precompute OVER/ADD with solids to convert it into a BLT operation
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 31a4c7bc13c5f4560482b450b9ee4788a58930cd
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 4 10:46:48 2014 +0100
+
+    sna/gen2+: Replace composite sources with solids where possible
+    
+    If the composite reads entirely from within a large pixmap which is a
+    clear color, just replace the source with a solid.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f0565852b668832d4988e875bc12e23abb6e1829
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Apr 3 16:27:47 2014 +0100
+
+    sna: Short-circuit repeated clearing to the same color
+    
+    Spotted in amongst a KDE debug log was a series of clear; copy; repeat
+    using Composite().
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit baef2201f752da5d0c6322547d925fcbd86c6de4
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 2 11:37:17 2014 +0100
+
+    sna: Silence compiler warning
+    
+    Simplify the dependency logic so that even the compiler can understand
+    what is going on.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f98b2e164637292c2425f6e6d2c22bd9a2800f8e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Apr 2 08:36:14 2014 +0100
+
+    sna: Prevent signal re-entrancy into cursor update routines
+    
+    As we may need to allocate from within the cursor update, we are prone
+    to re-entrancy issues within malloc()/free(). To avoid these we need to
+    block SigIO (for pointer updates) whilst in the critical section.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a926d9f68231ac0f2a1f54c7a722979a8ed6e9e1
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Mar 31 14:07:41 2014 +0100
+
+    sna: Update tiling flags after reusing inactive VMA
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 644c274b2cd398c8236d36423677317cbc82308a
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Mar 31 14:03:49 2014 +0100
+
+    sna: Fix predicate inversion for assertion
+    
+    The assertion was checking that the invalid condition was true, rather
+    than that it never happened. Oops.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4b97bf7e6e9e315cc77d940e3be97832a326e702
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Mar 31 13:32:45 2014 +0100
+
+    sna: Use a cheaper check for a replacement operation
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 76380bcc3c23d75575d37c0436369a8014bd5a3e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Mar 31 12:46:58 2014 +0100
+
+    sna: Allow reassignment of inactive VMA if not mapped into the GTT
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c4c8a1b180a9d4c1126ee4fe3120128aa560306c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Mar 31 11:23:45 2014 +0100
+
+    sna: Discard damage tracking for operations to the whole pixmap
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8f796d4586507a0a6e9ca3608f43448983a3b965
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Mar 31 11:14:46 2014 +0100
+
+    sna: Promote to the GPU operations that cover the whole pixmap
+    
+    If the pixmap is already partially on the GPU, and the next operation
+    touches the entire pixmap, promote that operation back to the whole GPU.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 27c086a89d838fe0060e5ddd0fb2f37434078e4d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Mar 31 10:01:38 2014 +0100
+
+    sna: Regularly check that damage does exceed the pixmap
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a8a5a5a58786445d393c3d6388904c0975c364a6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Mar 31 09:36:05 2014 +0100
+
+    sna: Search cursor cache first
+    
+    We can reuse the current cursor size rather than determine it every
+    time.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e892b789c4c6359e4fb2e11f552b3e43a466c49e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Mar 28 11:34:03 2014 +0000
+
+    sna: Suppress a compiler warning
+    
+    sna_display.c: In function '__sna_get_cursor':
+    sna_display.c:3153:6: warning: assignment from incompatible pointer type [enabled by default]
+      src = sna->cursor.ref->bits->argb;
+          ^
+    sna_display.c:3209:10: warning: comparison of distinct pointer types lacks a cast [enabled by default]
+      if (src != sna->cursor.ref->bits->argb)
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 5c0623b5f36cd1a1a2e3280ab2bea35a7899281b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Mar 28 09:53:49 2014 +0000
+
+    sna: Only transform the temporary cursor coordinates
+    
+    As we need to recompute them for each CRTC, we need to reset the
+    computation each time or else we screw up the coordinates and hide
+    the cursors at random.
+    
+    Breakage from commit 25ca8f136cef9e1bdf06967bf8e78c87b54ffce2
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Thu Mar 27 14:15:30 2014 +0000
+    
+        sna: Support variable sized cursors
+    
+    Reported-by: Jan Alexander Steffens <jan.steffens@gmail.com>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=76724
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 80792a3f490578735065d9f67ca6ebac00b5bb75
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Mar 28 09:43:34 2014 +0000
+
+    sna: Our cursors are always square.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 35b03b3fe6213eb3e08f05efe3428bd6bc5421d2
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Mar 28 09:14:59 2014 +0000
+
+    sna: Virtual CRTCs are last, so break loops early
+    
+    We know that all the virtual CRTCs are at the end of the CRTC array, so
+    when we see the first one, we can stop the processing of real CRTCs.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 929ac66558be96a039eadd8604d444598259a0aa
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Mar 28 08:48:06 2014 +0000
+
+    sna: Cursors are invariant
+    
+    Once created, a Cursor has a fixed size and content, so avoid upload
+    unnecessarily.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 26cc3cec982d316b8fe1700eae885ae2767c0110
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Mar 28 08:40:47 2014 +0000
+
+    sna: drmGetCap is too recent for our supported versions of libdrm
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 78805163c5f8a40a649c973ab2a08b682879f16d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Mar 28 08:45:39 2014 +0000
+
+    sna: RefCursor is too recent
+    
+    Replace RefCursor with the simple refcnt manipulation for compilation
+    against older stacks.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e07f8e2e625fb34f9ad795ca8fffc9a9e88e25b2
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Mar 27 23:06:15 2014 +0000
+
+    sna: Fix 2-color to ARGB cursor conversion
+    
+    It helps to remember to advance through the source/mask images after
+    each row.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e501aa667699787daf7dc0dfd22c397a785564ce
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Mar 27 21:57:39 2014 +0000
+
+    sna: Cursors only need to be cleared when they are shrunk
+    
+    If we completely overwrite the old contents, we do not need to clear it
+    first.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 5c4d6d1ad748fe5301fa88d9c15c19a07c55149f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Mar 27 21:16:31 2014 +0000
+
+    sna: Reorder the cursor cache search
+    
+    Search for an exact match first, before looking for a cursor we can
+    reuse. This should help reuse with multiple rotated screens not stealing
+    the others' cursor on every pass.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e8be2a438d7a413ba6c64005971ce814b0076fc7
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Mar 27 21:09:45 2014 +0000
+
+    sna: Clear the surrounding areas of small cursors
+    
+    If the cursor does not completely fill the size of the hardware cursor,
+    we will retain whatever contents already filled that area.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 25ca8f136cef9e1bdf06967bf8e78c87b54ffce2
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Mar 27 14:15:30 2014 +0000
+
+    sna: Support variable sized cursors
+    
+    One of the downsides with supporting large cursors is that the full size
+    is very rarely used leading to a waste of permanently allocated
+    resources. Refactor our cursor handling so that we can allocate fresh
+    cursors on the fly that are appropriately sized.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e3810cff42bca1badc5844002694a6f582c0f423
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Mar 26 16:15:07 2014 +0000
+
+    sna: Move cursor reload into crtc notify
+    
+    This only needs to be done once per-screen reconfiguration.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6bdd3b39bfddf1369656a6d182303e2058f6eb8f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Mar 25 14:44:49 2014 +0000
+
+    sna: Tighten detection of GCs that translate to solid fills
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 771b86e2a808bd74e7e2c316f8414766c2b267c6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Mar 25 10:27:23 2014 +0000
+
+    intel-virtual-output: Add DBG option to force 16 bit transfers
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e46c196ecc8ad83f78f4f948b5dcb07906f249c2
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Mar 26 12:17:37 2014 +0000
+
+    sna: Print probed maximum cursor size
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a273b207b94933713b3dfd7edd3f6bb9b3e959b9
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Mar 25 09:40:40 2014 +0000
+
+    intel-virtual-output: Fix damage iteration over active list
+    
+    When iterating over the active list to mark the current damage, we need
+    to chase the ->active pointer rather than ->next or else we walk the
+    wrong list from the wrong starting point.
+    
+    Reported-by: Kirill Müller <mail@kirill-mueller.de>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=76271
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit bfd51e205639b468479985c3c631e5d9c76d5fa7
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Mar 25 08:59:58 2014 +0000
+
+    intel-virtual-output: Add a little more DBG around damaging clones
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 278ef8f7bc0c7f63737ad5f5e967ca253c2571cb
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Mar 25 08:33:46 2014 +0000
+
+    intel-virtual-output: Do not detach with DBG enabled
+    
+    Since DBG is sent to stdout, we only see it if we do not daemonize
+    (which closes stdout).
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 7addfcbf0f2f609ce2a5b8e9a75ee7efb483531c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Mar 24 12:51:11 2014 +0000
+
+    sna: Remove one conditional from rendering glyphs into a mask
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d3050dbaf74d6a5b5123eea13bc7710efea6257f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Mar 24 12:39:37 2014 +0000
+
+    sna: Consolidate handling of uncacheable glyphs
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 79399ff9264ff23da0ab95131a67d2ac85651b3d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Mar 24 10:46:57 2014 +0000
+
+    sna: Eliminate a few conditionals in glyph fast path
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 220accd828c5a0054ae9e3b491a434f7a6c750e0
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Mar 20 09:03:31 2014 +0000
+
+    sna: Only enable cursor support if the hw cursor is supported
+    
+    Under a host, we naturally will not setup the cursor capability, and
+    this provides a safeguard in case we have a machine that does not
+    support hardware cursors.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 7cf0676ff868e7d8cdbfb264e5822250b1f59882
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Mar 20 08:51:05 2014 +0000
+
+    intel: Do not close server fds
+    
+    If we are given an fd by the Xserver, then it is not our responsibility
+    to close it during CloseScreen.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+    Cc: Hans de Goede <hdegoede@redhat.com>
+
+commit 9f4c121974abcec77e7f920e3258a337260200b3
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Mar 20 08:48:40 2014 +0000
+
+    intel: Refactor finding device path if unknown
+    
+    Since we already lookup the device path if we do not know it after
+    opening the fd, we can remove the special case along the legacy PCI
+    probe path.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
 commit 582adf067c275a18f55bb43945348b84cb7eb3c4
 Author: Chris Wilson <chris@chris-wilson.co.uk>
 Date:   Wed Mar 19 14:57:25 2014 +0000
