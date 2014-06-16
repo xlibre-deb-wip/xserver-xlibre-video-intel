@@ -2,7 +2,12 @@ Source: xserver-xorg-video-intel
 Section: x11
 Priority: optional
 Maintainer: Debian X Strike Force <debian-x@lists.debian.org>
-Uploaders: Drew Parsons <dparsons@debian.org>, Cyril Brulebois <kibi@debian.org>, Michael Stapelberg <stapelberg@debian.org>, maximilian attems <maks@debian.org>, Vincent Cheng <vcheng@debian.org>
+Uploaders:
+ Drew Parsons <dparsons@debian.org>,
+ Cyril Brulebois <kibi@debian.org>,
+ Michael Stapelberg <stapelberg@debian.org>,
+ maximilian attems <maks@debian.org>,
+ Vincent Cheng <vcheng@debian.org>,
 Build-Depends:
  debhelper (>= 8),
  dh-autoreconf,
