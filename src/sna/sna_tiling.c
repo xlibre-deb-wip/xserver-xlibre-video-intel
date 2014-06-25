@@ -138,14 +138,19 @@ sna_tiling_composite_done(struct sna *sna,
 {
 	struct sna_tile_state *tile = op->priv;
 	struct sna_composite_op tmp;
-	int x, y, n, step;
+	int x, y, n, step, max_size;
 
 	/* Use a small step to accommodate enlargement through tile alignment */
 	step = sna->render.max_3d_size;
 	if (tile->dst_x & (8*512 / tile->dst->pDrawable->bitsPerPixel - 1) ||
 	    tile->dst_y & 63)
 		step /= 2;
-	while (step * step * 4 > sna->kgem.max_copy_tile_size)
+
+	max_size = sna_max_tile_copy_size(sna, op->dst.bo, op->dst.bo);
+	if (max_size == 0)
+		goto done;
+
+	while (step * step * 4 > max_size)
 		step /= 2;
 
 	DBG(("%s -- %dx%d, count=%d, step size=%d\n", __FUNCTION__,
@@ -317,6 +322,7 @@ sna_tiling_composite(uint32_t op,
 	tmp->done  = sna_tiling_composite_done;
 
 	tmp->priv = tile;
+	tmp->dst.bo = priv->gpu_bo;
 	return true;
 }
 
@@ -373,7 +379,7 @@ sna_tiling_composite_spans_done(struct sna *sna,
 {
 	struct sna_tile_state *tile = op->base.priv;
 	struct sna_composite_spans_op tmp;
-	int x, y, n, step;
+	int x, y, n, step, max_size;
 	bool force_fallback = false;
 
 	/* Use a small step to accommodate enlargement through tile alignment */
@@ -381,7 +387,12 @@ sna_tiling_composite_spans_done(struct sna *sna,
 	if (tile->dst_x & (8*512 / tile->dst->pDrawable->bitsPerPixel - 1) ||
 	    tile->dst_y & 63)
 		step /= 2;
-	while (step * step * 4 > sna->kgem.max_copy_tile_size)
+
+	max_size = sna_max_tile_copy_size(sna, op->base.dst.bo, op->base.dst.bo);
+	if (max_size == 0)
+		goto done;
+
+	while (step * step * 4 > max_size)
 		step /= 2;
 
 	DBG(("%s -- %dx%d, count=%d, step size=%d\n", __FUNCTION__,
@@ -576,6 +587,7 @@ sna_tiling_composite_spans(uint32_t op,
 	tmp->done  = sna_tiling_composite_spans_done;
 
 	tmp->base.priv = tile;
+	tmp->base.dst.bo = priv->gpu_bo;
 	return true;
 }
 
@@ -589,7 +601,7 @@ sna_tiling_fill_boxes(struct sna *sna,
 {
 	RegionRec region, tile, this;
 	struct kgem_bo *bo;
-	int step;
+	int step, max_size;
 	bool ret = false;
 
 	pixman_region_init_rects(&region, box, n);
@@ -599,7 +611,12 @@ sna_tiling_fill_boxes(struct sna *sna,
 	if (region.extents.x1 & (8*512 / dst->drawable.bitsPerPixel - 1) ||
 	    region.extents.y1 & 63)
 		step /= 2;
-	while (step * step * 4 > sna->kgem.max_copy_tile_size)
+
+	max_size = sna_max_tile_copy_size(sna, dst_bo, dst_bo);
+	if (max_size == 0)
+		goto done;
+
+	while (step * step * 4 > max_size)
 		step /= 2;
 
 	DBG(("%s (op=%d, format=%x, color=(%04x,%04x,%04x, %04x), tile.size=%d, box=%dx[(%d, %d), (%d, %d)])\n",
@@ -655,22 +672,22 @@ sna_tiling_fill_boxes(struct sna *sna,
 
 				assert(kgem_bo_can_blt(&sna->kgem, bo));
 
-				if (!sna->render.copy_boxes(sna, GXcopy,
-							     dst, dst_bo, 0, 0,
-							     &tmp, bo, -dx, -dy,
-							     REGION_RECTS(&this), REGION_NUM_RECTS(&this), 0))
+				if (op > PictOpSrc &&
+				    !sna->render.copy_boxes(sna, GXcopy,
+							    dst, dst_bo, 0, 0,
+							    &tmp, bo, -dx, -dy,
+							    REGION_RECTS(&this), REGION_NUM_RECTS(&this), 0))
 					goto err;
 
 				RegionTranslate(&this, -dx, -dy);
-				if (!sna->render.fill_boxes(sna, op, format, color,
-							     &tmp, bo,
-							     REGION_RECTS(&this), REGION_NUM_RECTS(&this)))
+				if (!sna->render.fill_boxes(sna, op, format, color, &tmp, bo,
+							    REGION_RECTS(&this), REGION_NUM_RECTS(&this)))
 					goto err;
 
 				if (!sna->render.copy_boxes(sna, GXcopy,
-							     &tmp, bo, 0, 0,
-							     dst, dst_bo, dx, dy,
-							     REGION_RECTS(&this), REGION_NUM_RECTS(&this), 0))
+							    &tmp, bo, 0, 0,
+							    dst, dst_bo, dx, dy,
+							    REGION_RECTS(&this), REGION_NUM_RECTS(&this), 0))
 					goto err;
 
 				kgem_bo_destroy(&sna->kgem, bo);
@@ -790,14 +807,9 @@ sna_tiling_blt_copy_boxes__with_alpha(struct sna *sna, uint8_t alu,
 		return false;
 	}
 
-	max_size = sna->kgem.aperture_high * PAGE_SIZE;
-	max_size -= MAX(kgem_bo_size(src_bo), kgem_bo_size(dst_bo));
-	if (max_size <= 0) {
-		DBG(("%s: tiles cannot fit into aperture\n", __FUNCTION__));
+	max_size = sna_max_tile_copy_size(sna, src_bo, dst_bo);
+	if (max_size == 0)
 		return false;
-	}
-	if (max_size > sna->kgem.max_copy_tile_size)
-		max_size = sna->kgem.max_copy_tile_size;
 
 	pixman_region_init_rects(&region, box, nbox);
 
@@ -854,8 +866,7 @@ sna_tiling_blt_copy_boxes__with_alpha(struct sna *sna, uint8_t alu,
 				int16_t dx = this.extents.x1;
 				int16_t dy = this.extents.y1;
 
-				assert(bo->pitch <= 8192);
-				assert(bo->tiling != I915_TILING_Y);
+				assert(kgem_bo_can_blt(&sna->kgem, bo));
 
 				if (!sna_blt_copy_boxes(sna, GXcopy,
 							src_bo, src_dx, src_dy,
@@ -1009,6 +1020,9 @@ bool sna_tiling_blt_copy_boxes(struct sna *sna, uint8_t alu,
 	int max_size, step;
 	bool ret = false;
 
+	DBG(("%s: alu=%d, src size=%d, dst size=%d\n", __FUNCTION__,
+	     alu, kgem_bo_size(src_bo), kgem_bo_size(dst_bo)));
+
 	if (wedged(sna) ||
 	    !kgem_bo_can_blt(&sna->kgem, src_bo) ||
 	    !kgem_bo_can_blt(&sna->kgem, dst_bo)) {
@@ -1020,14 +1034,9 @@ bool sna_tiling_blt_copy_boxes(struct sna *sna, uint8_t alu,
 		return false;
 	}
 
-	max_size = sna->kgem.aperture_high * PAGE_SIZE;
-	max_size -= MAX(kgem_bo_size(src_bo), kgem_bo_size(dst_bo));
-	if (max_size <= 0) {
-		DBG(("%s: tiles cannot fit into aperture\n", __FUNCTION__));
+	max_size = sna_max_tile_copy_size(sna, src_bo, dst_bo);
+	if (max_size == 0)
 		return false;
-	}
-	if (max_size > sna->kgem.max_copy_tile_size)
-		max_size = sna->kgem.max_copy_tile_size;
 
 	pixman_region_init_rects(&region, box, nbox);
 
@@ -1084,8 +1093,7 @@ bool sna_tiling_blt_copy_boxes(struct sna *sna, uint8_t alu,
 				int16_t dx = this.extents.x1;
 				int16_t dy = this.extents.y1;
 
-				assert(bo->pitch <= 8192);
-				assert(bo->tiling != I915_TILING_Y);
+				assert(kgem_bo_can_blt(&sna->kgem, bo));
 
 				if (!sna_blt_copy_boxes(sna, GXcopy,
 							src_bo, src_dx, src_dy,

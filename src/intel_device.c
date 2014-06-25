@@ -37,8 +37,6 @@
 #include <stdlib.h>
 #include <errno.h>
 
-#include <sys/ioctl.h>
-
 #include <pciaccess.h>
 
 #include <xorg-server.h>
@@ -52,7 +50,18 @@
 #include <xf86platformBus.h>
 #endif
 
+#ifdef HAVE_VALGRIND
+#include <valgrind.h>
+#include <memcheck.h>
+#define VG(x) x
+#else
+#define VG(x)
+#endif
+
+#define VG_CLEAR(s) VG(memset(&s, 0, sizeof(s)))
+
 #include "intel_driver.h"
+#include "fd.h"
 
 struct intel_device {
 	char *master_node;
@@ -69,11 +78,11 @@ static int __intel_get_device_id(int fd)
 	struct drm_i915_getparam gp;
 	int devid = 0;
 
-	memset(&gp, 0, sizeof(gp));
+	VG_CLEAR(gp);
 	gp.param = I915_PARAM_CHIPSET_ID;
 	gp.value = &devid;
 
-	if (ioctl(fd, DRM_IOCTL_I915_GETPARAM, &gp, sizeof(gp)))
+	if (drmIoctl(fd, DRM_IOCTL_I915_GETPARAM, &gp))
 		return 0;
 
 	return devid;
@@ -103,7 +112,7 @@ static inline void intel_set_device(ScrnInfoPtr scrn, struct intel_device *dev)
 	xf86GetEntityPrivate(scrn->entityList[0], intel_device_key)->ptr = dev;
 }
 
-static Bool is_i915_device(int fd)
+static int is_i915_device(int fd)
 {
 	drm_version_t version;
 	char name[5] = "";
@@ -113,9 +122,27 @@ static Bool is_i915_device(int fd)
 	version.name = name;
 
 	if (drmIoctl(fd, DRM_IOCTL_VERSION, &version))
-		return FALSE;
+		return 0;
 
 	return strcmp("i915", name) == 0;
+}
+
+static int is_i915_gem(int fd)
+{
+	int ret = is_i915_device(fd);
+
+	if (ret) {
+		struct drm_i915_getparam gp;
+
+		VG_CLEAR(gp);
+		gp.param = I915_PARAM_HAS_GEM;
+		gp.value = &ret;
+
+		if (drmIoctl(fd, DRM_IOCTL_I915_GETPARAM, &gp))
+			ret = 0;
+	}
+
+	return ret;
 }
 
 static int __intel_check_device(int fd)
@@ -123,64 +150,23 @@ static int __intel_check_device(int fd)
 	int ret;
 
 	/* Confirm that this is a i915.ko device with GEM/KMS enabled */
-	ret = is_i915_device(fd);
-	if (ret) {
-		struct drm_i915_getparam gp;
-		gp.param = I915_PARAM_HAS_GEM;
-		gp.value = &ret;
-		if (drmIoctl(fd, DRM_IOCTL_I915_GETPARAM, &gp))
-			ret = FALSE;
-	}
+	ret = is_i915_gem(fd);
 	if (ret && !hosted()) {
 		struct drm_mode_card_res res;
 
 		memset(&res, 0, sizeof(res));
 		if (drmIoctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &res))
-			ret = FALSE;
+			ret = 0;
 	}
 
 	return ret;
 }
 
-static int fd_set_cloexec(int fd)
-{
-	int flags;
-
-	if (fd == -1)
-		return fd;
-
-#ifdef FD_CLOEXEC
-	flags = fcntl(fd, F_GETFD);
-	if (flags != -1) {
-		flags |= FD_CLOEXEC;
-		fcntl(fd, F_SETFD, flags);
-	}
-#endif
-
-	return fd;
-}
-
-static int fd_set_nonblock(int fd)
-{
-	int flags;
-
-	if (fd == -1)
-		return fd;
-
-	flags = fcntl(fd, F_GETFD);
-	if (flags != -1) {
-		flags |= O_NONBLOCK;
-		fcntl(fd, F_SETFD, flags);
-	}
-
-	return fd;
-}
-
-static int __intel_open_device(const struct pci_device *pci, char **path)
+static int __intel_open_device(const struct pci_device *pci, const char *path)
 {
 	int fd;
 
-	if (*path == NULL) {
+	if (path == NULL) {
 		char id[20];
 		int ret;
 
@@ -201,26 +187,50 @@ static int __intel_open_device(const struct pci_device *pci, char **path)
 			(void)xf86LoadKernelModule("fbcon");
 		}
 
-		fd = drmOpen(NULL, id);
-		if (fd != -1) {
-			*path = drmGetDeviceNameFromFd(fd);
-			if (*path == NULL) {
-				close(fd);
-				fd = -1;
-			}
-		}
-		fd = fd_set_nonblock(fd);
+		fd = fd_set_nonblock(drmOpen(NULL, id));
 	} else {
 #ifdef O_CLOEXEC
-		fd = open(*path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
+		fd = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
 #else
 		fd = -1;
 #endif
 		if (fd == -1)
-			fd = fd_set_cloexec(open(*path, O_RDWR | O_NONBLOCK));
+			fd = fd_set_cloexec(open(path, O_RDWR | O_NONBLOCK));
 	}
 
 	return fd;
+}
+
+static char *find_master_node(int fd)
+{
+	struct stat st, master;
+	char buf[128];
+
+	if (fstat(fd, &st))
+		return NULL;
+
+	if (!S_ISCHR(st.st_mode))
+		return NULL;
+
+	sprintf(buf, "/dev/dri/card%d", (int)(st.st_rdev & 0x7f));
+	if (stat(buf, &master) == 0 &&
+	    st.st_mode == master.st_mode &&
+	    (st.st_rdev & 0x7f) == master.st_rdev)
+		return strdup(buf);
+
+	/* Fallback to iterating over the usual suspects */
+	return drmGetDeviceNameFromFd(fd);
+}
+
+static int is_render_node(int fd, struct stat *st)
+{
+	if (fstat(fd, st))
+		return 0;
+
+	if (!S_ISCHR(st->st_mode))
+		return 0;
+
+	return st->st_rdev & 0x80;
 }
 
 static char *find_render_node(int fd)
@@ -229,14 +239,8 @@ static char *find_render_node(int fd)
 	struct stat master, render;
 	char buf[128];
 
-	if (fstat(fd, &master))
-		return NULL;
-
-	if (!S_ISCHR(master.st_mode))
-		return NULL;
-
 	/* Are we a render-node ourselves? */
-	if (master.st_rdev & 0x80)
+	if (is_render_node(fd, &master))
 		return NULL;
 
 	sprintf(buf, "/dev/dri/renderD%d", (int)((master.st_rdev | 0x80) & 0xbf));
@@ -273,19 +277,13 @@ static char *get_path(struct xf86_platform_device *dev)
 #endif
 
 
-#if defined(ODEV_ATTRIB_FD) && 0
+#if defined(ODEV_ATTRIB_FD)
 static int get_fd(struct xf86_platform_device *dev)
 {
-	const char *str;
-
 	if (dev == NULL)
 		return -1;
 
-	str = xf86_get_platform_device_attrib(dev, ODEV_ATTRIB_FD);
-	if (str == NULL)
-		return -1;
-
-	return atoi(str);
+	return xf86_get_platform_device_int_attrib(dev, ODEV_ATTRIB_FD, -1);
 }
 
 #else
@@ -294,16 +292,27 @@ static int get_fd(struct xf86_platform_device *dev)
 {
 	return -1;
 }
-
 #endif
+
+static int is_master(int fd)
+{
+	drmSetVersion sv;
+
+	sv.drm_di_major = 1;
+	sv.drm_di_minor = 1;
+	sv.drm_dd_major = -1;
+	sv.drm_dd_minor = -1;
+
+	return drmIoctl(fd, DRM_IOCTL_SET_VERSION, &sv) == 0;
+}
 
 int intel_open_device(int entity_num,
 		      const struct pci_device *pci,
 		      struct xf86_platform_device *platform)
 {
 	struct intel_device *dev;
-	char *local_path;
-	int fd;
+	char *path;
+	int fd, master_count;
 
 	if (intel_device_key == -1)
 		intel_device_key = xf86AllocateEntityPrivateIndex();
@@ -314,13 +323,23 @@ int intel_open_device(int entity_num,
 	if (dev)
 		return dev->fd;
 
-	local_path = get_path(platform);
+	path = get_path(platform);
 
+	master_count = 1; /* DRM_MASTER is managed by Xserver */
 	fd = get_fd(platform);
-	if (fd == -1)
-		fd = __intel_open_device(pci, &local_path);
-	if (fd == -1)
-		goto err_path;
+	if (fd == -1) {
+		fd = __intel_open_device(pci, path);
+		if (fd == -1)
+			goto err_path;
+
+		master_count = 0;
+	}
+
+	if (path == NULL) {
+		path = find_master_node(fd);
+		if (path == NULL)
+			goto err_close;
+	}
 
 	if (!__intel_check_device(fd))
 		goto err_close;
@@ -329,29 +348,42 @@ int intel_open_device(int entity_num,
 	if (dev == NULL)
 		goto err_close;
 
+	/* If hosted under a system compositor, just pretend to be master */
+	if (hosted())
+		master_count++;
+
+	/* Non-root user holding MASTER, don't let go */
+	if (geteuid() && is_master(fd))
+		master_count++;
+
 	dev->fd = fd;
-	dev->open_count = 0;
-	dev->master_count = 0;
-	dev->master_node = local_path;
+	dev->open_count = master_count;
+	dev->master_count = master_count;
+	dev->master_node = path;
 	dev->render_node = find_render_node(fd);
 	if (dev->render_node == NULL)
 		dev->render_node = dev->master_node;
-
-	/* If hosted under a system compositor, just pretend to be master */
-	if (hosted()) {
-		dev->open_count++;
-		dev->master_count++;
-	}
 
 	xf86GetEntityPrivate(entity_num, intel_device_key)->ptr = dev;
 
 	return fd;
 
 err_close:
-	close(fd);
+	if (master_count == 0) /* Don't close server-fds */
+		close(fd);
 err_path:
-	free(local_path);
+	free(path);
 	return -1;
+}
+
+int __intel_peek_fd(ScrnInfoPtr scrn)
+{
+	struct intel_device *dev;
+
+	dev = intel_device(scrn);
+	assert(dev && dev->fd != -1);
+
+	return dev->fd;
 }
 
 int intel_get_device(ScrnInfoPtr scrn)
@@ -402,6 +434,45 @@ const char *intel_get_client_name(ScrnInfoPtr scrn)
 	return dev->render_node;
 }
 
+static int authorise(struct intel_device *dev, int fd)
+{
+	struct stat st;
+	drm_magic_t magic;
+
+	assert(is_i915_gem(fd));
+
+	if (is_render_node(fd, &st)) /* restricted authority, do not elevate */
+		return 1;
+
+	return drmGetMagic(fd, &magic) == 0 && drmAuthMagic(dev->fd, magic) == 0;
+}
+
+int intel_get_client_fd(ScrnInfoPtr scrn)
+{
+	struct intel_device *dev;
+	int fd = -1;
+
+	dev = intel_device(scrn);
+	assert(dev);
+	assert(dev->fd != -1);
+	assert(dev->render_node);
+
+#ifdef O_CLOEXEC
+	fd = open(dev->render_node, O_RDWR | O_CLOEXEC);
+#endif
+	if (fd < 0)
+		fd = fd_set_cloexec(open(dev->render_node, O_RDWR));
+	if (fd < 0)
+		return -BadAlloc;
+
+	if (!authorise(dev, fd)) {
+		close(fd);
+		return -BadMatch;
+	}
+
+	return fd;
+}
+
 int intel_get_device_id(ScrnInfoPtr scrn)
 {
 	struct intel_device *dev = intel_device(scrn);
@@ -448,20 +519,6 @@ int intel_put_master(ScrnInfoPtr scrn)
 	}
 
 	return ret;
-}
-
-void __intel_uxa_release_device(ScrnInfoPtr scrn)
-{
-	struct intel_device *dev = intel_device(scrn);
-	if (dev && dev->open_count == 0) {
-		intel_set_device(scrn, NULL);
-
-		drmClose(dev->fd);
-		if (dev->render_node != dev->master_node)
-			free(dev->render_node);
-		free(dev->master_node);
-		free(dev);
-	}
 }
 
 void intel_put_device(ScrnInfoPtr scrn)

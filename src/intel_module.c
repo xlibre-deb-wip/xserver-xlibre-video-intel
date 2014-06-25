@@ -114,6 +114,10 @@ static const struct intel_device_info intel_broadwell_info = {
 	.gen = 0100,
 };
 
+static const struct intel_device_info intel_cherryview_info = {
+	.gen = 0101,
+};
+
 static const SymTabRec intel_chipsets[] = {
 	{PCI_CHIP_I810,				"i810"},
 	{PCI_CHIP_I810_DC100,			"i810-dc100"},
@@ -269,6 +273,8 @@ static const struct pci_id_match intel_device_match[] = {
 	INTEL_BDW_D_IDS(&intel_broadwell_info),
 	INTEL_BDW_M_IDS(&intel_broadwell_info),
 
+	INTEL_CHV_IDS(&intel_cherryview_info),
+
 	INTEL_VGA_DEVICE(PCI_MATCH_ANY, &intel_generic_info),
 #endif
 
@@ -419,6 +425,12 @@ static Bool intel_driver_func(ScrnInfoPtr pScrn,
 #endif
 
 		return TRUE;
+
+#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,15,99,902,0)
+	case SUPPORTS_SERVER_FDS:
+		return TRUE;
+#endif
+
 	default:
 		/* Unknown or deprecated function */
 		return FALSE;

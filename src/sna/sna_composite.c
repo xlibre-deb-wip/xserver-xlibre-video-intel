@@ -418,9 +418,12 @@ static void apply_damage(struct sna_composite_op *op, RegionPtr region)
 	assert_pixmap_contains_box(op->dst.pixmap, RegionExtents(region));
 	if (region->data == NULL &&
 	    region->extents.x2 - region->extents.x1 == op->dst.width &&
-	    region->extents.y2 - region->extents.y1 == op->dst.height)
-		sna_damage_all(op->damage, op->dst.width, op->dst.height);
-	else
+	    region->extents.y2 - region->extents.y1 == op->dst.height) {
+		*op->damage = _sna_damage_all(*op->damage,
+					      op->dst.width,
+					      op->dst.height);
+		op->damage = NULL;
+	} else
 		sna_damage_add(op->damage, region);
 }
 
@@ -527,7 +530,9 @@ sna_composite_fb(CARD8 op,
 	    src->filter != PictFilterConvolution &&
 	    (op == PictOpSrc || (op == PictOpOver && !PICT_FORMAT_A(src->format))) &&
 	    (dst->format == src->format || dst->format == alphaless(src->format)) &&
-	    sna_transform_is_integer_translation(src->transform, &tx, &ty)) {
+	    sna_transform_is_imprecise_integer_translation(src->transform, src->filter,
+							   dst->polyMode == PolyModePrecise,
+							   &tx, &ty)) {
 		PixmapPtr dst_pixmap = get_drawable_pixmap(dst->pDrawable);
 		PixmapPtr src_pixmap = get_drawable_pixmap(src->pDrawable);
 		int16_t sx = src_x + tx - (dst->pDrawable->x + dst_x);
@@ -570,6 +575,7 @@ sna_composite_fb(CARD8 op,
 
 					assert(box->x2 > box->x1 && box->y2 > box->y1);
 
+					sigtrap_assert_active();
 					memcpy_blt(src_pixmap->devPrivate.ptr,
 						   dst_pixmap->devPrivate.ptr,
 						   dst_pixmap->drawable.bitsPerPixel,
@@ -591,16 +597,12 @@ sna_composite_fb(CARD8 op,
 	mask_image = image_from_pict(mask, FALSE, &msk_xoff, &msk_yoff);
 	dest_image = image_from_pict(dst, TRUE, &dst_xoff, &dst_yoff);
 
-	if (src_image && dest_image && !(mask && !mask_image)) {
-		if (sigtrap_get() == 0) {
-			sna_image_composite(op, src_image, mask_image, dest_image,
-					    src_x + src_xoff, src_y + src_yoff,
-					    msk_x + msk_xoff, msk_y + msk_yoff,
-					    dst_x + dst_xoff, dst_y + dst_yoff,
-					    width, height);
-			sigtrap_put();
-		}
-	}
+	if (src_image && dest_image && !(mask && !mask_image))
+		sna_image_composite(op, src_image, mask_image, dest_image,
+				    src_x + src_xoff, src_y + src_yoff,
+				    msk_x + msk_xoff, msk_y + msk_yoff,
+				    dst_x + dst_xoff, dst_y + dst_yoff,
+				    width, height);
 
 	free_pixman_pict(src, src_image);
 	free_pixman_pict(mask, mask_image);
@@ -679,7 +681,8 @@ sna_composite(CARD8 op,
 	}
 
 	if (use_cpu(pixmap, priv, op, width, height) &&
-	    !picture_is_gpu(sna, src) && !picture_is_gpu(sna, mask)) {
+	    !picture_is_gpu(sna, src, PREFER_GPU_RENDER) &&
+	    !picture_is_gpu(sna, mask, PREFER_GPU_RENDER)) {
 		DBG(("%s: fallback, dst pixmap=%ld is too small (or completely damaged)\n",
 		     __FUNCTION__, pixmap->drawable.serialNumber));
 		goto fallback;
@@ -720,7 +723,8 @@ sna_composite(CARD8 op,
 				   region.extents.y1,
 				   region.extents.x2 - region.extents.x1,
 				   region.extents.y2 - region.extents.y1,
-				   0, memset(&tmp, 0, sizeof(tmp)))) {
+				   region.data ? COMPOSITE_PARTIAL : 0,
+				   memset(&tmp, 0, sizeof(tmp)))) {
 		DBG(("%s: fallback due unhandled composite op\n", __FUNCTION__));
 		goto fallback;
 	}
@@ -942,35 +946,35 @@ sna_composite_rectangles(CARD8		 op,
 	 */
 	hint = can_render(sna) ? PREFER_GPU : 0;
 	if (op <= PictOpSrc) {
-		if (priv->cpu_damage &&
-		    region_subsumes_damage(&region, priv->cpu_damage)) {
-			DBG(("%s: discarding existing CPU damage\n", __FUNCTION__));
-			if (priv->gpu_bo && priv->gpu_bo->proxy) {
-				assert(priv->gpu_damage == NULL);
-				kgem_bo_destroy(&sna->kgem, priv->gpu_bo);
-				priv->gpu_bo = NULL;
+		if (region.data == NULL) {
+			hint |= IGNORE_CPU;
+			if (region_subsumes_drawable(&region, &pixmap->drawable))
+				hint |= REPLACES;
+			if (priv->cpu_damage &&
+			    (hint & REPLACES ||
+			     region_subsumes_damage(&region, priv->cpu_damage))) {
+				DBG(("%s: discarding existing CPU damage\n", __FUNCTION__));
+				if (priv->gpu_bo && priv->gpu_bo->proxy) {
+					assert(priv->gpu_damage == NULL);
+					kgem_bo_destroy(&sna->kgem, priv->gpu_bo);
+					priv->gpu_bo = NULL;
+				}
+				sna_damage_destroy(&priv->cpu_damage);
+				list_del(&priv->flush_list);
 			}
-			sna_damage_destroy(&priv->cpu_damage);
-			list_del(&priv->flush_list);
-		}
-		if (region_subsumes_drawable(&region, &pixmap->drawable))
-			hint |= REPLACES;
-		if (hint & REPLACES || box_inplace(pixmap, &region.extents)) {
-			DBG(("%s: promoting to full GPU\n", __FUNCTION__));
-			if (priv->gpu_bo && priv->cpu_damage == NULL) {
-				assert(priv->gpu_bo->proxy == NULL);
-				sna_damage_all(&priv->gpu_damage,
-					       pixmap->drawable.width,
-					       pixmap->drawable.height);
+			if (hint & REPLACES ||
+			    box_inplace(pixmap, &region.extents)) {
+				if (priv->gpu_bo && priv->cpu_damage == NULL) {
+					DBG(("%s: promoting to full GPU\n", __FUNCTION__));
+					assert(priv->gpu_bo->proxy == NULL);
+					sna_damage_all(&priv->gpu_damage, pixmap);
+				}
 			}
 		}
 		if (priv->cpu_damage == NULL) {
 			DBG(("%s: dropping last-cpu hint\n", __FUNCTION__));
 			priv->cpu = false;
 		}
-
-		if (region.data == NULL)
-			hint |= IGNORE_CPU;
 	}
 
 	bo = sna_drawable_use_bo(&pixmap->drawable, hint,
@@ -1034,9 +1038,7 @@ sna_composite_rectangles(CARD8		 op,
 	 */
 	if (region_subsumes_drawable(&region, &pixmap->drawable)) {
 		if (damage) {
-			sna_damage_all(damage,
-				       pixmap->drawable.width,
-				       pixmap->drawable.height);
+			sna_damage_all(damage, pixmap);
 			sna_damage_destroy(damage == &priv->gpu_damage ?
 					   &priv->cpu_damage : &priv->gpu_damage);
 		}
@@ -1094,6 +1096,7 @@ fallback:
 							  dst->format))
 				goto fallback_composite;
 
+			sigtrap_assert_active();
 			if (pixel == 0 &&
 			    box->x2 - box->x1 == pixmap->drawable.width &&
 			    box->y2 - box->y1 == pixmap->drawable.height) {

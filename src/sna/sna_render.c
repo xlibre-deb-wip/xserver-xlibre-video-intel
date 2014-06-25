@@ -708,7 +708,7 @@ static int sna_render_picture_downsample(struct sna *sna,
 	struct sna_pixmap *priv;
 	pixman_transform_t t;
 	PixmapPtr tmp;
-	int width, height, size;
+	int width, height, size, max_size;
 	int sx, sy, sw, sh;
 	int error, ret = 0;
 	BoxRec box, b;
@@ -777,7 +777,7 @@ static int sna_render_picture_downsample(struct sna *sna,
 		goto fixup;
 	}
 
-	if (!sna_pixmap_force_to_gpu(pixmap, MOVE_SOURCE_HINT | MOVE_READ)) {
+	if (!sna_pixmap_move_to_gpu(pixmap, MOVE_SOURCE_HINT | MOVE_READ)) {
 fixup:
 		DBG(("%s: unable to create GPU bo for target or temporary pixmaps\n",
 		     __FUNCTION__));
@@ -789,6 +789,11 @@ fixup:
 	format = PictureMatchFormat(screen,
 				    pixmap->drawable.depth,
 				    picture->format);
+	if (format == NULL) {
+		DBG(("%s: invalid depth=%d, format=%08x\n",
+		     __FUNCTION__, pixmap->drawable.depth, picture->format));
+		goto fixup;
+	}
 
 	tmp_dst = CreatePicture(0, &tmp->drawable, format, 0, NULL,
 				serverClient, &error);
@@ -818,8 +823,12 @@ fixup:
 	ValidatePicture(tmp_src);
 
 	/* Use a small size to accommodate enlargement through tile alignment */
+	max_size = sna_max_tile_copy_size(sna, sna_pixmap(pixmap)->gpu_bo, priv->gpu_bo);
+	if (max_size == 0)
+		goto cleanup_dst;
+
 	size = sna->render.max_3d_size - 4096 / pixmap->drawable.bitsPerPixel;
-	while (size * size * 4 > sna->kgem.max_copy_tile_size)
+	while (size * size * 4 > max_size)
 		size /= 2;
 
 	sw = size / sx - 2 * sx;
@@ -1659,7 +1668,8 @@ do_fixup:
 		dst = pixman_image_create_bits(channel->pict_format,
 					       w, h, ptr, channel->bo->pitch);
 	else
-		dst = pixman_image_create_bits(picture->format, w, h, NULL, 0);
+		dst = pixman_image_create_bits((pixman_format_code_t)picture->format,
+					       w, h, NULL, 0);
 	if (!dst) {
 		kgem_bo_destroy(&sna->kgem, channel->bo);
 		return 0;
@@ -1674,14 +1684,11 @@ do_fixup:
 
 	DBG(("%s: compositing tmp=(%d+%d, %d+%d)x(%d, %d)\n",
 	     __FUNCTION__, x, dx, y, dy, w, h));
-	if (sigtrap_get() == 0) {
-		sna_image_composite(PictOpSrc, src, NULL, dst,
-				    x + dx, y + dy,
-				    0, 0,
-				    0, 0,
-				    w, h);
-		sigtrap_put();
-	}
+	sna_image_composite(PictOpSrc, src, NULL, dst,
+			    x + dx, y + dy,
+			    0, 0,
+			    0, 0,
+			    w, h);
 	free_pixman_pict(picture, src);
 
 	/* Then convert to card format */
@@ -1849,7 +1856,7 @@ sna_render_picture_convert(struct sna *sna,
 		if (!sna_pixmap_move_to_cpu(pixmap, MOVE_READ))
 			return 0;
 
-		src = pixman_image_create_bits(picture->format,
+		src = pixman_image_create_bits((pixman_format_code_t)picture->format,
 					       pixmap->drawable.width,
 					       pixmap->drawable.height,
 					       pixmap->devPrivate.ptr,
@@ -2027,7 +2034,6 @@ sna_render_composite_redirect(struct sna *sna,
 			}
 
 			assert(op->dst.bo != t->real_bo);
-			op->dst.bo->unique_id = kgem_get_unique_id(&sna->kgem);
 			op->dst.bo->pitch = t->real_bo->pitch;
 
 			op->dst.x -= box.x1;

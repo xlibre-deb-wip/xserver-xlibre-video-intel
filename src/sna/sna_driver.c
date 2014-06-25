@@ -71,6 +71,12 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "git_version.h"
 #endif
 
+#ifdef TEARFREE
+#define ENABLE_TEAR_FREE TRUE
+#else
+#define ENABLE_TEAR_FREE FALSE
+#endif
+
 DevPrivateKeyRec sna_pixmap_key;
 DevPrivateKeyRec sna_gc_key;
 DevPrivateKeyRec sna_window_key;
@@ -196,7 +202,7 @@ static Bool sna_set_desired_mode(struct sna *sna)
 		sna_set_fallback_mode(scrn);
 	}
 
-	sna_mode_update(sna);
+	sna_mode_check(sna);
 	return TRUE;
 }
 
@@ -281,6 +287,19 @@ static Bool sna_create_screen_resources(ScreenPtr screen)
 	return TRUE;
 }
 
+static Bool sna_save_screen(ScreenPtr screen, int mode)
+{
+	ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
+
+	DBG(("%s(mode=%d)\n", __FUNCTION__, mode));
+	if (!scrn->vtSema)
+		return FALSE;
+
+	xf86SaveScreen(screen, mode);
+	sna_crtc_config_notify(screen);
+	return TRUE;
+}
+
 static void sna_selftest(void)
 {
 	sna_damage_selftest();
@@ -292,27 +311,6 @@ static bool has_vsync(struct sna *sna)
 		return false;
 
 	return true;
-}
-
-static bool has_pageflipping(struct sna *sna)
-{
-	drm_i915_getparam_t gp;
-	int v;
-
-	if (sna->flags & SNA_IS_HOSTED)
-		return false;
-
-	v = 0;
-
-	VG_CLEAR(gp);
-	gp.param = I915_PARAM_HAS_PAGEFLIPPING;
-	gp.value = &v;
-
-	if (drmIoctl(sna->kgem.fd, DRM_IOCTL_I915_GETPARAM, &gp))
-		return false;
-
-	VG(VALGRIND_MAKE_MEM_DEFINED(&v, sizeof(v)));
-	return v > 0;
 }
 
 static void sna_setup_capabilities(ScrnInfoPtr scrn, int fd)
@@ -400,6 +398,37 @@ static Bool sna_option_cast_to_bool(struct sna *sna, int id, Bool val)
 	return val;
 }
 
+static unsigned sna_option_cast_to_unsigned(struct sna *sna, int id, unsigned val)
+{
+	const char *str = xf86GetOptValString(sna->Options, id);
+	unsigned v;
+
+	if (str == NULL || *str == '\0')
+		return val;
+
+	if (namecmp(str, "on") == 0)
+		return val;
+	if (namecmp(str, "true") == 0)
+		return val;
+	if (namecmp(str, "yes") == 0)
+		return val;
+
+	if (namecmp(str, "0") == 0)
+		return 0;
+	if (namecmp(str, "off") == 0)
+		return 0;
+	if (namecmp(str, "false") == 0)
+		return 0;
+	if (namecmp(str, "no") == 0)
+		return 0;
+
+	v = atoi(str);
+	if (v)
+		return v;
+
+	return val;
+}
+
 static Bool fb_supports_depth(int fd, int depth)
 {
 	struct drm_i915_gem_create create;
@@ -426,6 +455,24 @@ static Bool fb_supports_depth(int fd, int depth)
 	(void)drmIoctl(fd, DRM_IOCTL_GEM_CLOSE, &create.handle);
 
 	return ret;
+}
+
+static void setup_dri(struct sna *sna)
+{
+	unsigned level;
+
+	sna->dri2.available = false;
+	sna->dri3.available = false;
+
+	level = sna_option_cast_to_unsigned(sna, OPTION_DRI, ~0);
+#if HAVE_DRI3
+	if (level >= 3)
+		sna->dri3.available = !!xf86LoadSubModule(sna->scrn, "dri3");
+#endif
+#if HAVE_DRI2
+	if (level >= 2)
+		sna->dri2.available = !!xf86LoadSubModule(sna->scrn, "dri2");
+#endif
 }
 
 /**
@@ -564,6 +611,9 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 	if (xf86ReturnOptValBool(sna->Options, OPTION_TILING_FB, FALSE))
 		sna->tiling &= ~SNA_TILING_FB;
 
+	if (xf86ReturnOptValBool(sna->Options, OPTION_DELETE_DP12, FALSE))
+		sna->flags |= SNA_REMOVE_OUTPUTS;
+
 	if (!xf86ReturnOptValBool(sna->Options, OPTION_SWAPBUFFERS_WAIT, TRUE))
 		sna->flags |= SNA_NO_WAIT;
 	DBG(("%s: swapbuffer wait? %s\n", __FUNCTION__, sna->flags & SNA_NO_WAIT ? "disabled" : "enabled"));
@@ -573,7 +623,7 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 		sna->flags |= SNA_NO_VSYNC;
 	DBG(("%s: vsync? %s\n", __FUNCTION__, sna->flags & SNA_NO_VSYNC ? "disabled" : "enabled"));
 
-	if (!has_pageflipping(sna) ||
+	if (sna->flags & SNA_IS_HOSTED ||
 	    !xf86ReturnOptValBool(sna->Options, OPTION_PAGEFLIP, TRUE))
 		sna->flags |= SNA_NO_FLIP;
 	DBG(("%s: page flips? %s\n", __FUNCTION__, sna->flags & SNA_NO_FLIP ? "disabled" : "enabled"));
@@ -583,10 +633,6 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 		sna->flags |= SNA_TRIPLE_BUFFER;
 	DBG(("%s: triple buffer? %s\n", __FUNCTION__, sna->flags & SNA_TRIPLE_BUFFER ? "enabled" : "disabled"));
 
-	if ((sna->flags & (SNA_NO_VSYNC | SNA_NO_FLIP)) == 0 &&
-	    xf86ReturnOptValBool(sna->Options, OPTION_TEAR_FREE, FALSE))
-		sna->flags |= SNA_TEAR_FREE;
-
 	if (xf86ReturnOptValBool(sna->Options, OPTION_CRTC_PIXMAPS, FALSE))
 		sna->flags |= SNA_FORCE_SHADOW;
 
@@ -594,8 +640,6 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 		   sna->tiling & SNA_TILING_FB ? "tiled" : "linear");
 	xf86DrvMsg(scrn->scrnIndex, X_CONFIG, "Pixmaps %s\n",
 		   sna->tiling & SNA_TILING_2D ? "tiled" : "linear");
-	xf86DrvMsg(scrn->scrnIndex, X_CONFIG, "\"Tear free\" %sabled\n",
-		   sna->flags & SNA_TEAR_FREE ? "en" : "dis");
 	xf86DrvMsg(scrn->scrnIndex, X_CONFIG, "Forcing per-crtc-pixmaps? %s\n",
 		   sna->flags & SNA_FORCE_SHADOW ? "yes" : "no");
 
@@ -610,12 +654,23 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int flags)
 	}
 	scrn->currentMode = scrn->modes;
 
+	if (sna->flags & SNA_HAS_FLIP &&
+	    xf86ReturnOptValBool(sna->Options, OPTION_TEAR_FREE, ENABLE_TEAR_FREE))
+		sna->flags |= SNA_TEAR_FREE;
+	xf86DrvMsg(scrn->scrnIndex, X_CONFIG, "TearFree %sabled\n",
+		   sna->flags & SNA_TEAR_FREE ? "en" : "dis");
+
 	xf86SetGamma(scrn, zeros);
 	xf86SetDpi(scrn, 0, 0);
 
-	sna->dri_available = false;
-	if (sna_option_cast_to_bool(sna, OPTION_DRI, TRUE))
-		sna->dri_available = !!xf86LoadSubModule(scrn, "dri2");
+	setup_dri(sna);
+
+	sna->present.available = false;
+	if (xf86ReturnOptValBool(sna->Options, OPTION_PRESENT, TRUE)) {
+#if HAVE_PRESENT
+		sna->present.available = !!xf86LoadSubModule(scrn, "present");
+#endif
+	}
 
 	sna_acpi_init(sna);
 
@@ -625,6 +680,17 @@ cleanup:
 	scrn->driverPrivate = (void *)((uintptr_t)sna->info | 1);
 	free(sna);
 	return FALSE;
+}
+
+static bool has_shadow(struct sna *sna)
+{
+	if (!sna->mode.shadow_damage)
+		return false;
+
+	if (RegionNil(DamageRegion(sna->mode.shadow_damage)))
+		return false;
+
+	return sna->mode.flip_active == 0;
 }
 
 static void
@@ -642,7 +708,7 @@ sna_block_handler(BLOCKHANDLER_ARGS_DECL)
 
 	sna->BlockHandler(BLOCKHANDLER_ARGS);
 
-	if (*tv == NULL || ((*tv)->tv_usec | (*tv)->tv_sec))
+	if (*tv == NULL || ((*tv)->tv_usec | (*tv)->tv_sec) || has_shadow(sna))
 		sna_accel_block_handler(sna, tv);
 }
 
@@ -678,7 +744,7 @@ sna_handle_uevents(int fd, void *closure)
 	ScrnInfoPtr scrn = closure;
 	struct sna *sna = to_sna(scrn);
 	struct udev_device *dev;
-	const char *hotplug;
+	const char *str;
 	struct stat s;
 	dev_t udev_devnum;
 
@@ -689,25 +755,27 @@ sna_handle_uevents(int fd, void *closure)
 		return;
 
 	udev_devnum = udev_device_get_devnum(dev);
-	if (fstat(sna->kgem.fd, &s)) {
+	if (fstat(sna->kgem.fd, &s) || memcmp(&s.st_rdev, &udev_devnum, sizeof (dev_t))) {
 		udev_device_unref(dev);
 		return;
 	}
 
-	/*
-	 * Check to make sure this event is directed at our
-	 * device (by comparing dev_t values), then make
-	 * sure it's a hotplug event (HOTPLUG=1)
-	 */
+	str = udev_device_get_property_value(dev, "DISCOVER");
+	if (str && atoi(str) == 1) {
+		DBG(("%s: discover event (vtSema?=%d)\n",
+		     __FUNCTION__, sna->scrn->vtSema));
+		if (sna->scrn->vtSema)
+			sna_mode_discover(sna);
+		else
+			sna->flags |= SNA_REDISCOVER;
+	}
 
-	hotplug = udev_device_get_property_value(dev, "HOTPLUG");
-
-	if (memcmp(&s.st_rdev, &udev_devnum, sizeof (dev_t)) == 0 &&
-	    hotplug && atoi(hotplug) == 1) {
+	str = udev_device_get_property_value(dev, "HOTPLUG");
+	if (str && atoi(str) == 1) {
 		DBG(("%s: hotplug event (vtSema?=%d)\n",
 		     __FUNCTION__, sna->scrn->vtSema));
 		if (sna->scrn->vtSema) {
-			sna_mode_update(sna);
+			sna_mode_check(sna);
 			RRGetInfo(xf86ScrnToScreen(scrn), TRUE);
 		} else
 			sna->flags |= SNA_REPROBE;
@@ -806,8 +874,6 @@ static void sna_leave_vt(VT_FUNC_ARGS_DECL)
 
 	DBG(("%s\n", __FUNCTION__));
 
-	xf86_hide_cursors(scrn);
-
 	sna_mode_reset(to_sna(scrn));
 
 	if (intel_put_master(scrn))
@@ -824,14 +890,22 @@ static Bool sna_early_close_screen(CLOSE_SCREEN_ARGS_DECL)
 
 	/* XXX Note that we will leak kernel resources if !vtSema */
 
-	xf86_hide_cursors(scrn);
 	sna_uevent_fini(scrn);
-
 	sna_mode_close(sna);
 
-	if (sna->dri_open) {
-		sna_dri_close(sna, screen);
-		sna->dri_open = false;
+	if (sna->present.open) {
+		sna_present_close(sna, screen);
+		sna->present.open = false;
+	}
+
+	if (sna->dri3.open) {
+		sna_dri3_close(sna, screen);
+		sna->dri3.open = false;
+	}
+
+	if (sna->dri2.open) {
+		sna_dri2_close(sna, screen);
+		sna->dri2.open = false;
 	}
 
 	if (sna->front) {
@@ -843,8 +917,6 @@ static Bool sna_early_close_screen(CLOSE_SCREEN_ARGS_DECL)
 		intel_put_master(scrn);
 		scrn->vtSema = FALSE;
 	}
-
-	xf86_cursors_fini(screen);
 
 	return sna->CloseScreen(CLOSE_SCREEN_ARGS);
 }
@@ -910,6 +982,25 @@ sna_register_all_privates(void)
 #endif
 
 	return TRUE;
+}
+
+static void sna_dri_init(struct sna *sna, ScreenPtr screen)
+{
+	char str[128] = "";
+
+	if (sna->dri2.available)
+		sna->dri2.open = sna_dri2_open(sna, screen);
+	if (sna->dri2.open)
+		strcat(str, "DRI2 ");
+
+	if (sna->dri3.available)
+		sna->dri3.open = sna_dri3_open(sna, screen);
+	if (sna->dri3.open)
+		strcat(str, "DRI3 ");
+
+	if (*str)
+		xf86DrvMsg(sna->scrn->scrnIndex, X_INFO,
+			   "direct rendering: %senabled\n", str);
 }
 
 static size_t
@@ -999,16 +1090,7 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
 	if (!miDCInitialize(screen, xf86GetPointerScreenFuncs()))
 		return FALSE;
 
-	if ((sna->flags & SNA_IS_HOSTED) == 0 &&
-	    xf86_cursors_init(screen, SNA_CURSOR_X, SNA_CURSOR_Y,
-			       HARDWARE_CURSOR_TRUECOLOR_AT_8BPP |
-			       HARDWARE_CURSOR_BIT_ORDER_MSBFIRST |
-			       HARDWARE_CURSOR_INVERT_MASK |
-			       HARDWARE_CURSOR_SWAP_SOURCE_AND_MASK |
-			       HARDWARE_CURSOR_AND_SOURCE_WITH_MASK |
-			       HARDWARE_CURSOR_SOURCE_MASK_INTERLEAVE_64 |
-			       HARDWARE_CURSOR_UPDATE_UNHIDDEN |
-			       HARDWARE_CURSOR_ARGB))
+	if (sna_cursors_init(screen, sna))
 		xf86DrvMsg(scrn->scrnIndex, X_INFO, "HW Cursor enabled\n");
 
 	/* Must force it before EnterVT, so we are in control of VT and
@@ -1021,7 +1103,7 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
 	sna->WakeupHandler = screen->WakeupHandler;
 	screen->WakeupHandler = sna_wakeup_handler;
 
-	screen->SaveScreen = xf86SaveScreen;
+	screen->SaveScreen = sna_save_screen;
 	screen->CreateScreenResources = sna_create_screen_resources;
 
 	sna->CloseScreen = screen->CloseScreen;
@@ -1036,20 +1118,22 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
 	if (!miCreateDefColormap(screen))
 		return FALSE;
 
-	if (!xf86HandleColormaps(screen, 256, 8, sna_load_palette, NULL,
+	if (sna->mode.num_real_crtc &&
+	    !xf86HandleColormaps(screen, 256, 8, sna_load_palette, NULL,
 				 CMAP_RELOAD_ON_MODE_SWITCH |
-				 CMAP_PALETTED_TRUECOLOR)) {
+				 CMAP_PALETTED_TRUECOLOR))
 		return FALSE;
-	}
 
 	xf86DPMSInit(screen, xf86DPMSSet, 0);
 
 	sna_video_init(sna, screen);
-	if (sna->dri_available)
-		sna->dri_open = sna_dri_open(sna, screen);
-	if (sna->dri_open)
-		xf86DrvMsg(scrn->scrnIndex, X_INFO,
-			   "direct rendering: DRI2 Enabled\n");
+	sna_dri_init(sna, screen);
+
+	if (sna->present.available)
+		sna->present.open = sna_present_open(sna, screen);
+	if (sna->present.open)
+		xf86DrvMsg(sna->scrn->scrnIndex, X_INFO,
+			   "hardware support for Present enabled\n");
 
 	if (serverGeneration == 1)
 		xf86ShowUnusedOptions(scrn->scrnIndex, scrn->options);
@@ -1095,8 +1179,12 @@ static Bool sna_enter_vt(VT_FUNC_ARGS_DECL)
 	if (intel_get_master(scrn))
 		return FALSE;
 
-	if (!sna_set_desired_mode(sna))
-		return FALSE;
+	if (sna->flags & SNA_REDISCOVER) {
+		DBG(("%s: reporting deferred discover event\n",
+		     __FUNCTION__));
+		sna_mode_discover(sna);
+		sna->flags &= ~SNA_REDISCOVER;
+	}
 
 	if (sna->flags & SNA_REPROBE) {
 		DBG(("%s: reporting deferred hotplug event\n",
@@ -1105,7 +1193,7 @@ static Bool sna_enter_vt(VT_FUNC_ARGS_DECL)
 		sna->flags &= ~SNA_REPROBE;
 	}
 
-	return TRUE;
+	return sna_set_desired_mode(sna);
 }
 
 static Bool sna_switch_mode(SWITCH_MODE_ARGS_DECL)
@@ -1194,9 +1282,31 @@ static void sna_leave_vt__hosted(VT_FUNC_ARGS_DECL)
 {
 }
 
-Bool sna_init_scrn(ScrnInfoPtr scrn, int entity_num)
+static void describe_kms(ScrnInfoPtr scrn)
 {
-	DBG(("%s: entity_num=%d\n", __FUNCTION__, entity_num));
+	int fd = __intel_peek_fd(scrn);
+	drm_version_t version;
+	char name[128] = "";
+	char date[128] = "";
+
+	memset(&version, 0, sizeof(version));
+	version.name_len = sizeof(name) - 1;
+	version.name = name;
+	version.date_len = sizeof(date) - 1;
+	version.date = date;
+
+	if (drmIoctl(fd, DRM_IOCTL_VERSION, &version))
+		return;
+
+	xf86DrvMsg(scrn->scrnIndex, X_INFO,
+		   "Using Kernel Mode Setting driver: %s, version %d.%d.%d %s\n",
+		   version.name,
+		   version.version_major, version.version_minor, version.version_patchlevel,
+		   version.date);
+}
+
+static void describe_sna(ScrnInfoPtr scrn)
+{
 #if defined(USE_GIT_DESCRIBE)
 	xf86DrvMsg(scrn->scrnIndex, X_INFO,
 		   "SNA compiled from %s\n", git_version);
@@ -1221,6 +1331,13 @@ Bool sna_init_scrn(ScrnInfoPtr scrn, int entity_num)
 		   "SNA compiled with extra pixmap/damage validation\n");
 #endif
 	DBG(("pixman version: %s\n", pixman_version_string()));
+}
+
+Bool sna_init_scrn(ScrnInfoPtr scrn, int entity_num)
+{
+	DBG(("%s: entity_num=%d\n", __FUNCTION__, entity_num));
+	describe_kms(scrn);
+	describe_sna(scrn);
 
 	scrn->PreInit = sna_pre_init;
 	scrn->ScreenInit = sna_screen_init;

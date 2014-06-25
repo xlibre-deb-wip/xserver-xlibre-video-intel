@@ -1,4 +1,104 @@
-Snapshot 2.99.910 (2013-02-10)
+Snapshot 2.99.912 (2014-06-10)
+==============================
+A final round of features. We have everything from support for variable
+cursor sizes, support for the DRI3 and Present extensions, improved DRI2
+support, support for Xserver 1.16, userptr from kernel 3.16, and
+precursory support for DP multistream transport,
+
+ * Avoid discarding dirty pixels when promoting a migration to cover the
+   whole pixmap.
+   Regression in 2.99.911
+   https://bugs.freedesktop.org/show_bug.cgi?id=77063
+   https://bugs.freedesktop.org/show_bug.cgi?id=77178
+
+ * Avoid overextending degenerate lines (and consequentially accessing
+   pixels outside of our damaged area).
+   https://bugs.freedesktop.org/show_bug.cgi?id=77074
+
+ * Fix subpixel glyph rendering on gen2 devices (830-865 chipsets)
+   Regression in 2.99.911
+   https://bugs.freedesktop.org/show_bug.cgi?id=77201
+
+ * Share the global pixman glyph cache between ZaphodHeads
+   https://bugs.freedesktop.org/show_bug.cgi?id=54707
+
+ * Light up all connected outputs, even if their status is unknown, on
+   takeover from fbcon. This prevents loss of display after a resume
+   on recent kernels, for example.
+   https://bugs.freedesktop.org/show_bug.cgi?id=77768
+
+ * Show the video overlay (when supported by the hardware) across all
+   outputs.
+   https://bugs.freedesktop.org/show_bug.cgi?id=77802
+
+ * Do not discard damage when performing "BLT" spans inplace with the CPU.
+   Regression from 2.20.10
+
+ * Avoid discarding IO buffers too early during their preparation for a
+   new batch
+   https://bugs.freedesktop.org/show_bug.cgi?id=79238
+
+ * Fix fallback handling for displaying large scaled framebuffers (that
+   are too large to be scaled by the GPU in a single pass)
+   https://bugs.freedesktop.org/show_bug.cgi?id=79320
+
+ * Listen to external modifications of backlight value and propagate
+   the notifications to RandR clients. This should make the GUI report
+   ACPI keypresses to change the backlight correctly.
+   https://bugs.freedesktop.org/show_bug.cgi?id=79699
+
+ * UXA: fix pageflips with 3 heads.
+
+ * UXA: do not report a BadMatch error for DRI2GetMsc - as clients are
+   often unprepared and die when they get the unexpected error.
+
+
+Snapshot 2.99.911 (2014-03-19)
+==============================
+Hans de Geode has been working on making the Xserver work without
+privileges under the supervision of systemd/logind. This necessitated a
+few new features for us: server fds (where we are passed which fd to use
+to talk to our device by the Xserver who may in turn receive it from
+logind or other host) and a small backlight helper so that we can continue
+to provide a RandR backlight property when running without root privileges.
+
+ * Flush when changing blend modes on Ironlake, or else single glyphs
+   are sometimes rendered incorrectly
+   Regression from 2.20.15
+   https://bugs.freedesktop.org/show_bug.cgi?id=74882
+
+ * Fix pixmap offsets for pixman fallbacks onto Composite redirected
+   windows
+   https://bugs.freedesktop.org/show_bug.cgi?id=73811
+
+ * Fix blending onto 8-bit destinations, typically used for generating
+   masks in complex Render operations, on gen2
+   https://bugs.freedesktop.org/show_bug.cgi?id=75818
+
+ * Handle failure to create DRI bo more carefully. For example on gen3,
+   the DDX supports pixmaps that are much, much larger than OpenGL can
+   use and do not support the tiling modes that we request for OpenGL.
+   https://bugs.launchpad.net/ubuntu/+source/xserver-xorg-video-intel/+bug/1289049
+
+ * Fix a bookkeeping bug with proxy buffers that are marked active but
+   not actually inserted into a request (so they end up permanently
+   active and confuse everybody).
+   https://bugs.launchpad.net/ubuntu/+source/xserver-xorg-video-intel/+bug/1289923
+
+ * Actually turn off displays with DPMS off for UXA.
+   Regression from 2.99.903, but requires
+
+   kernel commit c9976dcf55c8aaa7037427b239f15e5acfc01a3a
+   Author: Chris Wilson <chris@chris-wilson.co.uk>
+   Date:   Sun Sep 29 19:15:07 2013 +0100
+
+       drm/i915: Only apply DPMS to the encoder if enabled
+
+   instead for correct behaviour on Haswell.
+   https://code.google.com/p/chromium/issues/detail?id=341135
+
+
+Snapshot 2.99.910 (2014-02-10)
 ==============================
 Another latent bug exposed by recent changes merit another snapshot for
 final testing.
@@ -23,7 +123,7 @@ final testing.
     https://bugs.freedesktop.org/show_bug.cgi?id=7237
 
 
-Snapshot 2.99.909 (2013-02-01)
+Snapshot 2.99.909 (2014-02-01)
 ==============================
 Pass the brown paper bag. Ridiculously stupid bug in last minute coding.
 
@@ -35,7 +135,7 @@ Pass the brown paper bag. Ridiculously stupid bug in last minute coding.
     https://bugs.freedesktop.org/show_bug.cgi?id=74327
 
 
-Snapshot 2.99.908 (2013-01-31)
+Snapshot 2.99.908 (2014-01-31)
 ==============================
 A couple of regressions dashed the hopes that .907 was to be the final
 release candidate, so time to start the cycle again after applying a few

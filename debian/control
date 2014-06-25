@@ -3,7 +3,7 @@ Section: x11
 Priority: optional
 Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
 XSBC-Original-Maintainer: Debian X Strike Force <debian-x@lists.debian.org>
-Uploaders: Drew Parsons <dparsons@debian.org>, Cyril Brulebois <kibi@debian.org>
+Uploaders: Drew Parsons <dparsons@debian.org>, Cyril Brulebois <kibi@debian.org>, Michael Stapelberg <stapelberg@debian.org>, maximilian attems <maks@debian.org>, Vincent Cheng <vcheng@debian.org>
 Build-Depends:
  debhelper (>= 8),
  dh-autoreconf,
@@ -37,7 +37,15 @@ Build-Depends:
  quilt (>= 0.46-7~),
  xutils-dev (>= 1:7.5+4),
  valgrind [amd64 armel armhf i386 mips mipsel powerpc s390x],
-Standards-Version: 3.9.4
+# intel-virtual-output:
+ libxinerama-dev,
+ libxrandr-dev,
+ libxdamage-dev,
+ libxcursor-dev,
+ libxtst-dev,
+ libxrender-dev,
+ libpixman-1-dev,
+Standards-Version: 3.9.5
 Vcs-Git: git://anonscm.debian.org/pkg-xorg/driver/xserver-xorg-video-intel
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-xorg/driver/xserver-xorg-video-intel.git
 Homepage: http://www.x.org/

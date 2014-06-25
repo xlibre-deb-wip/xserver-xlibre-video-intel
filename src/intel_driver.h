@@ -125,14 +125,14 @@ void intel_detect_chipset(ScrnInfoPtr scrn, EntityInfoPtr ent);
 int intel_open_device(int entity_num,
 		      const struct pci_device *pci,
 		      struct xf86_platform_device *dev);
+int __intel_peek_fd(ScrnInfoPtr scrn);
 int intel_get_device(ScrnInfoPtr scrn);
 const char *intel_get_client_name(ScrnInfoPtr scrn);
+int intel_get_client_fd(ScrnInfoPtr scrn);
 int intel_get_device_id(ScrnInfoPtr scrn);
 int intel_get_master(ScrnInfoPtr scrn);
 int intel_put_master(ScrnInfoPtr scrn);
 void intel_put_device(ScrnInfoPtr scrn);
-
-void __intel_uxa_release_device(ScrnInfoPtr scrn);
 
 #define hosted() (0)
 

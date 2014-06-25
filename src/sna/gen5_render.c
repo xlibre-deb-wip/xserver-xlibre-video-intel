@@ -54,6 +54,8 @@
 #define DBG_NO_STATE_CACHE 0
 #define DBG_NO_SURFACE_CACHE 0
 
+#define ALWAYS_FLUSH 0
+
 #define MAX_3D_SIZE 8192
 
 #define GEN5_GRF_BLOCKS(nreg)    ((nreg + 15) / 16 - 1)
@@ -1015,7 +1017,7 @@ gen5_emit_vertex_elements(struct sna *sna,
 inline static void
 gen5_emit_pipe_flush(struct sna *sna)
 {
-#if 0
+#if 1
 	OUT_BATCH(GEN5_PIPE_CONTROL |
 		  GEN5_PIPE_CONTROL_WC_FLUSH |
 		  (4 - 2));
@@ -1047,7 +1049,7 @@ gen5_emit_state(struct sna *sna,
 	}
 	gen5_emit_vertex_elements(sna, op);
 
-	if (kgem_bo_is_dirty(op->src.bo) || kgem_bo_is_dirty(op->mask.bo)) {
+	if (ALWAYS_FLUSH || kgem_bo_is_dirty(op->src.bo) || kgem_bo_is_dirty(op->mask.bo)) {
 		DBG(("%s: flushing dirty (%d, %d)\n", __FUNCTION__,
 		     kgem_bo_is_dirty(op->src.bo),
 		     kgem_bo_is_dirty(op->mask.bo)));
@@ -1346,6 +1348,7 @@ gen5_render_video(struct sna *sna,
 		  PixmapPtr pixmap)
 {
 	struct sna_composite_op tmp;
+	struct sna_pixmap *priv = sna_pixmap(pixmap);
 	int dst_width = dstRegion->extents.x2 - dstRegion->extents.x1;
 	int dst_height = dstRegion->extents.y2 - dstRegion->extents.y1;
 	int src_width = frame->src.x2 - frame->src.x1;
@@ -1353,16 +1356,12 @@ gen5_render_video(struct sna *sna,
 	float src_offset_x, src_offset_y;
 	float src_scale_x, src_scale_y;
 	int nbox, pix_xoff, pix_yoff;
-	struct sna_pixmap *priv;
 	BoxPtr box;
 
 	DBG(("%s: %dx%d -> %dx%d\n", __FUNCTION__,
 	     src_width, src_height, dst_width, dst_height));
 
-	priv = sna_pixmap_force_to_gpu(pixmap, MOVE_READ | MOVE_WRITE);
-	if (priv == NULL)
-		return false;
-
+	assert(priv->gpu_bo);
 	memset(&tmp, 0, sizeof(tmp));
 
 	tmp.op = PictOpSrc;
@@ -1514,13 +1513,25 @@ gen5_composite_picture(struct sna *sna,
 	y += dy + picture->pDrawable->y;
 
 	channel->is_affine = sna_transform_is_affine(picture->transform);
-	if (sna_transform_is_integer_translation(picture->transform, &dx, &dy)) {
+	if (sna_transform_is_imprecise_integer_translation(picture->transform, picture->filter, precise, &dx, &dy)) {
 		DBG(("%s: integer translation (%d, %d), removing\n",
 		     __FUNCTION__, dx, dy));
 		x += dx;
 		y += dy;
 		channel->transform = NULL;
 		channel->filter = PictFilterNearest;
+
+		if (channel->repeat ||
+		    (x >= 0 &&
+		     y >= 0 &&
+		     x + w < pixmap->drawable.width &&
+		     y + h < pixmap->drawable.height)) {
+			struct sna_pixmap *priv = sna_pixmap(pixmap);
+			if (priv && priv->clear) {
+				DBG(("%s: converting large pixmap source into solid [%08x]\n", __FUNCTION__, priv->clear_color));
+				return gen4_channel_init_solid(sna, channel, priv->clear_color);
+			}
+		}
 	} else
 		channel->transform = picture->transform;
 
@@ -1534,6 +1545,25 @@ gen5_composite_picture(struct sna *sna,
 	if (too_large(pixmap->drawable.width, pixmap->drawable.height))
 		return sna_render_picture_extract(sna, picture, channel,
 						  x, y, w, h, dst_x, dst_y);
+
+	DBG(("%s: pixmap, repeat=%d, filter=%d, transform?=%d [affine? %d], format=%08x\n",
+	     __FUNCTION__,
+	     channel->repeat, channel->filter,
+	     channel->transform != NULL, channel->is_affine,
+	     channel->pict_format));
+	if (channel->transform) {
+		DBG(("%s: transform=[%f %f %f, %f %f %f, %f %f %f]\n",
+		     __FUNCTION__,
+		     channel->transform->matrix[0][0] / 65536.,
+		     channel->transform->matrix[0][1] / 65536.,
+		     channel->transform->matrix[0][2] / 65536.,
+		     channel->transform->matrix[1][0] / 65536.,
+		     channel->transform->matrix[1][1] / 65536.,
+		     channel->transform->matrix[1][2] / 65536.,
+		     channel->transform->matrix[2][0] / 65536.,
+		     channel->transform->matrix[2][1] / 65536.,
+		     channel->transform->matrix[2][2] / 65536.));
+	}
 
 	return sna_render_pixmap_bo(sna, channel, pixmap,
 				    x, y, w, h, dst_x, dst_y);
@@ -1872,7 +1902,7 @@ gen5_render_composite(struct sna *sna,
 
 	if (!gen5_composite_set_target(sna, tmp, dst,
 				       dst_x, dst_y, width, height,
-				       flags & COMPOSITE_PARTIAL || op > PictOpSrc || dst->pCompositeClip->data)) {
+				       flags & COMPOSITE_PARTIAL || op > PictOpSrc)) {
 		DBG(("%s: failed to set composite target\n", __FUNCTION__));
 		goto fallback;
 	}
@@ -2896,6 +2926,7 @@ gen5_render_fill(struct sna *sna, uint8_t alu,
 	op->blt   = gen5_render_fill_op_blt;
 	op->box   = gen5_render_fill_op_box;
 	op->boxes = gen5_render_fill_op_boxes;
+	op->points = NULL;
 	op->done  = gen5_render_fill_op_done;
 	return true;
 }

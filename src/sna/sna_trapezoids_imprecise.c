@@ -1988,7 +1988,7 @@ imprecise_trapezoid_span_converter(struct sna *sna,
 			threads[n].extents.y1 = y;
 			threads[n].extents.y2 = y += h;
 
-			sna_threads_run(span_thread, &threads[n]);
+			sna_threads_run(n, span_thread, &threads[n]);
 		}
 
 		assert(y < threads[0].extents.y2);
@@ -2759,8 +2759,11 @@ trapezoid_span_inplace__x8r8g8b8(CARD8 op,
 			DBG(("%s: render inplace op=%d, color=%08x\n",
 			     __FUNCTION__, op, color));
 
-			tor_render(NULL, &tor, (void*)&inplace,
-				   dst->pCompositeClip, span, false);
+			if (sigtrap_get() == 0) {
+				tor_render(NULL, &tor, (void*)&inplace,
+					   dst->pCompositeClip, span, false);
+				sigtrap_put();
+			}
 		} else if (is_solid) {
 			struct pixman_inplace pi;
 
@@ -2778,9 +2781,12 @@ trapezoid_span_inplace__x8r8g8b8(CARD8 op,
 			else
 				span = pixmask_span_solid;
 
-			tor_render(NULL, &tor, (void*)&pi,
-				   dst->pCompositeClip, span,
-				   false);
+			if (sigtrap_get() == 0) {
+				tor_render(NULL, &tor, (void*)&pi,
+					   dst->pCompositeClip, span,
+					   false);
+				sigtrap_put();
+			}
 
 			pixman_image_unref(pi.source);
 			pixman_image_unref(pi.image);
@@ -2804,9 +2810,12 @@ trapezoid_span_inplace__x8r8g8b8(CARD8 op,
 			else
 				span = pixmask_span;
 
-			tor_render(NULL, &tor, (void*)&pi,
-				   dst->pCompositeClip, span,
-				   false);
+			if (sigtrap_get() == 0) {
+				tor_render(NULL, &tor, (void*)&pi,
+					   dst->pCompositeClip, span,
+					   false);
+				sigtrap_put();
+			}
 
 			pixman_image_unref(pi.mask);
 			pixman_image_unref(pi.source);
@@ -2842,19 +2851,23 @@ trapezoid_span_inplace__x8r8g8b8(CARD8 op,
 		h = (h + num_threads - 1) / num_threads;
 		num_threads -= (num_threads-1) * h >= region.extents.y2 - region.extents.y1;
 
-		for (n = 1; n < num_threads; n++) {
-			threads[n] = threads[0];
-			threads[n].extents.y1 = y;
-			threads[n].extents.y2 = y += h;
+		if (sigtrap_get() == 0) {
+			for (n = 1; n < num_threads; n++) {
+				threads[n] = threads[0];
+				threads[n].extents.y1 = y;
+				threads[n].extents.y2 = y += h;
 
-			sna_threads_run(inplace_x8r8g8b8_thread, &threads[n]);
-		}
+				sna_threads_run(n, inplace_x8r8g8b8_thread, &threads[n]);
+			}
 
-		assert(y < threads[0].extents.y2);
-		threads[0].extents.y1 = y;
-		inplace_x8r8g8b8_thread(&threads[0]);
+			assert(y < threads[0].extents.y2);
+			threads[0].extents.y1 = y;
+			inplace_x8r8g8b8_thread(&threads[0]);
 
-		sna_threads_wait();
+			sna_threads_wait();
+			sigtrap_put();
+		} else
+			sna_threads_kill(); /* leaks thread allocations */
 	}
 
 	return true;
@@ -3083,8 +3096,11 @@ imprecise_trapezoid_span_inplace(struct sna *sna,
 			tor_add_edge(&tor, &t, &t.right, -1);
 		}
 
-		tor_render(NULL, &tor, (void*)&inplace,
-			   dst->pCompositeClip, span, unbounded);
+		if (sigtrap_get() == 0) {
+			tor_render(NULL, &tor, (void*)&inplace,
+				   dst->pCompositeClip, span, unbounded);
+			sigtrap_put();
+		}
 
 		tor_fini(&tor);
 	} else {
@@ -3113,19 +3129,23 @@ imprecise_trapezoid_span_inplace(struct sna *sna,
 		h = (h + num_threads - 1) / num_threads;
 		num_threads -= (num_threads-1) * h >= region.extents.y2 - region.extents.y1;
 
-		for (n = 1; n < num_threads; n++) {
-			threads[n] = threads[0];
-			threads[n].extents.y1 = y;
-			threads[n].extents.y2 = y += h;
+		if (sigtrap_get() == 0) {
+			for (n = 1; n < num_threads; n++) {
+				threads[n] = threads[0];
+				threads[n].extents.y1 = y;
+				threads[n].extents.y2 = y += h;
 
-			sna_threads_run(inplace_thread, &threads[n]);
-		}
+				sna_threads_run(n, inplace_thread, &threads[n]);
+			}
 
-		assert(y < threads[0].extents.y2);
-		threads[0].extents.y1 = y;
-		inplace_thread(&threads[0]);
+			assert(y < threads[0].extents.y2);
+			threads[0].extents.y1 = y;
+			inplace_thread(&threads[0]);
 
-		sna_threads_wait();
+			sna_threads_wait();
+			sigtrap_put();
+		} else
+			sna_threads_kill(); /* leaks thread allocations */
 	}
 
 	return true;
@@ -3375,9 +3395,7 @@ static void mark_damaged(PixmapPtr pixmap, struct sna_pixmap *priv,
 	    box->x2 >= pixmap->drawable.width &&
 	    box->y2 >= pixmap->drawable.height) {
 		sna_damage_destroy(&priv->cpu_damage);
-		sna_damage_all(&priv->gpu_damage,
-			       pixmap->drawable.width,
-			       pixmap->drawable.height);
+		sna_damage_all(&priv->gpu_damage, pixmap);
 		list_del(&priv->flush_list);
 	} else {
 		sna_damage_add_box(&priv->gpu_damage, box);

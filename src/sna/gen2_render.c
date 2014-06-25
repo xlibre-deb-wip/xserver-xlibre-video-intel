@@ -350,7 +350,6 @@ gen2_get_blend_factors(const struct sna_composite_op *op,
 	cblend = TB0C_LAST_STAGE | TB0C_RESULT_SCALE_1X | TB0C_OUTPUT_WRITE_CURRENT;
 	ablend = TB0A_RESULT_SCALE_1X | TB0A_OUTPUT_WRITE_CURRENT;
 
-
 	/* Get the source picture's channels into TBx_ARG1 */
 	if ((op->has_component_alpha && gen2_blend_op[blend].src_alpha) ||
 	    op->dst.format == PICT_a8) {
@@ -359,11 +358,14 @@ gen2_get_blend_factors(const struct sna_composite_op *op,
 		 * is a8, in which case src.G is what's written, and the other
 		 * channels are ignored.
 		 */
-		if (op->src.is_solid) {
-			ablend |= TB0A_ARG1_SEL_DIFFUSE;
+		if (op->src.is_opaque) {
+			ablend |= TB0C_ARG1_SEL_ONE;
+			cblend |= TB0C_ARG1_SEL_ONE;
+		} else if (op->src.is_solid) {
+			ablend |= TB0C_ARG1_SEL_DIFFUSE;
 			cblend |= TB0C_ARG1_SEL_DIFFUSE | TB0C_ARG1_REPLICATE_ALPHA;
 		} else {
-			ablend |= TB0A_ARG1_SEL_TEXEL0;
+			ablend |= TB0C_ARG1_SEL_TEXEL0;
 			cblend |= TB0C_ARG1_SEL_TEXEL0 | TB0C_ARG1_REPLICATE_ALPHA;
 		}
 	} else {
@@ -373,10 +375,11 @@ gen2_get_blend_factors(const struct sna_composite_op *op,
 			cblend |= TB0C_ARG1_SEL_TEXEL0;
 		else
 			cblend |= TB0C_ARG1_SEL_ONE | TB0C_ARG1_INVERT;	/* 0.0 */
-		if (op->src.is_solid)
-			ablend |= TB0A_ARG1_SEL_DIFFUSE;
-		else if (op->src.is_opaque)
+
+		if (op->src.is_opaque)
 			ablend |= TB0A_ARG1_SEL_ONE;
+		else if (op->src.is_solid)
+			ablend |= TB0A_ARG1_SEL_DIFFUSE;
 		else
 			ablend |= TB0A_ARG1_SEL_TEXEL0;
 	}
@@ -425,14 +428,28 @@ static uint32_t gen2_get_blend_cntl(int op,
 	sblend = gen2_blend_op[op].src_blend;
 	dblend = gen2_blend_op[op].dst_blend;
 
-	/* If there's no dst alpha channel, adjust the blend op so that
-	 * we'll treat it as always 1.
-	 */
-	if (PICT_FORMAT_A(dst_format) == 0 && gen2_blend_op[op].dst_alpha) {
-		if (sblend == BLENDFACTOR_DST_ALPHA)
-			sblend = BLENDFACTOR_ONE;
-		else if (sblend == BLENDFACTOR_INV_DST_ALPHA)
-			sblend = BLENDFACTOR_ZERO;
+	if (gen2_blend_op[op].dst_alpha) {
+		/* If there's no dst alpha channel, adjust the blend op so that
+		 * we'll treat it as always 1.
+		 */
+		if (PICT_FORMAT_A(dst_format) == 0) {
+			if (sblend == BLENDFACTOR_DST_ALPHA)
+				sblend = BLENDFACTOR_ONE;
+			else if (sblend == BLENDFACTOR_INV_DST_ALPHA)
+				sblend = BLENDFACTOR_ZERO;
+		}
+
+		/* gen2 engine reads 8bit color buffer into green channel
+		 * in cases like color buffer blending etc., and also writes
+		 * back green channel.  So with dst_alpha blend we should use
+		 * color factor.
+		 */
+		if (dst_format == PICT_a8) {
+			if (sblend == BLENDFACTOR_DST_ALPHA)
+				sblend = BLENDFACTOR_DST_COLR;
+			else if (sblend == BLENDFACTOR_INV_DST_ALPHA)
+				sblend = BLENDFACTOR_INV_DST_COLR;
+		}
 	}
 
 	/* If the source alpha is being used, then we should only be in a case
@@ -585,6 +602,7 @@ static void gen2_emit_target(struct sna *sna, const struct sna_composite_op *op)
 	assert(op->dst.bo->pitch >= 8 && op->dst.bo->pitch <= MAX_3D_PITCH);
 	assert(sna->render.vertex_offset == 0);
 
+	assert(op->dst.bo->unique_id);
 	if (sna->render_state.gen2.target == op->dst.bo->unique_id) {
 		kgem_bo_mark_dirty(op->dst.bo);
 		return;
@@ -1543,13 +1561,25 @@ gen2_composite_picture(struct sna *sna,
 	y += dy + picture->pDrawable->y;
 
 	channel->is_affine = sna_transform_is_affine(picture->transform);
-	if (sna_transform_is_integer_translation(picture->transform, &dx, &dy)) {
+	if (sna_transform_is_imprecise_integer_translation(picture->transform, picture->filter, precise, &dx, &dy)) {
 		DBG(("%s: integer translation (%d, %d), removing\n",
 		     __FUNCTION__, dx, dy));
 		x += dx;
 		y += dy;
 		channel->transform = NULL;
 		channel->filter = PictFilterNearest;
+
+		if (channel->repeat &&
+		    (x >= 0 &&
+		     y >= 0 &&
+		     x + w < pixmap->drawable.width &&
+		     y + h < pixmap->drawable.height)) {
+			struct sna_pixmap *priv = sna_pixmap(pixmap);
+			if (priv && priv->clear) {
+				DBG(("%s: converting large pixmap source into solid [%08x]\n", __FUNCTION__, priv->clear_color));
+				return gen2_composite_solid_init(sna, channel, priv->clear_color);
+			}
+		}
 	} else
 		channel->transform = picture->transform;
 
@@ -1874,7 +1904,7 @@ gen2_render_composite(struct sna *sna,
 
 	if (!gen2_composite_set_target(sna, tmp, dst,
 				       dst_x, dst_y, width, height,
-				       flags & COMPOSITE_PARTIAL || op > PictOpSrc || dst->pCompositeClip->data != NULL)) {
+				       flags & COMPOSITE_PARTIAL || op > PictOpSrc)) {
 		DBG(("%s: unable to set render target\n",
 		     __FUNCTION__));
 		goto fallback;
@@ -2978,6 +3008,7 @@ gen2_render_fill(struct sna *sna, uint8_t alu,
 	tmp->blt   = gen2_render_fill_op_blt;
 	tmp->box   = gen2_render_fill_op_box;
 	tmp->boxes = gen2_render_fill_op_boxes;
+	tmp->points = NULL;
 	tmp->done  = gen2_render_fill_op_done;
 
 	gen2_emit_fill_state(sna, &tmp->base);

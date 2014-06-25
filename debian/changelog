@@ -1,14 +1,41 @@
+xserver-xorg-video-intel (2:2.99.912-1~exp1) experimental; urgency=medium
+
+  * New upstream prerelease 2.99.912.
+  * Update upstream changelog.
+
+ -- maximilian attems <maks@debian.org>  Tue, 10 Jun 2014 21:59:57 +0200
+
+xserver-xorg-video-intel (2:2.99.911+git20140607-1~exp1) experimental; urgency=medium
+
+  * New upstream prerelease.
+
+ -- maximilian attems <maks@debian.org>  Sat, 07 Jun 2014 10:33:52 +0200
+
+xserver-xorg-video-intel (2:2.99.911+git20140529-1~exp2) experimental; urgency=medium
+
+  * Add myself to Uploaders.
+  * Install intel-virtual-output. (Closes: #749925)
+    - New build-deps added: libxinerama-dev, libxrandr-dev, libxdamage-dev,
+      libxcursor-dev, libxtst-dev, libxrender-dev, libpixman-1-dev
+  * Stop overriding default upstream acceleration method (i.e. default to SNA
+    instead of UXA).
+
+ -- Vincent Cheng <vcheng@debian.org>  Mon, 02 Jun 2014 23:47:23 -0700
+
+xserver-xorg-video-intel (2:2.99.911+git20140529-1~exp1) experimental; urgency=low
+
+  * New upstream prerelease. (closes: #748753)
+  * Install new backlight helper.
+  * Add myself to Uploaders.
+  * Bump Standards-Version to 3.9.5 (no changes necessary)
+
+ -- maximilian attems <maks@debian.org>  Fri, 30 May 2014 11:15:58 +0200
+
 xserver-xorg-video-intel (2:2.99.910-0ubuntu1) trusty; urgency=medium
 
   * Merge from Debian git. (LP: #1277143)
 
  -- Timo Aaltonen <tjaalton@ubuntu.com>  Mon, 10 Feb 2014 14:03:01 +0200
-
-xserver-xorg-video-intel (2:2.99.910-1) UNRELEASED; urgency=low
-
-  * New upstream prerelease.
-
- -- Timo Aaltonen <tjaalton@ubuntu.com>  Tue, 01 Oct 2013 14:07:22 +0300
 
 xserver-xorg-video-intel (2:2.99.909-0ubuntu2) trusty; urgency=medium
 

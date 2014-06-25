@@ -109,9 +109,21 @@ libsna_la_SOURCES = \
 	$(NULL)
 
 if DRI2
-AM_CFLAGS += @DRI2_CFLAGS@
-libsna_la_SOURCES += sna_dri.c
+AM_CFLAGS += $(DRI2_CFLAGS)
+libsna_la_SOURCES += sna_dri2.c
 libsna_la_LIBADD += $(DRI2_LIBS) @CLOCK_GETTIME_LIBS@
+endif
+
+if DRI3
+AM_CFLAGS += $(DRI3_CFLAGS)
+libsna_la_SOURCES += sna_dri3.c
+libsna_la_LIBADD += $(DRI3_LIBS)
+endif
+
+if PRESENT
+AM_CFLAGS += $(PRESENT_CFLAGS)
+libsna_la_SOURCES += sna_present.c
+libsna_la_LIBADD += $(PRESENT_LIBS)
 endif
 
 if XVMC

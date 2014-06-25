@@ -170,6 +170,7 @@ sna_video_textured_put_image(ClientPtr client,
 	struct sna *sna = video->sna;
 	struct sna_video_frame frame;
 	PixmapPtr pixmap = get_drawable_pixmap(draw);
+	unsigned int flags;
 	BoxRec dstBox;
 	RegionRec clip;
 	xf86CrtcPtr crtc;
@@ -197,12 +198,6 @@ sna_video_textured_put_image(ClientPtr client,
 	     clip.extents.x1, clip.extents.y1,
 	     clip.extents.x2, clip.extents.y2));
 
-	if (!sna_pixmap_move_to_gpu(pixmap, MOVE_READ | MOVE_WRITE)) {
-		DBG(("%s: attempting to render to a non-GPU pixmap\n",
-		     __FUNCTION__));
-		return BadAlloc;
-	}
-
 	sna_video_frame_init(video, format->id, width, height, &frame);
 
 	if (!sna_video_clip_helper(video, &frame, &crtc, &dstBox,
@@ -210,6 +205,18 @@ sna_video_textured_put_image(ClientPtr client,
 				   src_w, src_h, drw_w, drw_h,
 				   &clip))
 		return Success;
+
+	flags = MOVE_WRITE | __MOVE_FORCE;
+	if (clip.data)
+		flags |= MOVE_READ;
+
+	if (!sna_pixmap_move_area_to_gpu(pixmap, &clip.extents, flags)) {
+		DBG(("%s: attempting to render to a non-GPU pixmap\n",
+		     __FUNCTION__));
+		return BadAlloc;
+	}
+
+	sna_video_frame_set_rotation(video, &frame, RR_Rotate_0);
 
 	if (xvmc_passthrough(format->id)) {
 		DBG(("%s: using passthough, name=%d\n",
@@ -403,7 +410,6 @@ void sna_video_textured_setup(struct sna *sna, ScreenPtr screen)
 		v->sna = sna;
 		v->textured = true;
 		v->alignment = 4;
-		v->rotation = RR_Rotate_0;
 		v->SyncToVblank = (sna->flags & SNA_NO_WAIT) == 0;
 
 		RegionNull(&v->clip);

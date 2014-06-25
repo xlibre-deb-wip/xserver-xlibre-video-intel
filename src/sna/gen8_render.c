@@ -410,16 +410,24 @@ static void
 gen8_emit_urb(struct sna *sna)
 {
 #if SIM
+	OUT_BATCH(GEN8_3DSTATE_PUSH_CONSTANT_ALLOC_VS | (2 - 2));
+	OUT_BATCH(0 << PUSH_CONSTANT_BUFFER_OFFSET_SHIFT |
+		  0 << PUSH_CONSTANT_BUFFER_SIZE_SHIFT);
+
+	OUT_BATCH(GEN8_3DSTATE_PUSH_CONSTANT_ALLOC_GS | (2 - 2));
+	OUT_BATCH(0 << PUSH_CONSTANT_BUFFER_OFFSET_SHIFT |
+		  0 << PUSH_CONSTANT_BUFFER_SIZE_SHIFT);
+
 	OUT_BATCH(GEN8_3DSTATE_PUSH_CONSTANT_ALLOC_PS | (2 - 2));
 	OUT_BATCH(0 << PUSH_CONSTANT_BUFFER_OFFSET_SHIFT |
-		  4 << PUSH_CONSTANT_BUFFER_SIZE_SHIFT); /* 8KiB */
+		  0 << PUSH_CONSTANT_BUFFER_SIZE_SHIFT);
 #endif
 
 	/* num of VS entries must be divisible by 8 if size < 9 */
 	OUT_BATCH(GEN8_3DSTATE_URB_VS | (2 - 2));
-	OUT_BATCH(960 << URB_ENTRY_NUMBER_SHIFT |
+	OUT_BATCH(1024 << URB_ENTRY_NUMBER_SHIFT |
 		  (2 - 1) << URB_ENTRY_SIZE_SHIFT |
-		  1 << URB_STARTING_ADDRESS_SHIFT);
+		  0 << URB_STARTING_ADDRESS_SHIFT);
 
 	OUT_BATCH(GEN8_3DSTATE_URB_HS | (2 - 2));
 	OUT_BATCH(0 << URB_ENTRY_SIZE_SHIFT |
@@ -640,8 +648,13 @@ static void
 gen8_emit_null_depth_buffer(struct sna *sna)
 {
 	OUT_BATCH(GEN8_3DSTATE_DEPTH_BUFFER | (8 - 2));
+#if 0
 	OUT_BATCH(SURFACE_NULL << DEPTH_BUFFER_TYPE_SHIFT |
 		  DEPTHFORMAT_D32_FLOAT << DEPTH_BUFFER_FORMAT_SHIFT);
+#else
+	OUT_BATCH(SURFACE_2D << DEPTH_BUFFER_TYPE_SHIFT |
+		  DEPTHFORMAT_D16_UNORM << DEPTH_BUFFER_FORMAT_SHIFT);
+#endif
 	OUT_BATCH64(0);
 	OUT_BATCH(0);
 	OUT_BATCH(0);
@@ -769,11 +782,7 @@ gen8_emit_invariant(struct sna *sna)
 	OUT_BATCH(1);
 
 #if SIM
-	OUT_BATCH(GEN8_3DSTATE_SAMPLE_PATTERN | (9 - 2));
-	OUT_BATCH(0);
-	OUT_BATCH(0);
-	OUT_BATCH(0);
-	OUT_BATCH(0);
+	OUT_BATCH(GEN8_3DSTATE_SAMPLE_PATTERN | (5 - 2));
 	OUT_BATCH(0);
 	OUT_BATCH(0);
 	OUT_BATCH(0);
@@ -1281,6 +1290,13 @@ gen8_tiling_bits(uint32_t tiling)
 	}
 }
 
+#define MOCS_WT (2 << 5)
+#define MOCS_WB (3 << 5)
+#define MOCS_eLLC_ONLY (0 << 3)
+#define MOCS_LLC_ONLY (1 << 3)
+#define MOCS_eLLC_LLC (2 << 3)
+#define MOCS_ALL_CACHES (3 << 3)
+
 /**
  * Sets up the common fields for a surface state buffer for the given
  * picture in the given surface state buffer.
@@ -1318,7 +1334,7 @@ gen8_bind_bo(struct sna *sna,
 		domains = I915_GEM_DOMAIN_RENDER << 16 |I915_GEM_DOMAIN_RENDER;
 	} else
 		domains = I915_GEM_DOMAIN_SAMPLER << 16;
-	ss[1] = (is_scanout || bo->io) ? 0 : 3 << 24;
+	ss[1] = bo->io ? 0 : is_scanout ? (MOCS_WT | MOCS_ALL_CACHES) << 24 : (MOCS_WB | MOCS_ALL_CACHES) << 24;
 	ss[2] = ((width - 1)  << SURFACE_WIDTH_SHIFT |
 		 (height - 1) << SURFACE_HEIGHT_SHIFT);
 	ss[3] = (bo->pitch - 1) << SURFACE_PITCH_SHIFT;
@@ -1799,13 +1815,25 @@ gen8_composite_picture(struct sna *sna,
 	y += dy + picture->pDrawable->y;
 
 	channel->is_affine = sna_transform_is_affine(picture->transform);
-	if (sna_transform_is_integer_translation(picture->transform, &dx, &dy)) {
+	if (sna_transform_is_imprecise_integer_translation(picture->transform, picture->filter, precise, &dx, &dy)) {
 		DBG(("%s: integer translation (%d, %d), removing\n",
 		     __FUNCTION__, dx, dy));
 		x += dx;
 		y += dy;
 		channel->transform = NULL;
 		channel->filter = PictFilterNearest;
+
+		if (channel->repeat ||
+		    (x >= 0 &&
+		     y >= 0 &&
+		     x + w < pixmap->drawable.width &&
+		     y + h < pixmap->drawable.height)) {
+			struct sna_pixmap *priv = sna_pixmap(pixmap);
+			if (priv && priv->clear) {
+				DBG(("%s: converting large pixmap source into solid [%08x]\n", __FUNCTION__, priv->clear_color));
+				return gen4_channel_init_solid(sna, channel, priv->clear_color);
+			}
+		}
 	} else
 		channel->transform = picture->transform;
 
@@ -1862,7 +1890,7 @@ gen8_composite_set_target(struct sna *sna,
 	BoxRec box;
 	unsigned int hint;
 
-	DBG(("%s: (%d, %d)x(%d, %d), partial?=%d\n", __FUNCTION__, x, y, w, h));
+	DBG(("%s: (%d, %d)x(%d, %d), partial?=%d\n", __FUNCTION__, x, y, w, h, partial));
 
 	op->dst.pixmap = get_drawable_pixmap(dst->pDrawable);
 	op->dst.format = dst->format;
@@ -2202,7 +2230,7 @@ gen8_render_composite(struct sna *sna,
 	tmp->op = op;
 	if (!gen8_composite_set_target(sna, tmp, dst,
 				       dst_x, dst_y, width, height,
-				       flags & COMPOSITE_PARTIAL || op > PictOpSrc || dst->pCompositeClip->data))
+				       flags & COMPOSITE_PARTIAL || op > PictOpSrc))
 		goto fallback;
 
 	switch (gen8_composite_picture(sna, src, &tmp->src,
@@ -3318,6 +3346,7 @@ gen8_render_fill(struct sna *sna, uint8_t alu,
 	op->blt   = gen8_render_fill_op_blt;
 	op->box   = gen8_render_fill_op_box;
 	op->boxes = gen8_render_fill_op_boxes;
+	op->points = NULL;
 	op->done  = gen8_render_fill_op_done;
 	return true;
 }
@@ -3623,6 +3652,7 @@ gen8_render_video(struct sna *sna,
 		  PixmapPtr pixmap)
 {
 	struct sna_composite_op tmp;
+	struct sna_pixmap *priv = sna_pixmap(pixmap);
 	int dst_width = dstRegion->extents.x2 - dstRegion->extents.x1;
 	int dst_height = dstRegion->extents.y2 - dstRegion->extents.y1;
 	int src_width = frame->src.x2 - frame->src.x1;
@@ -3630,7 +3660,6 @@ gen8_render_video(struct sna *sna,
 	float src_offset_x, src_offset_y;
 	float src_scale_x, src_scale_y;
 	int nbox, pix_xoff, pix_yoff;
-	struct sna_pixmap *priv;
 	unsigned filter;
 	BoxPtr box;
 
@@ -3643,10 +3672,7 @@ gen8_render_video(struct sna *sna,
 	     REGION_EXTENTS(NULL, dstRegion)->x2,
 	     REGION_EXTENTS(NULL, dstRegion)->y2));
 
-	priv = sna_pixmap_force_to_gpu(pixmap, MOVE_READ | MOVE_WRITE);
-	if (priv == NULL)
-		return false;
-
+	assert(priv->gpu_bo);
 	memset(&tmp, 0, sizeof(tmp));
 
 	tmp.dst.pixmap = pixmap;
@@ -3805,6 +3831,12 @@ static bool gen8_render_setup(struct sna *sna)
 	struct sna_static_stream general;
 	struct gen8_sampler_state *ss;
 	int i, j, k, l, m;
+	uint32_t devid;
+
+	devid = intel_get_device_id(sna->scrn);
+	if (devid & 0xf)
+		state->gt = ((devid >> 4) & 0xf) + 1;
+	DBG(("%s: gt=%d\n", __FUNCTION__, state->gt));
 
 	sna_static_stream_init(&general);
 

@@ -199,6 +199,11 @@ struct sna_fill_op {
 			       const struct sna_fill_op *op,
 			       const BoxRec *box,
 			       int count);
+	fastcall void (*points)(struct sna *sna,
+			       const struct sna_fill_op *op,
+			       int16_t dx, int16_t dy,
+			       const DDXPointRec *points,
+			       int count);
 	void (*done)(struct sna *sna, const struct sna_fill_op *op);
 };
 
@@ -321,9 +326,6 @@ struct sna_render {
 	} glyph[2];
 	pixman_image_t *white_image;
 	PicturePtr white_picture;
-#if HAS_PIXMAN_GLYPHS
-	pixman_glyph_cache_t *glyph_cache;
-#endif
 
 	uint16_t vb_id;
 	uint16_t vertex_offset;

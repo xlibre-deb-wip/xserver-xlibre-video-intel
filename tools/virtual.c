@@ -67,11 +67,14 @@
 
 #if 0
 #define DBG(x) printf x
+#define EXTRA_DBG 1
 #else
 #define DBG(x)
+#define EXTRA_DBG 0
 #endif
 
 #define FORCE_FULL_REDRAW 0
+#define FORCE_16BIT_XFER 0
 
 struct display {
 	Display *dpy;
@@ -82,10 +85,10 @@ struct display {
 	int xfixes_event, xfixes_error;
 	int rr_event, rr_error, rr_active;
 	int xinerama_event, xinerama_error, xinerama_active;
+	int dri3_active;
 	Window root;
 	Visual *visual;
 	Damage damage;
-	long timestamp;
 
 	int width;
 	int height;
@@ -154,6 +157,11 @@ struct clone {
 	int width, height, depth;
 	struct { int x1, x2, y1, y2; } damaged;
 	int rr_update;
+
+	struct dri3_fence {
+		XID xid;
+		void *addr;
+	} dri3;
 };
 
 struct context {
@@ -168,6 +176,9 @@ struct context {
 	int nfd;
 
 	int timer_active;
+
+	long timestamp;
+	long configTimestamp;
 
 	Atom singleton;
 	char command[1024];
@@ -299,6 +310,143 @@ can_use_shm(Display *dpy,
 
 	return has_shm;
 }
+
+#ifdef DRI3
+#include <X11/Xlib-xcb.h>
+#include <X11/xshmfence.h>
+#include <xcb/xcb.h>
+#include <xcb/dri3.h>
+#include <xcb/sync.h>
+static Pixmap dri3_create_pixmap(Display *dpy,
+				 Drawable draw,
+				 int width, int height, int depth,
+				 int fd, int bpp, int stride, int size)
+{
+	xcb_connection_t *c = XGetXCBConnection(dpy);
+	xcb_pixmap_t pixmap = xcb_generate_id(c);
+	xcb_dri3_pixmap_from_buffer(c, pixmap, draw, size, width, height, stride, depth, bpp, fd);
+	return pixmap;
+}
+
+static int dri3_create_fd(Display *dpy,
+			  Pixmap pixmap,
+			  int *stride)
+{
+	xcb_connection_t *c = XGetXCBConnection(dpy);
+	xcb_dri3_buffer_from_pixmap_cookie_t cookie;
+	xcb_dri3_buffer_from_pixmap_reply_t *reply;
+
+	cookie = xcb_dri3_buffer_from_pixmap(c, pixmap);
+	reply = xcb_dri3_buffer_from_pixmap_reply(c, cookie, NULL);
+	if (!reply)
+		return -1;
+
+	if (reply->nfd != 1)
+		return -1;
+
+	*stride = reply->stride;
+	return xcb_dri3_buffer_from_pixmap_reply_fds(c, reply)[0];
+}
+
+static int dri3_query_version(Display *dpy, int *major, int *minor)
+{
+	xcb_connection_t *c = XGetXCBConnection(dpy);
+	xcb_dri3_query_version_reply_t *reply;
+
+	*major = *minor = -1;
+
+	reply = xcb_dri3_query_version_reply(c,
+					     xcb_dri3_query_version(c,
+								    XCB_DRI3_MAJOR_VERSION,
+								    XCB_DRI3_MINOR_VERSION),
+					     NULL);
+	if (reply == NULL)
+		return -1;
+
+	*major = reply->major_version;
+	*minor = reply->minor_version;
+	free(reply);
+
+	return 0;
+}
+
+static int dri3_exists(Display *dpy)
+{
+	int major, minor;
+
+	if (dri3_query_version(dpy, &major, &minor) < 0)
+		return 0;
+
+	return major >= 0;
+}
+
+static void dri3_create_fence(Display *dpy, Drawable d, struct dri3_fence *fence)
+{
+	xcb_connection_t *c = XGetXCBConnection(dpy);
+	struct dri3_fence f;
+	int fd;
+
+	fd = xshmfence_alloc_shm();
+	if (fd < 0)
+		return;
+
+	f.addr = xshmfence_map_shm(fd);
+	if (f.addr == NULL) {
+		close(fd);
+		return;
+	}
+
+	f.xid = xcb_generate_id(c);
+	xcb_dri3_fence_from_fd(c, d, f.xid, 0, fd);
+
+	*fence = f;
+}
+
+static void dri3_fence_flush(Display *dpy, struct dri3_fence *fence)
+{
+	xcb_sync_trigger_fence(XGetXCBConnection(dpy), fence->xid);
+}
+
+static void dri3_fence_free(Display *dpy, struct dri3_fence *fence)
+{
+	xshmfence_unmap_shm(fence->addr);
+	xcb_sync_destroy_fence(XGetXCBConnection(dpy), fence->xid);
+}
+
+#else
+
+static int dri3_exists(Display *dpy)
+{
+	return 0;
+}
+
+static void dri3_create_fence(Display *dpy, Drawable d, struct dri3_fence *fence)
+{
+}
+
+static void dri3_fence_flush(Display *dpy, struct dri3_fence *fence)
+{
+}
+
+static void dri3_fence_free(Display *dpy, struct dri3_fence *fence)
+{
+}
+
+static Pixmap dri3_create_pixmap(Display *dpy,
+				 Drawable draw,
+				 int width, int height, int depth,
+				 int fd, int bpp, int stride, int size)
+{
+	return None;
+}
+
+static int dri3_create_fd(Display *dpy,
+			  Pixmap pixmap,
+			  int *stride)
+{
+	return -1;
+}
+#endif
 
 static int timerfd(int hz)
 {
@@ -442,6 +590,46 @@ static void clone_update_edid(struct clone *clone)
 	}
 }
 
+static int disable_crtc(Display *dpy, XRRScreenResources *res, RRCrtc crtc)
+{
+	XRRPanning panning;
+
+	if (crtc) {
+		XRRSetPanning(dpy, res, crtc, memset(&panning, 0, sizeof(panning)));
+
+		if (XRRSetCrtcConfig(dpy, res, crtc, CurrentTime, 0, 0, None, RR_Rotate_0, NULL, 0) != Success)
+			return 0;
+
+		if (XRRSetPanning(dpy, res, crtc, memset(&panning, 0, sizeof(panning))) != Success) {
+			DBG(("%s failed to clear panning on CRTC:%ld\n", DisplayString(dpy), (long)crtc));
+			if (EXTRA_DBG) {
+				XRRCrtcInfo *c;
+				XRRPanning *p;
+
+				c = XRRGetCrtcInfo(dpy, res, crtc);
+				if (c) {
+					DBG(("%s CRTC:%ld x=%d, y=%d, rotation=%d, mode=%ld\n",
+					     DisplayString(dpy), (long)crtc,
+					     c->x, c->y, c->rotation, c->mode));
+					XRRFreeCrtcInfo(c);
+				}
+
+				p = XRRGetPanning(dpy, res, crtc);
+				if (p) {
+					DBG(("%s CRTC:%ld panning (%d, %d)x(%d, %d), tracking (%d, %d)x(%d, %d), border (%d, %d),(%d, %d)\n",
+					     DisplayString(dpy), (long)crtc,
+					     p->left, p->top, p->width, p->height,
+					     p->track_left, p->track_top, p->track_width, p->track_height,
+					     p->border_left, p->border_top, p->border_right, p->border_bottom));
+					XRRFreePanning(p);
+				}
+			}
+		}
+	}
+
+	return 1;
+}
+
 static int clone_update_modes__randr(struct clone *clone)
 {
 	XRRScreenResources *from_res = NULL, *to_res = NULL;
@@ -452,7 +640,7 @@ static int clone_update_modes__randr(struct clone *clone)
 	assert(clone->dst.rr_output);
 	assert(clone->dst.display->rr_event);
 
-	from_res = XRRGetScreenResources(clone->dst.dpy, clone->dst.window);
+	from_res = _XRRGetScreenResourcesCurrent(clone->dst.dpy, clone->dst.window);
 	if (from_res == NULL)
 		goto err;
 
@@ -460,11 +648,10 @@ static int clone_update_modes__randr(struct clone *clone)
 	if (from_info == NULL)
 		goto err;
 
-	DBG(("%s(%s-%s): timestamp %ld (last %ld)\n", __func__,
+	DBG(("%s(%s-%s <- %s-%s): timestamp %ld (last %ld)\n", __func__,
 	     DisplayString(clone->src.dpy), clone->src.name,
-	    from_info->timestamp, clone->timestamp));
-	if (from_info->timestamp == clone->timestamp)
-		goto err;
+	     DisplayString(clone->dst.dpy), clone->dst.name,
+	     from_info->timestamp, clone->timestamp));
 
 	to_res = _XRRGetScreenResourcesCurrent(clone->src.dpy, clone->src.window);
 	if (to_res == NULL)
@@ -474,6 +661,8 @@ static int clone_update_modes__randr(struct clone *clone)
 	if (to_info == NULL)
 		goto err;
 
+	DBG(("%s: dst.rr_crtc=%ld, now %ld\n",
+	     __func__, (long)clone->dst.rr_crtc, (long)from_info->crtc));
 	if (clone->dst.rr_crtc == from_info->crtc) {
 		for (i = 0; i < to_info->nmode; i++) {
 			XRRModeInfo *mode, *old;
@@ -481,6 +670,11 @@ static int clone_update_modes__randr(struct clone *clone)
 			mode = lookup_mode(to_res, to_info->modes[i]);
 			if (mode == NULL)
 				break;
+
+			DBG(("%s(%s-%s): lookup mode %s\n", __func__,
+			     DisplayString(clone->src.dpy), clone->src.name,
+			     mode->name));
+
 			for (j = 0; j < from_info->nmode; j++) {
 				old = lookup_mode(from_res, from_info->modes[j]);
 				if (old && mode_equal(mode, old)) {
@@ -488,8 +682,12 @@ static int clone_update_modes__randr(struct clone *clone)
 					break;
 				}
 			}
-			if (mode)
+			if (mode) {
+				DBG(("%s(%s-%s): unknown mode %s\n", __func__,
+				     DisplayString(clone->src.dpy), clone->src.name,
+				     mode->name));
 				break;
+			}
 		}
 		if (i == from_info->nmode && i == to_info->nmode) {
 			DBG(("%s(%s-%s): no change in output\n", __func__,
@@ -498,14 +696,33 @@ static int clone_update_modes__randr(struct clone *clone)
 		}
 	}
 
-	clone->dst.rr_crtc = from_info->crtc;
+	/* Disable the remote output */
+	if (from_info->crtc != clone->dst.rr_crtc) {
+		DBG(("%s(%s-%s): disabling active CRTC\n", __func__,
+		     DisplayString(clone->dst.dpy), clone->dst.name));
+		if (disable_crtc(clone->dst.dpy, from_res, from_info->crtc)) {
+			clone->dst.rr_crtc = 0;
+			clone->dst.mode.id = 0;
+		} else {
+			XRRCrtcInfo *c = XRRGetCrtcInfo(clone->dst.dpy, from_res, from_info->crtc);
+			if (c) {
+				clone->dst.x = c->x;
+				clone->dst.y = c->y;
+				clone->dst.rotation = c->rotation;
+				clone->dst.mode.id = c->mode;
+				XRRFreeCrtcInfo(c);
+			}
+		}
+	}
+
+	/* Create matching modes for the real output on the virtual */
+	XGrabServer(clone->src.dpy);
 
 	/* Clear all current UserModes on the output, including any active ones */
 	if (to_info->crtc) {
 		DBG(("%s(%s-%s): disabling active CRTC\n", __func__,
 		     DisplayString(clone->src.dpy), clone->src.name));
-		XRRSetCrtcConfig(clone->src.dpy, to_res, to_info->crtc, CurrentTime,
-				0, 0, None, RR_Rotate_0, NULL, 0);
+		disable_crtc(clone->src.dpy, to_res, to_info->crtc);
 	}
 	for (i = 0; i < to_info->nmode; i++) {
 		DBG(("%s(%s-%s): deleting mode %ld\n", __func__,
@@ -515,8 +732,6 @@ static int clone_update_modes__randr(struct clone *clone)
 
 	clone->src.rr_crtc = 0;
 
-	/* Create matching modes for the real output on the virtual */
-	XGrabServer(clone->src.dpy);
 	for (i = 0; i < from_info->nmode; i++) {
 		XRRModeInfo *mode, *old;
 		RRMode id;
@@ -605,8 +820,7 @@ static int clone_update_modes__fixed(struct clone *clone)
 	if (info->crtc) {
 		DBG(("%s(%s-%s): disabling active CRTC\n", __func__,
 		     DisplayString(clone->src.dpy), clone->src.name));
-		XRRSetCrtcConfig(clone->src.dpy, res, info->crtc, CurrentTime,
-				 0, 0, None, RR_Rotate_0, NULL, 0);
+		disable_crtc(clone->src.dpy, res, info->crtc);
 	}
 	for (i = 0; i < info->nmode; i++) {
 		DBG(("%s(%s-%s): deleting mode %ld\n", __func__,
@@ -705,9 +919,7 @@ static RROutput claim_virtual(struct display *display, char *output_name, int nc
 	/* Some else may have interrupted us and installed that new mode! */
 	output = XRRGetOutputInfo(dpy, res, rr_output);
 	if (output) {
-		if (output->crtc)
-			XRRSetCrtcConfig(dpy, res, output->crtc, CurrentTime,
-					 0, 0, None, RR_Rotate_0, NULL, 0);
+		disable_crtc(dpy, res, output->crtc);
 		XRRFreeOutputInfo(output);
 	}
 	XRRFreeScreenResources(res);
@@ -715,6 +927,10 @@ static RROutput claim_virtual(struct display *display, char *output_name, int nc
 	XRRDeleteOutputMode(dpy, rr_output, id);
 	XRRDestroyMode(dpy, id);
 
+	/* And hide it again */
+	res = XRRGetScreenResources(dpy, display->root);
+	if (res != NULL)
+		XRRFreeScreenResources(res);
 out:
 	XUngrabServer(dpy);
 
@@ -795,16 +1011,24 @@ static int mode_width(const XRRModeInfo *mode, Rotation rotation)
 
 static void output_init_xfer(struct clone *clone, struct output *output)
 {
-	if (output->use_shm_pixmap) {
+	if (output->pixmap == None && output->use_shm_pixmap) {
 		DBG(("%s-%s: creating shm pixmap\n", DisplayString(output->dpy), output->name));
-		if (output->pixmap)
-			XFreePixmap(output->dpy, output->pixmap);
+		XSync(output->dpy, False);
+		_x_error_occurred = 0;
+
 		output->pixmap = XShmCreatePixmap(output->dpy, output->window,
 						  clone->shm.shmaddr, &output->shm,
 						  clone->width, clone->height, clone->depth);
 		if (output->pix_picture) {
 			XRenderFreePicture(output->dpy, output->pix_picture);
 			output->pix_picture = None;
+		}
+
+		XSync(output->dpy, False);
+		if (_x_error_occurred) {
+			XFreePixmap(output->dpy, output->pixmap);
+			output->pixmap = None;
+			output->use_shm_pixmap = 0;
 		}
 	}
 	if (output->use_render) {
@@ -830,34 +1054,33 @@ static void output_init_xfer(struct clone *clone, struct output *output)
 	}
 }
 
+static int bpp_for_depth(int depth)
+{
+	switch (depth) {
+	case 1: return 1;
+	case 8: return 8;
+	case 15: return 16;
+	case 16: return 16;
+	case 24: return 24;
+	case 32: return 32;
+	default: return 0;
+	}
+}
+
 static int clone_init_xfer(struct clone *clone)
 {
 	int width, height;
 
-	if (clone->src.mode.id == 0) {
-		if (clone->width == 0 && clone->height == 0)
-			return 0;
-
+	if (clone->dst.mode.id == 0) {
 		clone->width = 0;
 		clone->height = 0;
-
-		if (clone->src.use_shm)
-			XShmDetach(clone->src.dpy, &clone->src.shm);
-		if (clone->dst.use_shm)
-			XShmDetach(clone->dst.dpy, &clone->dst.shm);
-
-		if (clone->shm.shmaddr) {
-			shmdt(clone->shm.shmaddr);
-			clone->shm.shmaddr = 0;
-		}
-
-		clone->damaged.x2 = clone->damaged.y2 = INT_MIN;
-		clone->damaged.x1 = clone->damaged.y1 = INT_MAX;
-		return 0;
+	} else if (clone->dri3.xid) {
+		width = clone->dst.display->width;
+		height = clone->dst.display->height;
+	} else {
+		width = mode_width(&clone->src.mode, clone->src.rotation);
+		height = mode_height(&clone->src.mode, clone->src.rotation);
 	}
-
-	width = mode_width(&clone->src.mode, clone->src.rotation);
-	height = mode_height(&clone->src.mode, clone->src.rotation);
 
 	if (width == clone->width && height == clone->height)
 		return 0;
@@ -866,40 +1089,93 @@ static int clone_init_xfer(struct clone *clone)
 	     DisplayString(clone->dst.dpy), clone->dst.name,
 	     width, height));
 
-	clone->width = width;
-	clone->height = height;
+	if (clone->src.use_shm)
+		XShmDetach(clone->src.dpy, &clone->src.shm);
+	if (clone->dst.use_shm)
+		XShmDetach(clone->dst.dpy, &clone->dst.shm);
 
-	if (clone->shm.shmaddr)
+	if (clone->shm.shmaddr) {
 		shmdt(clone->shm.shmaddr);
-
-	clone->shm.shmid = shmget(IPC_PRIVATE,
-				  height * stride_for_depth(width, clone->depth),
-				  IPC_CREAT | 0666);
-	if (clone->shm.shmid == -1)
-		return errno;
-
-	clone->shm.shmaddr = shmat(clone->shm.shmid, 0, 0);
-	if (clone->shm.shmaddr == (char *) -1) {
-		shmctl(clone->shm.shmid, IPC_RMID, NULL);
-		return ENOMEM;
+		clone->shm.shmaddr = NULL;
 	}
 
-	init_image(clone);
+	if (clone->src.pixmap) {
+		XFreePixmap(clone->src.dpy, clone->src.pixmap);
+		clone->src.pixmap = 0;
+	}
 
-	if (clone->src.use_shm) {
-		clone->src.shm = clone->shm;
-		clone->dst.shm.readOnly = False;
-		XShmAttach(clone->src.dpy, &clone->src.shm);
+	if (clone->dst.pixmap) {
+		XFreePixmap(clone->dst.dpy, clone->dst.pixmap);
+		clone->dst.pixmap = 0;
+	}
+
+	if ((width | height) == 0) {
+		clone->damaged.x2 = clone->damaged.y2 = INT_MIN;
+		clone->damaged.x1 = clone->damaged.y1 = INT_MAX;
+		return 0;
+	}
+
+	if (clone->dri3.xid) {
+		int fd, stride;
+		Pixmap src;
+
+		_x_error_occurred = 0;
+
+		fd = dri3_create_fd(clone->dst.dpy, clone->dst.window, &stride);
+		src = dri3_create_pixmap(clone->src.dpy, clone->src.window,
+					 width, height, clone->depth,
+					 fd, bpp_for_depth(clone->depth),
+					 stride, lseek(fd, 0, SEEK_END));
+
 		XSync(clone->src.dpy, False);
-	}
-	if (clone->dst.use_shm) {
-		clone->dst.shm = clone->shm;
-		clone->dst.shm.readOnly = True;
-		XShmAttach(clone->dst.dpy, &clone->dst.shm);
-		XSync(clone->dst.dpy, False);
+		if (!_x_error_occurred) {
+			clone->src.pixmap = src;
+			clone->width = width;
+			clone->height = height;
+		} else {
+			XFreePixmap(clone->src.dpy, src);
+			close(fd);
+			dri3_fence_free(clone->src.dpy, &clone->dri3);
+			clone->dri3.xid = 0;
+		}
 	}
 
-	shmctl(clone->shm.shmid, IPC_RMID, NULL);
+	width = mode_width(&clone->src.mode, clone->src.rotation);
+	height = mode_height(&clone->src.mode, clone->src.rotation);
+
+	if (!clone->dri3.xid) {
+		clone->shm.shmid = shmget(IPC_PRIVATE,
+					  height * stride_for_depth(width, clone->depth),
+					  IPC_CREAT | 0666);
+		if (clone->shm.shmid == -1)
+			return errno;
+
+		clone->shm.shmaddr = shmat(clone->shm.shmid, 0, 0);
+		if (clone->shm.shmaddr == (char *) -1) {
+			shmctl(clone->shm.shmid, IPC_RMID, NULL);
+			return ENOMEM;
+		}
+
+		init_image(clone);
+
+		if (clone->src.use_shm) {
+			clone->src.shm = clone->shm;
+			clone->src.shm.readOnly = False;
+			XShmAttach(clone->src.dpy, &clone->src.shm);
+			XSync(clone->src.dpy, False);
+		}
+		if (clone->dst.use_shm) {
+			clone->dst.shm = clone->shm;
+			clone->dst.shm.readOnly = !clone->dst.use_shm_pixmap;
+			XShmAttach(clone->dst.dpy, &clone->dst.shm);
+			XSync(clone->dst.dpy, False);
+		}
+
+		shmctl(clone->shm.shmid, IPC_RMID, NULL);
+
+		clone->width = width;
+		clone->height = height;
+	}
 
 	output_init_xfer(clone, &clone->src);
 	output_init_xfer(clone, &clone->dst);
@@ -938,14 +1214,20 @@ static int context_update(struct context *ctx)
 	if (res == NULL)
 		return 0;
 
-	DBG(("%s timestamp %ld (last %ld)\n", DisplayString(dpy), res->timestamp, ctx->display->timestamp));
-	if (res->timestamp == ctx->display->timestamp &&
+	DBG(("%s timestamp %ld (last %ld), config %ld (last %ld)\n",
+	     DisplayString(dpy),
+	     res->timestamp, ctx->timestamp,
+	     res->configTimestamp, ctx->configTimestamp));
+	if (res->timestamp == ctx->timestamp &&
+	    res->configTimestamp == ctx->configTimestamp &&
 	    res->timestamp != res->configTimestamp) { /* mutter be damned */
 		XRRFreeScreenResources(res);
 		return 0;
 	}
 
-	ctx->display->timestamp = res->timestamp;
+	ctx->timestamp = res->timestamp;
+	ctx->configTimestamp = res->configTimestamp;
+
 	for (n = 0; n < ctx->nclone; n++) {
 		struct output *output = &ctx->clones[n].src;
 		XRROutputInfo *o;
@@ -966,7 +1248,7 @@ static int context_update(struct context *ctx)
 			     output->x, output->y, output->rotation, output->mode.id,
 			     c->x, c->y, c->rotation, c->mode));
 
-			changed |= output->rotation |= c->rotation;
+			changed |= output->rotation != c->rotation;
 			output->rotation = c->rotation;
 
 			changed |= output->x != c->x;
@@ -975,7 +1257,7 @@ static int context_update(struct context *ctx)
 			changed |= output->y != c->y;
 			output->y = c->y;
 
-			changed |= output->mode.id != mode;
+			changed |= output->mode.id != c->mode;
 			mode = c->mode;
 			XRRFreeCrtcInfo(c);
 		} else {
@@ -985,6 +1267,9 @@ static int context_update(struct context *ctx)
 		}
 		output->rr_crtc = o->crtc;
 		XRRFreeOutputInfo(o);
+
+		DBG(("%s-%s crtc changed? %d\n",
+		     DisplayString(ctx->clones[n].dst.display->dpy), ctx->clones[n].dst.name, changed));
 
 		if (mode) {
 			if (output->mode.id != mode) {
@@ -1000,11 +1285,9 @@ static int context_update(struct context *ctx)
 			output->mode.id = 0;
 		}
 
-		DBG(("%s-%s changed? %d\n",
+		DBG(("%s-%s output changed? %d\n",
 		     DisplayString(ctx->clones[n].dst.display->dpy), ctx->clones[n].dst.name, changed));
 
-		if (changed)
-			clone_init_xfer(&ctx->clones[n]);
 		context_changed |= changed;
 	}
 	XRRFreeScreenResources(res);
@@ -1052,17 +1335,35 @@ static int context_update(struct context *ctx)
 				y2 = v;
 		}
 
-		x2 -= x1;
-		y2 -= y1;
 		DBG(("%s fb bounds (%d, %d)x(%d, %d)\n", DisplayString(display->dpy),
 		     x1, y1, x2, y2));
 
+		XGrabServer(display->dpy);
 		res = _XRRGetScreenResourcesCurrent(display->dpy, display->root);
 		if (res == NULL)
-			continue;
+			goto ungrab;
 
-		XGrabServer(display->dpy);
+		if (x2 <= x1 || y2 <= y1) {
+			/* Nothing enabled, preserve the current fb, and turn everything off */
+			for (clone = display->clone; clone; clone = clone->next) {
+				struct output *dst = &clone->dst;
 
+				if (!dst->rr_crtc)
+					continue;
+
+				DBG(("%s: disabling output '%s'\n",
+				     DisplayString(display->dpy), dst->name));
+				assert(clone->dst.display == display);
+				if (disable_crtc(display->dpy, res, dst->rr_crtc)) {
+					dst->rr_crtc = 0;
+					dst->mode.id = 0;
+				}
+			}
+			goto free_res;
+		}
+
+		x2 -= x1;
+		y2 -= y1;
 		DBG(("%s: current size %dx%d, need %dx%d\n",
 		     DisplayString(display->dpy),
 		     display->width, display->height,
@@ -1077,11 +1378,12 @@ static int context_update(struct context *ctx)
 					continue;
 
 				DBG(("%s: disabling output '%s'\n",
-				     DisplayString(dst->dpy), dst->name));
-				XRRSetCrtcConfig(dst->dpy, res, dst->rr_crtc, CurrentTime,
-						0, 0, None, RR_Rotate_0, NULL, 0);
-				dst->rr_crtc = 0;
-				dst->mode.id = 0;
+				     DisplayString(display->dpy), dst->name));
+				assert(clone->dst.display == display);
+				if (disable_crtc(display->dpy, res, dst->rr_crtc)) {
+					dst->rr_crtc = 0;
+					dst->mode.id = 0;
+				}
 			}
 
 			DBG(("%s: XRRSetScreenSize %dx%d\n", DisplayString(display->dpy), x2, y2));
@@ -1099,20 +1401,21 @@ static int context_update(struct context *ctx)
 			RRCrtc rr_crtc;
 			Status ret;
 
-			DBG(("%s: copying configuration from %s (mode=%ld: %s) to %s\n",
-			     DisplayString(dst->dpy),
-			     src->name, (long)src->mode.id, src->mode.name,
+			DBG(("%s: copying configuration from %s (mode=%ld: %dx%d) to %s\n",
+			     DisplayString(display->dpy),
+			     src->name, (long)src->mode.id, src->mode.width, src->mode.height,
 			     dst->name));
 
 			if (src->mode.id == 0) {
 err:
 				if (dst->rr_crtc) {
 					DBG(("%s: disabling unused output '%s'\n",
-					     DisplayString(dst->dpy), dst->name));
-					XRRSetCrtcConfig(dst->dpy, res, dst->rr_crtc, CurrentTime,
-							 0, 0, None, RR_Rotate_0, NULL, 0);
-					dst->rr_crtc = 0;
-					dst->mode.id = 0;
+					     DisplayString(display->dpy), dst->name));
+					assert(clone->dst.display == display);
+					if (disable_crtc(display->dpy, res, dst->rr_crtc)) {
+						dst->rr_crtc = 0;
+						dst->mode.id = 0;
+					}
 				}
 				continue;
 			}
@@ -1137,15 +1440,20 @@ err:
 				/* XXX User names must be unique! */
 				m = src->mode;
 				m.nameLength = snprintf(buf, sizeof(buf),
-							"%s.%ld-%s", src->name, (long)src->mode.id, src->mode.name);
+							"%s.%ld-%dx%d", src->name,
+							(long)src->mode.id,
+							src->mode.width,
+							src->mode.height);
 				m.name = buf;
 
 				id = XRRCreateMode(dst->dpy, dst->window, &m);
 				if (id) {
-					DBG(("%s: adding mode %ld: %s to %s\n",
+					DBG(("%s: adding mode %ld: %dx%d to %s, new mode %ld\n",
 					     DisplayString(dst->dpy),
-					     (long)id, src->mode.name,
-					     dst->name));
+					     (long)src->mode.id,
+					     src->mode.width,
+					     src->mode.height,
+					     dst->name, (long)id));
 					XRRAddOutputMode(dst->dpy, dst->rr_output, id);
 					dst->mode.id = id;
 				} else {
@@ -1196,6 +1504,10 @@ err:
 			     dst->x, dst->y, dst->mode.width, dst->mode.height,
 			     dst->rotation, (long)rr_crtc, dst->mode.id));
 
+			ret = XRRSetPanning(dst->dpy, res, rr_crtc, memset(&panning, 0, sizeof(panning)));
+			DBG(("%s-%s: XRRSetPanning %s\n", DisplayString(dst->dpy), dst->name, ret ? "failed" : "success"));
+			(void)ret;
+
 			ret = XRRSetCrtcConfig(dst->dpy, res, rr_crtc, CurrentTime,
 					       dst->x, dst->y, dst->mode.id, dst->rotation,
 					       &dst->rr_output, 1);
@@ -1203,23 +1515,48 @@ err:
 			if (ret)
 				goto err;
 
-			ret = XRRSetPanning(dst->dpy, res, rr_crtc, memset(&panning, 0, sizeof(panning)));
-			DBG(("%s-%s: XRRSetPanning %s\n", DisplayString(dst->dpy), dst->name, ret ? "failed" : "success"));
+			if (EXTRA_DBG) {
+				XRRCrtcInfo *c;
+				XRRPanning *p;
+
+				c = XRRGetCrtcInfo(dst->dpy, res, rr_crtc);
+				if (c) {
+					DBG(("%s-%s: x=%d, y=%d, rotation=%d, mode=%ld\n",
+					     DisplayString(dst->dpy), dst->name,
+					     c->x, c->y, c->rotation, c->mode));
+					XRRFreeCrtcInfo(c);
+				}
+
+				p = XRRGetPanning(dst->dpy, res, rr_crtc);
+				if (p) {
+					DBG(("%s-%s: panning (%d, %d)x(%d, %d), tracking (%d, %d)x(%d, %d), border (%d, %d),(%d, %d)\n",
+					     DisplayString(dst->dpy), dst->name,
+					     p->left, p->top, p->width, p->height,
+					     p->track_left, p->track_top, p->track_width, p->track_height,
+					     p->border_left, p->border_top, p->border_right, p->border_bottom));
+					XRRFreePanning(p);
+				}
+			}
 
 			dst->rr_crtc = rr_crtc;
-			(void)ret;
 		}
-		XUngrabServer(display->dpy);
-
+free_res:
 		XRRFreeScreenResources(res);
+ungrab:
+		XUngrabServer(display->dpy);
 	}
 
 	ctx->active = NULL;
 	for (n = 0; n < ctx->nclone; n++) {
 		struct clone *clone = &ctx->clones[n];
 
+		clone_init_xfer(clone);
+
 		if (clone->dst.rr_crtc == 0)
 			continue;
+
+		DBG(("%s-%s: added to active list\n",
+		     DisplayString(clone->dst.display->dpy), clone->dst.name));
 
 		clone->active = ctx->active;
 		ctx->active = clone;
@@ -1379,7 +1716,7 @@ static int clone_output_init(struct clone *clone, struct output *output,
 	DBG(("%s-%s use shm? %d (use shm pixmap? %d)\n",
 	     DisplayString(dpy), name, display->has_shm, display->has_shm_pixmap));
 
-	depth = output->use_shm ? display->depth : 16;
+	depth = output->use_shm && !FORCE_16BIT_XFER ? display->depth : 16;
 	if (depth < clone->depth)
 		clone->depth = depth;
 
@@ -1503,8 +1840,6 @@ static void put_dst(struct clone *c, const XRectangle *clip)
 			  clip->width, clip->height);
 		c->dst.serial = 0;
 	}
-
-	display_mark_flush(c->dst.display);
 }
 
 static int clone_paint(struct clone *c)
@@ -1559,15 +1894,37 @@ static int clone_paint(struct clone *c)
 		c->damaged.y2 = c->src.y + c->height;
 	}
 
-	clip.x = c->damaged.x1;
-	clip.y = c->damaged.y1;
-	clip.width  = c->damaged.x2 - c->damaged.x1;
-	clip.height = c->damaged.y2 - c->damaged.y1;
-	get_src(c, &clip);
+	if (c->dri3.xid) {
+		if (c->src.use_render) {
+			XRenderComposite(c->src.dpy, PictOpSrc,
+					 c->src.win_picture, 0, c->src.pix_picture,
+					 c->damaged.x1, c->damaged.y1,
+					 0, 0,
+					 c->damaged.x1 + c->dst.x - c->src.x,
+					 c->damaged.y1 + c->dst.y - c->src.y,
+					 c->damaged.x2 - c->damaged.x1,
+					 c->damaged.y2 - c->damaged.y1);
+		} else {
+			XCopyArea(c->src.dpy, c->src.window, c->src.pixmap, c->src.gc,
+				  c->damaged.x1, c->damaged.y1,
+				  c->damaged.x2 - c->damaged.x1,
+				  c->damaged.y2 - c->damaged.y1,
+				  c->damaged.x1 + c->dst.x - c->src.x,
+				  c->damaged.y1 + c->dst.y - c->src.y);
+		}
+		dri3_fence_flush(c->src.dpy, &c->dri3);
+	} else {
+		clip.x = c->damaged.x1;
+		clip.y = c->damaged.y1;
+		clip.width  = c->damaged.x2 - c->damaged.x1;
+		clip.height = c->damaged.y2 - c->damaged.y1;
+		get_src(c, &clip);
 
-	clip.x += c->dst.x - c->src.x;
-	clip.y += c->dst.y - c->src.y;
-	put_dst(c, &clip);
+		clip.x += c->dst.x - c->src.x;
+		clip.y += c->dst.y - c->src.y;
+		put_dst(c, &clip);
+	}
+	display_mark_flush(c->dst.display);
 
 done:
 	c->damaged.x2 = c->damaged.y2 = INT_MIN;
@@ -1577,14 +1934,21 @@ done:
 
 static void clone_damage(struct clone *c, const XRectangle *rec)
 {
-	if (rec->x < c->damaged.x1)
-		c->damaged.x1 = rec->x;
-	if (rec->x + rec->width > c->damaged.x2)
-		c->damaged.x2 = rec->x + rec->width;
-	if (rec->y < c->damaged.y1)
-		c->damaged.y1 = rec->y;
-	if (rec->y + rec->height > c->damaged.y2)
-		c->damaged.y2 = rec->y + rec->height;
+	int v;
+
+	if ((v = rec->x) < c->damaged.x1)
+		c->damaged.x1 = v;
+	if ((v = (int)rec->x + rec->width) > c->damaged.x2)
+		c->damaged.x2 = v;
+	if ((v = rec->y) < c->damaged.y1)
+		c->damaged.y1 = v;
+	if ((v = (int)rec->y + rec->height) > c->damaged.y2)
+		c->damaged.y2 = v;
+
+	DBG(("%s-%s damaged: (%d, %d), (%d, %d)\n",
+	     DisplayString(c->dst.display->dpy), c->dst.name,
+	     c->damaged.x1, c->damaged.y1,
+	     c->damaged.x2, c->damaged.y2));
 }
 
 static void usage(const char *arg0)
@@ -1859,6 +2223,11 @@ static int clone_init_depth(struct clone *clone)
 	     clone->src.use_render != NULL,
 	     clone->dst.use_render != NULL));
 
+	if (!clone->dst.use_render &&
+	    clone->src.display->dri3_active &&
+	    clone->dst.display->dri3_active)
+		dri3_create_fence(clone->src.dpy, clone->src.window, &clone->dri3);
+
 	return 0;
 }
 
@@ -1900,10 +2269,32 @@ static int add_display(struct context *ctx, Display *dpy)
 				       &display->shm_event,
 				       &display->shm_opcode,
 				       &display->has_shm_pixmap);
+	DBG(("%s: has_shm?=%d, event=%d, opcode=%d, has_pixmap?=%d\n",
+	     DisplayString(dpy),
+	     display->has_shm,
+	     display->shm_event,
+	     display->shm_opcode,
+	     display->has_shm_pixmap));
 
 	display->rr_active = XRRQueryExtension(dpy, &display->rr_event, &display->rr_error);
+	DBG(("%s: randr_active?=%d, event=%d, error=%d\n",
+	     DisplayString(dpy),
+	     display->rr_active,
+	     display->rr_event,
+	     display->rr_error));
+
 	if (XineramaQueryExtension(dpy, &display->xinerama_event, &display->xinerama_error))
 		display->xinerama_active = XineramaIsActive(dpy);
+	DBG(("%s: xinerama_active?=%d, event=%d, error=%d\n",
+	     DisplayString(dpy),
+	     display->xinerama_active,
+	     display->xinerama_event,
+	     display->xinerama_error));
+
+	display->dri3_active = dri3_exists(dpy);
+	DBG(("%s: dri3_active?=%d\n",
+	     DisplayString(dpy),
+	     display->dri3_active));
 
 	/* first display (source) is slightly special */
 	if (!first_display) {
@@ -2083,6 +2474,20 @@ static struct display *last_display(struct context *ctx)
 	return &ctx->display[ctx->ndisplay-1];
 }
 
+static void reverse_clone_list(struct display *display)
+{
+	struct clone *list = NULL;
+
+	while (display->clone) {
+		struct clone *clone = display->clone;
+		display->clone = clone->next;
+		clone->next = list;
+		list = clone;
+	}
+
+	display->clone = list;
+}
+
 static int last_display_add_clones__randr(struct context *ctx)
 {
 	struct display *display = last_display(ctx);
@@ -2094,7 +2499,8 @@ static int last_display_add_clones__randr(struct context *ctx)
 
 	display_init_randr_hpd(display);
 
-	res = _XRRGetScreenResourcesCurrent(display->dpy, display->root);
+	/* Force a probe of outputs on initial connection */
+	res = XRRGetScreenResources(display->dpy, display->root);
 	if (res == NULL)
 		return -ENOMEM;
 
@@ -2149,13 +2555,14 @@ static int last_display_add_clones__randr(struct context *ctx)
 
 		if (o->crtc) {
 			DBG(("%s - disabling active output\n", DisplayString(display->dpy)));
-			XRRSetCrtcConfig(display->dpy, res, o->crtc, CurrentTime,
-					0, 0, None, RR_Rotate_0, NULL, 0);
+			disable_crtc(display->dpy, res, o->crtc);
 		}
 
 		XRRFreeOutputInfo(o);
 	}
 	XRRFreeScreenResources(res);
+
+	reverse_clone_list(display);
 	return 0;
 }
 
@@ -2229,6 +2636,8 @@ static int last_display_add_clones__xinerama(struct context *ctx)
 		ctx->active = clone;
 	}
 	XFree(xi);
+
+	reverse_clone_list(display);
 	return 0;
 }
 
@@ -2652,10 +3061,7 @@ static void context_cleanup(struct context *ctx)
 		if (output == NULL)
 			continue;
 
-		if (output->crtc)
-			XRRSetCrtcConfig(dpy, res, output->crtc, CurrentTime,
-					 0, 0, None, RR_Rotate_0, NULL, 0);
-
+		disable_crtc(dpy, res, output->crtc);
 		for (j = 0; j < output->nmode; j++)
 			XRRDeleteOutputMode(dpy, clone->src.rr_output, output->modes[j]);
 
@@ -2673,9 +3079,14 @@ static void context_cleanup(struct context *ctx)
 			continue;
 		}
 	}
+	XRRFreeScreenResources(res);
+
+	/* And hide them again */
+	res = XRRGetScreenResources(dpy, ctx->display->root);
+	if (res != NULL)
+		XRRFreeScreenResources(res);
 
 	XUngrabServer(dpy);
-	XRRFreeScreenResources(res);
 
 	if (ctx->singleton)
 		XDeleteProperty(dpy, ctx->display->root, ctx->singleton);
@@ -2694,7 +3105,7 @@ int main(int argc, char **argv)
 	struct context ctx;
 	const char *src_name = NULL;
 	uint64_t count;
-	int daemonize = 1, bumblebee = 0, all = 0, singleton = 1;
+	int daemonize = !EXTRA_DBG, bumblebee = 0, all = 0, singleton = 1;
 	int i, ret, open, fail;
 
 	signal(SIGPIPE, SIG_IGN);
@@ -2864,7 +3275,7 @@ int main(int argc, char **argv)
 					     DisplayString(ctx.display->dpy),
 					     de->area.x, de->area.y, de->area.width, de->area.height));
 
-					for (clone = ctx.active; clone; clone = clone->next)
+					for (clone = ctx.active; clone; clone = clone->active)
 						clone_damage(clone, &de->area);
 
 					if (ctx.active)
@@ -2947,7 +3358,8 @@ int main(int argc, char **argv)
 		if (reconfigure && context_update(&ctx))
 			display_reset_damage(ctx.display);
 
-		XPending(ctx.record);
+		while (XPending(ctx.record)) /* discard all implicit events */
+			XNextEvent(ctx.record, &e);
 
 		if (ctx.timer_active && read(ctx.timer, &count, sizeof(count)) > 0) {
 			struct clone *clone;

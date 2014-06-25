@@ -324,9 +324,10 @@ static void intel_uxa_solid(PixmapPtr pixmap, int x1, int y1, int x2, int y2)
 	pitch = intel_pixmap_pitch(pixmap);
 
 	{
-		BEGIN_BATCH_BLT(6);
+		int len = INTEL_INFO(intel)->gen >= 0100 ? 7 : 6;
+		BEGIN_BATCH_BLT(len);
 
-		cmd = XY_COLOR_BLT_CMD;
+		cmd = XY_COLOR_BLT_CMD | (len - 2);
 
 		if (pixmap->drawable.bitsPerPixel == 32)
 			cmd |=
@@ -462,9 +463,10 @@ intel_uxa_copy(PixmapPtr dest, int src_x1, int src_y1, int dst_x1,
 	src_pitch = intel_pixmap_pitch(intel->render_source);
 
 	{
-		BEGIN_BATCH_BLT(8);
+		int len = INTEL_INFO(intel)->gen >= 0100 ? 10 : 8;
+		BEGIN_BATCH_BLT(len);
 
-		cmd = XY_SRC_COPY_BLT_CMD;
+		cmd = XY_SRC_COPY_BLT_CMD | (len - 2);
 
 		if (dest->drawable.bitsPerPixel == 32)
 			cmd |=
@@ -509,10 +511,10 @@ static void intel_uxa_done(PixmapPtr pixmap)
 	ScrnInfoPtr scrn = xf86ScreenToScrn(pixmap->drawable.pScreen);
 	intel_screen_private *intel = intel_get_screen_private(scrn);
 
-	if (IS_GEN6(intel) || IS_GEN7(intel)) {
+	if (INTEL_INFO(intel)->gen >= 060) {
 		/* workaround a random BLT hang */
 		BEGIN_BATCH_BLT(3);
-		OUT_BATCH(XY_SETUP_CLIP_BLT_CMD);
+		OUT_BATCH(XY_SETUP_CLIP_BLT_CMD | (3 - 2));
 		OUT_BATCH(0);
 		OUT_BATCH(0);
 		ADVANCE_BATCH();
@@ -631,18 +633,38 @@ dri_bo *intel_get_pixmap_bo(PixmapPtr pixmap)
 	return intel->bo;
 }
 
+static unsigned intel_get_tile_width(intel_screen_private *intel, int tiling, int pitch)
+{
+	unsigned long tile_width;
+
+	if (tiling == I915_TILING_NONE)
+		return 4;
+
+	tile_width = (tiling == I915_TILING_Y) ? 128 : 512;
+	if (INTEL_INFO(intel)->gen >= 040)
+		return tile_width;
+
+	while (tile_width < pitch)
+		tile_width <<= 1;
+
+	return tile_width;
+}
+
 void intel_set_pixmap_bo(PixmapPtr pixmap, dri_bo * bo)
 {
+	ScrnInfoPtr scrn = xf86ScreenToScrn(pixmap->drawable.pScreen);
+	intel_screen_private *intel = intel_get_screen_private(scrn);
 	struct intel_pixmap *priv;
 
 	priv = intel_get_pixmap_private(pixmap);
 	if (priv == NULL && bo == NULL)
-	    return;
+		return;
 
 	if (priv != NULL) {
 		if (priv->bo == bo)
 			return;
 
+free_priv:
 		dri_bo_unreference(priv->bo);
 		list_del(&priv->batch);
 
@@ -651,9 +673,9 @@ void intel_set_pixmap_bo(PixmapPtr pixmap, dri_bo * bo)
 	}
 
 	if (bo != NULL) {
-		uint32_t tiling;
-		uint32_t swizzle_mode;
-		int ret;
+		uint32_t tiling, swizzle_mode;
+		unsigned tile_width;
+		int size, stride;
 
 		priv = calloc(1, sizeof (struct intel_pixmap));
 		if (priv == NULL)
@@ -665,15 +687,45 @@ void intel_set_pixmap_bo(PixmapPtr pixmap, dri_bo * bo)
 		priv->bo = bo;
 		priv->stride = intel_pixmap_pitch(pixmap);
 
-		ret = drm_intel_bo_get_tiling(bo, &tiling, &swizzle_mode);
-		if (ret != 0) {
-			FatalError("Couldn't get tiling on bo %p: %s\n",
-				   bo, strerror(-ret));
+		if (drm_intel_bo_get_tiling(bo, &tiling, &swizzle_mode)) {
+			bo = NULL;
+			goto free_priv;
 		}
 
 		priv->tiling = tiling;
 		priv->busy = -1;
 		priv->offscreen = 1;
+
+		stride = (pixmap->drawable.width * pixmap->drawable.bitsPerPixel + 7) / 8;
+		tile_width = intel_get_tile_width(intel, tiling, stride);
+		stride = ALIGN(stride, tile_width);
+
+		if (priv->stride < stride ||
+		    priv->stride & (tile_width - 1) ||
+		    priv->stride >= KB(32)) {
+			bo = NULL;
+			goto free_priv;
+		}
+
+		if (tiling != I915_TILING_NONE) {
+			int height;
+
+			if (IS_GEN2(intel))
+				height = 16;
+			else if (tiling == I915_TILING_X)
+				height = 8;
+			else
+				height = 32;
+
+			height = ALIGN(pixmap->drawable.height, 2*height);
+			size = intel_get_fence_size(intel, priv->stride * height);
+		} else
+			size = priv->stride * pixmap->drawable.height;
+
+		if (bo->size < size || bo->size > intel->max_bo_size) {
+			bo = NULL;
+			goto free_priv;
+		}
 	}
 
   BAIL:
@@ -1354,7 +1406,7 @@ Bool intel_uxa_init(ScreenPtr screen)
 
 	/* Composite */
 	if (intel_option_accel_blt(intel)) {
-	} else if (IS_GEN2(intel)) {
+	} else if (INTEL_INFO(intel)->gen < 030) {
 		intel->uxa_driver->check_composite = i830_check_composite;
 		intel->uxa_driver->check_composite_target = i830_check_composite_target;
 		intel->uxa_driver->check_composite_texture = i830_check_composite_texture;
@@ -1364,7 +1416,7 @@ Bool intel_uxa_init(ScreenPtr screen)
 
 		intel->vertex_flush = i830_vertex_flush;
 		intel->batch_commit_notify = i830_batch_commit_notify;
-	} else if (IS_GEN3(intel)) {
+	} else if (INTEL_INFO(intel)->gen < 040) {
 		intel->uxa_driver->check_composite = i915_check_composite;
 		intel->uxa_driver->check_composite_target = i915_check_composite_target;
 		intel->uxa_driver->check_composite_texture = i915_check_composite_texture;
@@ -1374,7 +1426,7 @@ Bool intel_uxa_init(ScreenPtr screen)
 
 		intel->vertex_flush = i915_vertex_flush;
 		intel->batch_commit_notify = i915_batch_commit_notify;
-	} else {
+	} else if (INTEL_INFO(intel)->gen < 0100) {
 		intel->uxa_driver->check_composite = i965_check_composite;
 		intel->uxa_driver->check_composite_texture = i965_check_composite_texture;
 		intel->uxa_driver->prepare_composite = i965_prepare_composite;
@@ -1385,9 +1437,9 @@ Bool intel_uxa_init(ScreenPtr screen)
 		intel->batch_flush = i965_batch_flush;
 		intel->batch_commit_notify = i965_batch_commit_notify;
 
-		if (IS_GEN4(intel)) {
+		if (INTEL_INFO(intel)->gen < 050) {
 			intel->context_switch = gen4_context_switch;
-		} else if (IS_GEN5(intel)) {
+		} else if (INTEL_INFO(intel)->gen < 060) {
 			intel->context_switch = gen5_context_switch;
 		} else {
 			intel->context_switch = gen6_context_switch;
@@ -1420,5 +1472,6 @@ Bool intel_uxa_init(ScreenPtr screen)
 	uxa_set_fallback_debug(screen, intel->fallback_debug);
 	uxa_set_force_fallback(screen, intel->force_fallback);
 
+	intel->flush_rendering = intel_flush_rendering;
 	return TRUE;
 }

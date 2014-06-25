@@ -1585,6 +1585,7 @@ gen6_render_video(struct sna *sna,
 		  PixmapPtr pixmap)
 {
 	struct sna_composite_op tmp;
+	struct sna_pixmap *priv = sna_pixmap(pixmap);
 	int dst_width = dstRegion->extents.x2 - dstRegion->extents.x1;
 	int dst_height = dstRegion->extents.y2 - dstRegion->extents.y1;
 	int src_width = frame->src.x2 - frame->src.x1;
@@ -1592,7 +1593,6 @@ gen6_render_video(struct sna *sna,
 	float src_offset_x, src_offset_y;
 	float src_scale_x, src_scale_y;
 	int nbox, pix_xoff, pix_yoff;
-	struct sna_pixmap *priv;
 	unsigned filter;
 	BoxPtr box;
 
@@ -1605,10 +1605,7 @@ gen6_render_video(struct sna *sna,
 	     REGION_EXTENTS(NULL, dstRegion)->x2,
 	     REGION_EXTENTS(NULL, dstRegion)->y2));
 
-	priv = sna_pixmap_force_to_gpu(pixmap, MOVE_READ | MOVE_WRITE);
-	if (priv == NULL)
-		return false;
-
+	assert(priv->gpu_bo);
 	memset(&tmp, 0, sizeof(tmp));
 
 	tmp.dst.pixmap = pixmap;
@@ -1713,8 +1710,8 @@ gen6_composite_picture(struct sna *sna,
 	uint32_t color;
 	int16_t dx, dy;
 
-	DBG(("%s: (%d, %d)x(%d, %d), dst=(%d, %d)\n",
-	     __FUNCTION__, x, y, w, h, dst_x, dst_y));
+	DBG(("%s: (%d, %d)x(%d, %d), dst=(%d, %d), precise=%d\n",
+	     __FUNCTION__, x, y, w, h, dst_x, dst_y, precise));
 
 	channel->is_solid = false;
 	channel->card_format = -1;
@@ -1766,13 +1763,25 @@ gen6_composite_picture(struct sna *sna,
 	y += dy + picture->pDrawable->y;
 
 	channel->is_affine = sna_transform_is_affine(picture->transform);
-	if (sna_transform_is_integer_translation(picture->transform, &dx, &dy)) {
+	if (sna_transform_is_imprecise_integer_translation(picture->transform, picture->filter, precise, &dx, &dy)) {
 		DBG(("%s: integer translation (%d, %d), removing\n",
 		     __FUNCTION__, dx, dy));
 		x += dx;
 		y += dy;
 		channel->transform = NULL;
 		channel->filter = PictFilterNearest;
+
+		if (channel->repeat &&
+		    (x >= 0 &&
+		     y >= 0 &&
+		     x + w < pixmap->drawable.width &&
+		     y + h < pixmap->drawable.height)) {
+			struct sna_pixmap *priv = sna_pixmap(pixmap);
+			if (priv && priv->clear) {
+				DBG(("%s: converting large pixmap source into solid [%08x]\n", __FUNCTION__, priv->clear_color));
+				return gen4_channel_init_solid(sna, channel, priv->clear_color);
+			}
+		}
 	} else
 		channel->transform = picture->transform;
 
@@ -1788,6 +1797,36 @@ gen6_composite_picture(struct sna *sna,
 		     pixmap->drawable.width, pixmap->drawable.height));
 		return sna_render_picture_extract(sna, picture, channel,
 						  x, y, w, h, dst_x, dst_y);
+	}
+
+	DBG(("%s: pixmap, repeat=%d, filter=%d, transform?=%d [affine? %d], format=%08x\n",
+	     __FUNCTION__,
+	     channel->repeat, channel->filter,
+	     channel->transform != NULL, channel->is_affine,
+	     channel->pict_format));
+	if (channel->transform) {
+#define f2d(x) (((double)(x))/65536.)
+		DBG(("%s: transform=[%f %f %f, %f %f %f, %f %f %f] (raw [%x %x %x, %x %x %x, %x %x %x])\n",
+		     __FUNCTION__,
+		     f2d(channel->transform->matrix[0][0]),
+		     f2d(channel->transform->matrix[0][1]),
+		     f2d(channel->transform->matrix[0][2]),
+		     f2d(channel->transform->matrix[1][0]),
+		     f2d(channel->transform->matrix[1][1]),
+		     f2d(channel->transform->matrix[1][2]),
+		     f2d(channel->transform->matrix[2][0]),
+		     f2d(channel->transform->matrix[2][1]),
+		     f2d(channel->transform->matrix[2][2]),
+		     channel->transform->matrix[0][0],
+		     channel->transform->matrix[0][1],
+		     channel->transform->matrix[0][2],
+		     channel->transform->matrix[1][0],
+		     channel->transform->matrix[1][1],
+		     channel->transform->matrix[1][2],
+		     channel->transform->matrix[2][0],
+		     channel->transform->matrix[2][1],
+		     channel->transform->matrix[2][2]));
+#undef f2d
 	}
 
 	return sna_render_pixmap_bo(sna, channel, pixmap,
@@ -1832,7 +1871,7 @@ gen6_composite_set_target(struct sna *sna,
 	BoxRec box;
 	unsigned int hint;
 
-	DBG(("%s: (%d, %d)x(%d, %d), partial?=%d\n", __FUNCTION__, x, y, w, h));
+	DBG(("%s: (%d, %d)x(%d, %d), partial?=%d\n", __FUNCTION__, x, y, w, h, partial));
 
 	op->dst.pixmap = get_drawable_pixmap(dst->pDrawable);
 	op->dst.format = dst->format;
@@ -2171,7 +2210,7 @@ gen6_render_composite(struct sna *sna,
 	tmp->op = op;
 	if (!gen6_composite_set_target(sna, tmp, dst,
 				       dst_x, dst_y, width, height,
-				       flags & COMPOSITE_PARTIAL || op > PictOpSrc || dst->pCompositeClip->data))
+				       flags & COMPOSITE_PARTIAL || op > PictOpSrc))
 		goto fallback;
 
 	switch (gen6_composite_picture(sna, src, &tmp->src,
@@ -3300,6 +3339,7 @@ gen6_render_fill(struct sna *sna, uint8_t alu,
 	op->blt  = gen6_render_op_fill_blt;
 	op->box  = gen6_render_op_fill_box;
 	op->boxes = gen6_render_op_fill_boxes;
+	op->points = NULL;
 	op->done = gen6_render_op_fill_done;
 	return true;
 }
