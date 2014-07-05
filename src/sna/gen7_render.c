@@ -1836,12 +1836,12 @@ gen7_render_video(struct sna *sna,
 	float src_scale_x, src_scale_y;
 	int nbox, pix_xoff, pix_yoff;
 	unsigned filter;
-	BoxPtr box;
+	const BoxRec *box;
 
-	DBG(("%s: src=(%d, %d), dst=(%d, %d), %ldx[(%d, %d), (%d, %d)...]\n",
+	DBG(("%s: src=(%d, %d), dst=(%d, %d), %dx[(%d, %d), (%d, %d)...]\n",
 	     __FUNCTION__,
 	     src_width, src_height, dst_width, dst_height,
-	     (long)REGION_NUM_RECTS(dstRegion),
+	     region_num_rects(dstRegion),
 	     REGION_EXTENTS(NULL, dstRegion)->x1,
 	     REGION_EXTENTS(NULL, dstRegion)->y1,
 	     REGION_EXTENTS(NULL, dstRegion)->x2,
@@ -1918,8 +1918,8 @@ gen7_render_video(struct sna *sna,
 	     src_scale_x, src_scale_y,
 	     src_offset_x, src_offset_y));
 
-	box = REGION_RECTS(dstRegion);
-	nbox = REGION_NUM_RECTS(dstRegion);
+	box = region_rects(dstRegion);
+	nbox = region_num_rects(dstRegion);
 	while (nbox--) {
 		BoxRec r;
 
@@ -2089,7 +2089,7 @@ gen7_composite_picture(struct sna *sna,
 				    x, y, w, h, dst_x, dst_y);
 }
 
-static void gen7_composite_channel_convert(struct sna_composite_channel *channel)
+inline static void gen7_composite_channel_convert(struct sna_composite_channel *channel)
 {
 	channel->repeat = gen7_repeat(channel->repeat);
 	channel->filter = gen7_filter(channel->filter);
@@ -2114,7 +2114,7 @@ static void gen7_render_composite_done(struct sna *sna,
 	sna_render_composite_redirect_done(sna, op);
 }
 
-static bool
+inline static bool
 gen7_composite_set_target(struct sna *sna,
 			  struct sna_composite_op *op,
 			  PicturePtr dst,
@@ -2142,7 +2142,7 @@ gen7_composite_set_target(struct sna *sna,
 
 	hint = PREFER_GPU | FORCE_GPU | RENDER_GPU;
 	if (!partial) {
-		hint |= IGNORE_CPU;
+		hint |= IGNORE_DAMAGE;
 		if (w == op->dst.width && h == op->dst.height)
 			hint |= REPLACES;
 	}
@@ -2150,6 +2150,11 @@ gen7_composite_set_target(struct sna *sna,
 	op->dst.bo = sna_drawable_use_bo(dst->pDrawable, hint, &box, &op->damage);
 	if (op->dst.bo == NULL)
 		return false;
+
+	if (hint & REPLACES) {
+		struct sna_pixmap *priv = sna_pixmap(op->dst.pixmap);
+		kgem_bo_pair_undo(&sna->kgem, priv->gpu_bo, priv->cpu_bo);
+	}
 
 	get_drawable_deltas(dst->pDrawable, op->dst.pixmap,
 			    &op->dst.x, &op->dst.y);
@@ -2190,18 +2195,21 @@ try_blt(struct sna *sna,
 	}
 
 	bo = __sna_drawable_peek_bo(dst->pDrawable);
-	if (bo && bo->rq)
+	if (bo == NULL)
+		return true;
+	if (bo->rq)
 		return RQ_IS_BLT(bo->rq);
 
-	if (sna_picture_is_solid(src, NULL) && can_switch_to_blt(sna, NULL, 0))
+	if (sna_picture_is_solid(src, NULL) && can_switch_to_blt(sna, bo, 0))
 		return true;
 
 	if (src->pDrawable) {
 		bo = __sna_drawable_peek_bo(src->pDrawable);
 		if (bo == NULL)
 			return true;
-		else if (bo->rq)
-			return RQ_IS_BLT(bo->rq);
+
+		if (prefer_blt_bo(sna, bo))
+			return true;
 	}
 
 	if (sna->kgem.ring == KGEM_BLT) {
@@ -2886,44 +2894,10 @@ prefer_blt_copy(struct sna *sna,
 	return prefer_blt_bo(sna, src_bo) || prefer_blt_bo(sna, dst_bo);
 }
 
-inline static void boxes_extents(const BoxRec *box, int n, BoxRec *extents)
-{
-	*extents = box[0];
-	while (--n) {
-		box++;
-
-		if (box->x1 < extents->x1)
-			extents->x1 = box->x1;
-		if (box->x2 > extents->x2)
-			extents->x2 = box->x2;
-
-		if (box->y1 < extents->y1)
-			extents->y1 = box->y1;
-		if (box->y2 > extents->y2)
-			extents->y2 = box->y2;
-	}
-}
-
-static inline bool
-overlaps(struct sna *sna,
-	 struct kgem_bo *src_bo, int16_t src_dx, int16_t src_dy,
-	 struct kgem_bo *dst_bo, int16_t dst_dx, int16_t dst_dy,
-	 const BoxRec *box, int n, BoxRec *extents)
-{
-	if (src_bo != dst_bo)
-		return false;
-
-	boxes_extents(box, n, extents);
-	return (extents->x2 + src_dx > extents->x1 + dst_dx &&
-		extents->x1 + src_dx < extents->x2 + dst_dx &&
-		extents->y2 + src_dy > extents->y1 + dst_dy &&
-		extents->y1 + src_dy < extents->y2 + dst_dy);
-}
-
 static bool
 gen7_render_copy_boxes(struct sna *sna, uint8_t alu,
-		       PixmapPtr src, struct kgem_bo *src_bo, int16_t src_dx, int16_t src_dy,
-		       PixmapPtr dst, struct kgem_bo *dst_bo, int16_t dst_dx, int16_t dst_dy,
+		       const DrawableRec *src, struct kgem_bo *src_bo, int16_t src_dx, int16_t src_dy,
+		       const DrawableRec *dst, struct kgem_bo *dst_bo, int16_t dst_dx, int16_t dst_dy,
 		       const BoxRec *box, int n, unsigned flags)
 {
 	struct sna_composite_op tmp;
@@ -2935,21 +2909,21 @@ gen7_render_copy_boxes(struct sna *sna, uint8_t alu,
 	     overlaps(sna,
 		      src_bo, src_dx, src_dy,
 		      dst_bo, dst_dx, dst_dy,
-		      box, n, &extents)));
+		      box, n, flags, &extents)));
 
 	if (prefer_blt_copy(sna, src_bo, dst_bo, flags) &&
-	    sna_blt_compare_depth(&src->drawable, &dst->drawable) &&
+	    sna_blt_compare_depth(src, dst) &&
 	    sna_blt_copy_boxes(sna, alu,
 			       src_bo, src_dx, src_dy,
 			       dst_bo, dst_dx, dst_dy,
-			       dst->drawable.bitsPerPixel,
+			       dst->bitsPerPixel,
 			       box, n))
 		return true;
 
 	if (!(alu == GXcopy || alu == GXclear)) {
 fallback_blt:
 		DBG(("%s: fallback blt\n", __FUNCTION__));
-		if (!sna_blt_compare_depth(&src->drawable, &dst->drawable))
+		if (!sna_blt_compare_depth(src, dst))
 			return false;
 
 		return sna_blt_copy_boxes_fallback(sna, alu,
@@ -2961,38 +2935,45 @@ fallback_blt:
 	if (overlaps(sna,
 		     src_bo, src_dx, src_dy,
 		     dst_bo, dst_dx, dst_dy,
-		     box, n, &extents)) {
-		if (too_large(extents.x2-extents.x1, extents.y2-extents.y1))
-			goto fallback_blt;
+		     box, n, flags,
+		     &extents)) {
+		bool big = too_large(extents.x2-extents.x1, extents.y2-extents.y1);
 
-		if (can_switch_to_blt(sna, dst_bo, flags) &&
-		    sna_blt_compare_depth(&src->drawable, &dst->drawable) &&
+		if ((big || can_switch_to_blt(sna, dst_bo, flags)) &&
 		    sna_blt_copy_boxes(sna, alu,
 				       src_bo, src_dx, src_dy,
 				       dst_bo, dst_dx, dst_dy,
-				       dst->drawable.bitsPerPixel,
+				       dst->bitsPerPixel,
 				       box, n))
 			return true;
 
+		if (big)
+			goto fallback_blt;
+
+		assert(src_bo == dst_bo);
+		assert(src->depth == dst->depth);
+		assert(src->width == dst->width);
+		assert(src->height == dst->height);
 		return sna_render_copy_boxes__overlap(sna, alu,
-						      src, src_bo, src_dx, src_dy,
-						      dst, dst_bo, dst_dx, dst_dy,
+						      src, src_bo,
+						      src_dx, src_dy,
+						      dst_dx, dst_dy,
 						      box, n, &extents);
 	}
 
-	if (dst->drawable.depth == src->drawable.depth) {
-		tmp.dst.format = sna_render_format_for_depth(dst->drawable.depth);
+	if (dst->depth == src->depth) {
+		tmp.dst.format = sna_render_format_for_depth(dst->depth);
 		tmp.src.pict_format = tmp.dst.format;
 	} else {
-		tmp.dst.format = sna_format_for_depth(dst->drawable.depth);
-		tmp.src.pict_format = sna_format_for_depth(src->drawable.depth);
+		tmp.dst.format = sna_format_for_depth(dst->depth);
+		tmp.src.pict_format = sna_format_for_depth(src->depth);
 	}
 	if (!gen7_check_format(tmp.src.pict_format))
 		goto fallback_blt;
 
-	tmp.dst.pixmap = dst;
-	tmp.dst.width  = dst->drawable.width;
-	tmp.dst.height = dst->drawable.height;
+	tmp.dst.pixmap = (PixmapPtr)dst;
+	tmp.dst.width  = dst->width;
+	tmp.dst.height = dst->height;
 	tmp.dst.bo = dst_bo;
 	tmp.dst.x = tmp.dst.y = 0;
 	tmp.damage = NULL;
@@ -3021,15 +3002,10 @@ fallback_blt:
 						   extents.y2 - extents.y1,
 						   n > 1))
 			goto fallback_tiled;
-
-		dst_dx += tmp.dst.x;
-		dst_dy += tmp.dst.y;
-
-		tmp.dst.x = tmp.dst.y = 0;
 	}
 
 	tmp.src.card_format = gen7_get_card_format(tmp.src.pict_format);
-	if (too_large(src->drawable.width, src->drawable.height)) {
+	if (too_large(src->width, src->height)) {
 		int i;
 
 		extents = box[0];
@@ -3051,13 +3027,11 @@ fallback_blt:
 					       extents.x2 - extents.x1,
 					       extents.y2 - extents.y1))
 			goto fallback_tiled_dst;
-
-		src_dx += tmp.src.offset[0];
-		src_dy += tmp.src.offset[1];
 	} else {
 		tmp.src.bo = src_bo;
-		tmp.src.width  = src->drawable.width;
-		tmp.src.height = src->drawable.height;
+		tmp.src.width  = src->width;
+		tmp.src.height = src->height;
+		tmp.src.offset[0] = tmp.src.offset[1] = 0;
 	}
 
 	tmp.mask.bo = NULL;
@@ -3080,6 +3054,14 @@ fallback_blt:
 		}
 		_kgem_set_mode(&sna->kgem, KGEM_RENDER);
 	}
+
+	src_dx += tmp.src.offset[0];
+	src_dy += tmp.src.offset[1];
+
+	dst_dx += tmp.dst.x;
+	dst_dy += tmp.dst.y;
+
+	tmp.dst.x = tmp.dst.y = 0;
 
 	gen7_align_vertex(sna, &tmp);
 	gen7_emit_copy_state(sna, &tmp);
@@ -3124,11 +3106,11 @@ fallback_tiled_dst:
 		kgem_bo_destroy(&sna->kgem, tmp.dst.bo);
 fallback_tiled:
 	DBG(("%s: fallback tiled\n", __FUNCTION__));
-	if (sna_blt_compare_depth(&src->drawable, &dst->drawable) &&
+	if (sna_blt_compare_depth(src, dst) &&
 	    sna_blt_copy_boxes(sna, alu,
 			       src_bo, src_dx, src_dy,
 			       dst_bo, dst_dx, dst_dy,
-			       dst->drawable.bitsPerPixel,
+			       dst->bitsPerPixel,
 			       box, n))
 		return true;
 
@@ -3291,7 +3273,7 @@ gen7_render_fill_boxes(struct sna *sna,
 		       CARD8 op,
 		       PictFormat format,
 		       const xRenderColor *color,
-		       PixmapPtr dst, struct kgem_bo *dst_bo,
+		       const DrawableRec *dst, struct kgem_bo *dst_bo,
 		       const BoxRec *box, int n)
 {
 	struct sna_composite_op tmp;
@@ -3326,7 +3308,7 @@ gen7_render_fill_boxes(struct sna *sna,
 
 		if (alu != GXinvalid &&
 		    sna_blt_fill_boxes(sna, alu,
-				       dst_bo, dst->drawable.bitsPerPixel,
+				       dst_bo, dst->bitsPerPixel,
 				       pixel, box, n))
 			return true;
 
@@ -3349,16 +3331,17 @@ gen7_render_fill_boxes(struct sna *sna,
 	     __FUNCTION__, pixel, n,
 	     box[0].x1, box[0].y1, box[0].x2, box[0].y2));
 
-	tmp.dst.pixmap = dst;
-	tmp.dst.width  = dst->drawable.width;
-	tmp.dst.height = dst->drawable.height;
+	assert(dst->type == DRAWABLE_PIXMAP);
+	tmp.dst.pixmap = (PixmapPtr)dst;
+	tmp.dst.width  = dst->width;
+	tmp.dst.height = dst->height;
 	tmp.dst.format = format;
 	tmp.dst.bo = dst_bo;
 	tmp.dst.x = tmp.dst.y = 0;
 	tmp.damage = NULL;
 
 	sna_render_composite_redirect_init(&tmp);
-	if (too_large(dst->drawable.width, dst->drawable.height)) {
+	if (too_large(dst->width, dst->height)) {
 		BoxRec extents;
 
 		boxes_extents(box, n, &extents);
