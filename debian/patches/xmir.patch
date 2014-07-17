@@ -25,7 +25,7 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
  
 --- a/src/intel_device.c
 +++ b/src/intel_device.c
-@@ -276,6 +276,27 @@
+@@ -276,6 +276,25 @@
  }
  #endif
  
@@ -35,17 +35,15 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
 +#if XMIR
 +	char id[20];
 +
++	if (!xorgMir)
++		return -1;
++
 +	snprintf(id, sizeof(id),
 +		 "pci:%04x:%02x:%02x.%d",
 +		 pci->domain, pci->bus, pci->dev, pci->func);
 +	fd = xmir_get_drm_fd(id);
 +	if (fd == -1)
 +		return -1;
-+
-+	if (*path == NULL) /* XXX Fix Xmir - it knows both the fd and path */
-+		*path = drmGetDeviceNameFromFd(fd);
-+	if (*path == NULL)
-+		fd = -1;
 +#endif
 +
 +	return fd;
@@ -53,7 +51,7 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
  
  #if defined(ODEV_ATTRIB_FD)
  static int get_fd(struct xf86_platform_device *dev)
-@@ -328,7 +349,9 @@
+@@ -328,7 +347,9 @@
  	master_count = 1; /* DRM_MASTER is managed by Xserver */
  	fd = get_fd(platform);
  	if (fd == -1) {
