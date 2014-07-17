@@ -373,11 +373,9 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
 +}
 +
 +#endif
-diff --git a/src/sna/sna_dri2.c b/src/sna/sna_dri2.c
-index 1baaf2b..e053dcc 100644
 --- a/src/sna/sna_dri2.c
 +++ b/src/sna/sna_dri2.c
-@@ -791,6 +791,7 @@ static void sna_dri2_select_mode(struct sna *sna, struct kgem_bo *dst, struct kg
+@@ -791,6 +791,7 @@
  	if (busy.busy & (1 << 17))
  		mode = KGEM_BLT;
  	kgem_bo_mark_busy(busy.handle == src->handle ? src : dst, mode);
@@ -385,28 +383,20 @@ index 1baaf2b..e053dcc 100644
  	_kgem_set_mode(&sna->kgem, mode);
  }
  
-@@ -1351,16 +1352,16 @@ can_flip(struct sna * sna,
- 	if (draw->type == DRAWABLE_PIXMAP)
+@@ -1356,6 +1357,12 @@
  		return false;
+ 	}
  
--	if (!sna->scrn->vtSema) {
--		DBG(("%s: no, not attached to VT\n", __FUNCTION__));
 +	if ((sna->flags & SNA_IS_HOSTED) == 0) {
 +		DBG(("%s: no, not hosted\n", __FUNCTION__));
++		return false;
++	}
++
++
+ 	if ((sna->flags & (SNA_HAS_FLIP | SNA_HAS_ASYNC_FLIP)) == 0) {
+ 		DBG(("%s: no, pageflips disabled\n", __FUNCTION__));
  		return false;
- 	}
- 
--	if ((sna->flags & (SNA_HAS_FLIP | SNA_HAS_ASYNC_FLIP)) == 0) {
--		DBG(("%s: no, pageflips disabled\n", __FUNCTION__));
-+	if (!sna->scrn->vtSema) {
-+		DBG(("%s: no, not attached to VT\n", __FUNCTION__));
- 		return false;
- 	}
- 
- 	if (front->format != back->format) {
- 		DBG(("%s: no, format mismatch, front = %d, back = %d\n",
- 		     __FUNCTION__, front->format, back->format));
-@@ -2966,6 +2977,13 @@ static const char *dri_driver_name(struct sna *sna)
+@@ -2966,6 +2973,13 @@
  	return s;
  }
  
@@ -420,7 +410,7 @@ index 1baaf2b..e053dcc 100644
  bool sna_dri2_open(struct sna *sna, ScreenPtr screen)
  {
  	DRI2InfoRec info;
-@@ -3027,6 +3045,13 @@ bool sna_dri2_open(struct sna *sna, ScreenPtr screen)
+@@ -3027,6 +3041,13 @@
  	info.ReuseBufferNotify = sna_dri2_reuse_buffer;
  #endif
  
