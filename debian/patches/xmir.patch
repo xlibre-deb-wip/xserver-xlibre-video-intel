@@ -1,14 +1,14 @@
-commit 67c072065118115112d06e77c43b6ac225dbcf56
+commit 80db93ed6b05fade9e0c7a581cc2b503f66d2416
 Author: Chris Wilson <chris@chris-wilson.co.uk>
 Date:   Wed Jul 24 01:44:30 2013 +0100
 
-    sna: Preliminary patch for XMir
-    
-    For the intrepid explorer, who is desperate to encounter all the bugs we
-    fixed long ago. /o\
+    sna: Add XMir support
     
     With lots of updates by Christopher James Halse Rogers as he updated the
-    XMir API.
+    XMir API - but now supposedly frozen!
+    
+    "<RAOF> ickle: I think the xmir api should be pretty much stable now,
+    barring people coming up with more awesome ways of doing things."
     
     Signed-off-by: Christopher James Halse Rogers <raof@ubuntu.com>
     Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
@@ -25,43 +25,30 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
  
 --- a/src/intel_device.c
 +++ b/src/intel_device.c
-@@ -276,6 +276,25 @@
+@@ -162,10 +162,23 @@
+ 	return ret;
  }
- #endif
  
 +static int __intel_open_xmir(const struct pci_device *pci)
 +{
-+	int fd = -1;
-+#if XMIR
 +	char id[20];
-+
-+	if (!xorgMir)
-+		return -1;
 +
 +	snprintf(id, sizeof(id),
 +		 "pci:%04x:%02x:%02x.%d",
 +		 pci->domain, pci->bus, pci->dev, pci->func);
-+	fd = xmir_get_drm_fd(id);
-+	if (fd == -1)
-+		return -1;
-+#endif
-+
-+	return fd;
++	return xmir_get_drm_fd(id);
 +}
++
+ static int __intel_open_device(const struct pci_device *pci, const char *path)
+ {
+ 	int fd;
  
- #if defined(ODEV_ATTRIB_FD)
- static int get_fd(struct xf86_platform_device *dev)
-@@ -328,7 +347,9 @@
- 	master_count = 1; /* DRM_MASTER is managed by Xserver */
- 	fd = get_fd(platform);
- 	if (fd == -1) {
--		fd = __intel_open_device(pci, path);
-+		fd = __intel_open_xmir(pci);
-+		if (fd == -1)
-+			fd = __intel_open_device(pci, path);
- 		if (fd == -1)
- 			goto err_path;
- 
++	if (xorgMir)
++		return __intel_open_xmir(pci);
++
+ 	if (path == NULL) {
+ 		char id[20];
+ 		int ret;
 --- a/src/intel_driver.h
 +++ b/src/intel_driver.h
 @@ -1,6 +1,8 @@
@@ -138,6 +125,36 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
 +#endif
 +
  #endif /* _SNA_H */
+--- a/src/sna/sna_dri2.c
++++ b/src/sna/sna_dri2.c
+@@ -2873,6 +2873,13 @@
+ void sna_dri2_destroy_window(WindowPtr win) { }
+ #endif
+ 
++#if DRI2INFOREC_VERSION >= 8 && XMIR
++static int sna_dri_auth_magic2(ScreenPtr screen, uint32_t magic)
++{
++	return xmir_auth_drm_magic(to_sna_from_screen(screen)->xmir, magic);
++}
++#endif
++
+ static bool has_i830_dri(void)
+ {
+ 	return access(DRI_DRIVER_PATH "/i830_dri.so", R_OK) == 0;
+@@ -3027,6 +3034,13 @@
+ 	info.ReuseBufferNotify = sna_dri2_reuse_buffer;
+ #endif
+ 
++#if DRI2INFOREC_VERSION >= 8 && XMIR
++	if (sna->xmir) {
++		info.version = 8;
++		info.AuthMagic2 = sna_dri_auth_magic2;
++	}
++#endif
++
+ #if USE_ASYNC_SWAP
+ 	info.version = 10;
+ 	info.scheduleSwap0 = 1;
 --- a/src/sna/sna_driver.c
 +++ b/src/sna/sna_driver.c
 @@ -548,6 +548,9 @@
@@ -150,7 +167,15 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
  	/* Sanity check */
  	if (hosted() && (sna->flags & SNA_IS_HOSTED) == 0) {
  		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
-@@ -592,9 +595,13 @@
+@@ -559,6 +562,7 @@
+ 	xf86DrvMsg(scrn->scrnIndex, X_PROBED, "CPU: %s\n",
+ 		   sna_cpu_features_to_string(sna->cpu_features, buf));
+ 
++	/* XXX query depth from host */
+ 	if (!xf86SetDepthBpp(scrn, 24, 0, 0,
+ 			     Support32bppFb |
+ 			     SupportConvert24to32 | PreferConvert24to32))
+@@ -592,6 +596,9 @@
  
  	sna_setup_capabilities(scrn, fd);
  
@@ -160,10 +185,6 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
  	kgem_init(&sna->kgem, fd,
  		  xf86GetPciInfoForEntity(pEnt->index),
  		  sna->info->gen);
-+
- 	if (xf86ReturnOptValBool(sna->Options, OPTION_ACCEL_DISABLE, FALSE) ||
- 	    !sna_option_cast_to_bool(sna, OPTION_ACCEL_METHOD, TRUE)) {
- 		xf86DrvMsg(sna->scrn->scrnIndex, X_CONFIG,
 @@ -710,6 +717,8 @@
  
  	if (*tv == NULL || ((*tv)->tv_usec | (*tv)->tv_sec) || has_shadow(sna))
@@ -184,7 +205,7 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
  
 --- /dev/null
 +++ b/src/sna/sna_xmir.c
-@@ -0,0 +1,186 @@
+@@ -0,0 +1,183 @@
 +/***************************************************************************
 +
 + Copyright 2013 Intel Corporation.  All Rights Reserved.
@@ -271,7 +292,6 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
 +	if (n == 0)
 +		return;
 +
-+	/* XXX size is bogus, but only used for sanity checks */
 +	dst = kgem_create_for_prime(&sna->kgem,
 +				    xmir_window_get_fd(xmir_win),
 +				    pitch * (dst_box->y2 - dst_box->y1));
@@ -279,7 +299,6 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
 +		return;
 +
 +	dst->pitch = pitch;
-+	dst->scanout = true; /* presume the worst (almost always true) */
 +
 +	if (get_window_deltas(pixmap, &sx, &sy))
 +		RegionTranslate(region, sx, sy);
@@ -323,7 +342,6 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
 +	if (n == 0)
 +		xmir_submit_rendering_for_window(xmir_win, region);
 +
-+	dst->scanout = false; /* but don't confuse our caching! */
 +	kgem_bo_destroy(&sna->kgem, dst);
 +}
 +
@@ -371,54 +389,3 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
 +}
 +
 +#endif
---- a/src/sna/sna_dri2.c
-+++ b/src/sna/sna_dri2.c
-@@ -791,6 +791,7 @@
- 	if (busy.busy & (1 << 17))
- 		mode = KGEM_BLT;
- 	kgem_bo_mark_busy(busy.handle == src->handle ? src : dst, mode);
-+#warning next line disabled by xmir patch?
- 	_kgem_set_mode(&sna->kgem, mode);
- }
- 
-@@ -1356,6 +1357,12 @@
- 		return false;
- 	}
- 
-+	if ((sna->flags & SNA_IS_HOSTED) == 0) {
-+		DBG(("%s: no, not hosted\n", __FUNCTION__));
-+		return false;
-+	}
-+
-+
- 	if ((sna->flags & (SNA_HAS_FLIP | SNA_HAS_ASYNC_FLIP)) == 0) {
- 		DBG(("%s: no, pageflips disabled\n", __FUNCTION__));
- 		return false;
-@@ -2966,6 +2973,13 @@
- 	return s;
- }
- 
-+#if DRI2INFOREC_VERSION >= 8 && XMIR
-+static int sna_dri_auth_magic2(ScreenPtr screen, uint32_t magic)
-+{
-+	return xmir_auth_drm_magic(to_sna_from_screen(screen)->xmir, magic);
-+}
-+#endif
-+
- bool sna_dri2_open(struct sna *sna, ScreenPtr screen)
- {
- 	DRI2InfoRec info;
-@@ -3027,6 +3041,13 @@
- 	info.ReuseBufferNotify = sna_dri2_reuse_buffer;
- #endif
- 
-+#if DRI2INFOREC_VERSION >= 8 && XMIR
-+	if (sna->xmir) {
-+		info.version = 8;
-+		info.AuthMagic2 = sna_dri_auth_magic2;
-+	}
-+#endif
-+
- #if USE_ASYNC_SWAP
- 	info.version = 10;
- 	info.scheduleSwap0 = 1;
