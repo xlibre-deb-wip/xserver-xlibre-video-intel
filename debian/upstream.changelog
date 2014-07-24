@@ -1,3 +1,2837 @@
+commit 8d95e90b7b4bf5d6bae5443f92d77d30f4443f24
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 23 15:45:31 2014 +0100
+
+    2.99.914 snapshot
+
+commit 57f0e65d5186412835f282af59141626e4a87a00
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 23 16:42:46 2014 +0100
+
+    sna/dri2: Compile fix for old xorg/dri2
+    
+    We have to do conditional compilation as we touch structure members that
+    may not exist in older Xserver headers.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4ed0937640b54246440421114b697f75d1b8c835
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 23 15:41:29 2014 +0100
+
+    Add automake magic required for libobj/
+    
+    So libobj/ wasn't included in the tarball, and nor was the compatability
+    functions being added to the driver when they were needed. The oddity is
+    that using the ./configure script (and thus make distcheck) succeeds. It
+    was only when 'autoreconf -fi' was run was the first error encoutered.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+    Reported-by: Tobias Klausmann
+
+commit dcf9ce4a9f16c01f58797e4f899d51e23506aa6c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 23 14:19:44 2014 +0000
+
+    Fix compile failure on old Xorg with XF86_ALLOCATE_GPU_SCREEN
+    
+    Sigh, a late fix was not compile checked against xorg-1.7.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1c5e20716f192f0c38b4edd879d28e11126f7f01
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jul 5 08:47:16 2014 +0100
+
+    2.99.913 snapshot
+
+commit d242965979cf251383a6230dbd65cdc1d9e231ea
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 23 14:25:25 2014 +0100
+
+    sna: Skip performing an async flip after fixup
+    
+    After the first async failure and we fix up the CRTC, ordinary we queue
+    a no-op flip in order to queue the event. For async flips, we do not
+    want that event so just skip the flip.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4153d4b43004cd90c0d9a7a7db399dac4d30721e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 23 13:54:19 2014 +0100
+
+    sna/dri2: Tidy freeing the queued frame events
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f2b2b6eda009924e5ec6974bb31be9d3749c9cf8
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 23 13:45:27 2014 +0100
+
+    test/dri2: Use the right device node
+    
+    Use the device node as instructed by Xorg.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 65c2376730e86d7502d8c47d49386be5f51e47ba
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 23 12:12:03 2014 +0100
+
+    sna: Add a DBG message for slave damage propagation
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 95c059b330e705ecd0e575e98d8edf5707e84a05
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 23 11:01:07 2014 +0100
+
+    sna: Reorder disabling scanout pixmap when updating slave
+    
+    The assertion caught that we would unregister an invalid drawable on
+    older Xorg.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d6830190bc9956f485db6c3420f7a4a79793a693
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 23 10:53:40 2014 +0100
+
+    sna: Disable all outputs when initializing as a slaved output provider
+    
+    When we are constructed as a slaved device, we need to disable all
+    outputs or else they are not correctly hooked into the master device
+    upon startup.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 70868c7aa881b15b7478f7ee4543fde0268a4ba6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 23 08:37:46 2014 +0100
+
+    sna/dri2: Recreate buffer in reuse rather than force recreate
+    
+    By marking the buffer->attachment as invalid we forced the recreation of
+    the buffer on the next DRI2GetBuffers. The only small problem with that
+    was that the client didn't always immediately call DRI2GetBuffers after
+    the invalidation - and if they did a DRI2CopyRegion with its stale
+    buffers the unfound attachment would generate a BadValue and kill the
+    client. So instead of messing around with the attachment, explicitly
+    recreate the buffer if we attempt to reuse a buffer of the wrong size.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit aa5351dbbe0a50080efee35a3d494b3a20b7c9f6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jul 22 09:40:14 2014 +0100
+
+    sna: Ensure errno is set after failure before reporting a modeset failure
+    
+    A few paths we report a sanity check failure which do not set errno, but
+    we then print out the errno as part of our message to the user. Set it
+    to a sane value in those cases.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit feba651db8dd61356fb6296b55d46168bd4d7011
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jul 22 09:15:01 2014 +0100
+
+    sna: Remove %# from DBG messages
+    
+    LogF doesn't support the 0x-prefix instruction.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 13e20c7f61d8b21b33c02d8b737cf9c06bf50f17
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jul 22 08:52:10 2014 +0100
+
+    sna: Assert that we do not overwrite an earlier COW entry
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d8b0a8fa033848543e0b39566b531fdfdd078087
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jul 22 08:48:58 2014 +0100
+
+    sna/dri3: Don't forget to add SHM pixmaps to the list of exported DRI3 bo
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit bfccacf745d054756661be3edd8898ac6aceb878
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jul 20 07:29:21 2014 +0100
+
+    sna/video: Bump the maximum size for sprites
+    
+    A sprite plane is limited by the display engine who's maximum resolution
+    has increased since the 2kx2k limitations of 8xx, so let's set it
+    correctly to the reported maximum CRTC size (since we have no individual
+    query for maximum sprite plane sizes).
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 9bb2818a7db1c9dc89379996415511b6cff4bb33
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jul 20 07:27:58 2014 +0100
+
+    dri3-test: Print line number for shm failures
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4ae346e7647fd2c01324f1a6d3b37674e858486d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jul 18 07:31:25 2014 +0100
+
+    configure: Double check xinerama's headers
+    
+    Having the pkgconfig present doesn't always necessarily imply the
+    headers are installed correctly - just fail over gracefully for xinerama
+    and intel-virtual-output
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit fac6845820e49dbbea2a625b7bb745d8f9159b56
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jul 18 07:14:19 2014 +0100
+
+    sna/dri2: Protect compsiteext.h include with build check
+    
+    We shouldn't include calls to the composite extension if it has not been
+    built.
+    
+    Reported-by: Ben Widawsky <ben@bwidawsk.net>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 923e098f5f830c30b93d6f85d4f812201bdcb206
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jul 17 17:10:39 2014 +0100
+
+    sna: Fix compilation with older Xorg
+    
+    sna_display.c: In function 'sna_crtc_disable_shadow':
+    sna_display.c:1375:39: error: dereferencing pointer to incomplete type
+       DamageUnregister(&crtc->slave_damage->drawable, crtc->slave_damage);
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 7026ffe56005bbc36dc37cafc7ebb2a7f09fefdd
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jul 17 17:04:02 2014 +0100
+
+    sna: Support TearFree on slaved outputs
+    
+    By always forcing the shadow intermediatory, we can enable TearFree even
+    ona slave scanout.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 3140d72826b5227f7f7ac9a428faa4bcfd4b377b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jul 17 16:14:16 2014 +0100
+
+    backlight: Prevent dereference of potential NULL argv
+    
+    Adam Sampson spotted that
+    
+    "It's possible (but not very sensible) to exec a program with an empty
+    argument list, so argv[0] is not necessarily a valid pointer. For
+    example:
+    
+    $ cat exec0.c
+    
+    int main(int argc, char *argv[]) {
+        char *empty[1] = { NULL };
+        execvp(argv[1], empty);
+        perror("execvp");
+        return 1;
+    }
+    $ ./exec0 /usr/libexec/xf86-video-intel-backlight-helper
+    Usage: (null) <iface>
+    "
+    
+    He sensibly suggested that we hardcode the program name to avoid the
+    NULL dereference. Being the paranoid type, we should also be careful not
+    to write to any file descriptors outside of our control (i.e. stderr),
+    so disable the messages unless we are debugging.
+    
+    Reported-by: Adam Sampson
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit bcd09ff6eb76bc4df046ece4da29b1455fed8dff
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jul 17 15:23:46 2014 +0100
+
+    sna: Assert that we never attempt to flip the slave scanout
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 129656e4a82d4bf799e5c1d75d0dcb4480f6eb09
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jul 17 15:01:06 2014 +0100
+
+    sna/dri2: Disable SwapLimit buffers with buggy prime implementations
+    
+    If there is a GPU screen, we have to assume that the DRI2 code may pass
+    around the wrong pointers to ReuseBufferNotify until the fix is
+    released:
+    
+    commit 4d92fab39c4225e89f2d157a1f559cb0618a6eaa
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Wed Jun 18 11:14:43 2014 +0100
+    
+        dri2: Use the PrimeScreen when creating/reusing buffers
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a45b2ea11c15f35c36330ff27cb45854a29c2e2c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jul 17 14:40:51 2014 +0100
+
+    sna: Handle rotated slaved scanouts
+    
+    As per the usual handling of rotated scanouts with unsupported
+    rotations, we stage the drawing onto a backbuffer then rotate onto the
+    crtc later. The difference here is that we must read the contents from
+    the master pixmap rather than our own screen pixmap.
+    
+    Spotted was looking at slaved scanouts mistakenly setting the CRTC
+    transformed flag.
+    
+    Reported-by: Tomas Pruzina <pruzinat@gmail.com>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=81383
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 339c9dd0d5206180995731ab22304776e544f2f7
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jul 17 12:54:47 2014 +0100
+
+    sna: Add missing DBG parameters
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 62f62f70eda97a3ef18c5144031fdf1cb2b7dad0
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jul 17 10:06:06 2014 +0100
+
+    sna: Avoid confusing failure to flip and flipping zero CRTC
+    
+    During the present unflip path we blindly try to restore the original
+    mode after a flip failure. However, it confuses flipping zero CRTC with
+    a genuine failure. This has the result of undoing a DPMS change (e.g.
+    xset dpms force dpms) under a DRI3 compositor.
+    
+    Reported-by: Jiri Slaby <jirislaby@gmail.com>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=81456
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 95f08c171ebd9b594112ab006c4460702a22bec1
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jul 17 09:20:35 2014 +0100
+
+    sna: Busy-wait for the kernel to catch up when flipping
+    
+    If the kernel reports that it is busy, it has not yet finished
+    processing a pending flip and we have multiple CRTC queued, just wait
+    for the kernel to clear its backlog before submitting the next flip. On
+    the other hand, if we can just overwrite the pending flip results.
+    However, the EBUSY may actually be a genuine report by the kernel of an
+    error, so check for an invalid CRTC first.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0a9d3dd8c83749992e643675f16486092f2b00fa
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jul 17 08:53:13 2014 +0100
+
+    sna: Silence valgrind when reading plane properties
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0a57b55f0fcfa93b38015535002cb11eeaf1dd3a
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jul 17 08:32:14 2014 +0100
+
+    sna: Remove extraneous function wrapping
+    
+    Since we only have the single callsite for do_page_flip, the wrapper is
+    not adding any meaningful information.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f33d44f41ef0f287375b7a6b1c117abff5a23b19
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 16 12:53:02 2014 +0100
+
+    sna: And remove new bogus assertion
+    
+    We assert that damage is valid as we delete the Pixmap, and so we cannot
+    assert that the Pixmap is still valid itself.
+    
+    Reported-by: Jiri Slaby <jirislaby@gmail.com>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit dd9df24eb5234c96e499063904ab7bd85a332fd8
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 16 08:05:34 2014 +0100
+
+    sna: Make the damage check more verbose
+    
+    Print out the pixmap number and the damage extents for when the
+    assertion fails.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 34ada63118680bf8ad2ef737fd4a8edfd8246e37
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 16 07:19:03 2014 +0100
+
+    sna/gen2+: Remove assertion on draw->type for fills
+    
+    I overlooked the tiling-fill path passing down a temporary DrawableRec
+    into the fill_boxes callback - invalidating the assertion.
+    
+    Fixes regression from
+    commit 43176b9bfafe389c4b9ed676f4e50e3b06f858c4
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Mon Jun 30 21:01:11 2014 +0100
+    
+        sna/dri2: Pass around the correct DrawableRec for sampling from the foriegn bo
+    
+    Reported-by: Jiri Slaby <jirislaby@gmail.com>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=70461#c62
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4422b1854209a2cdf023c1fbc60834fde2fbc0c7
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jul 11 22:23:55 2014 +0100
+
+    sna: Use a stricter test for determining CRTC off before updating the cursor
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e0523ade28fa0da00d0bd70d8b22d53ed4e49f73
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 9 12:10:15 2014 +0100
+
+    sna: Reduce reflections onto rotations
+    
+    In order to support a wider range of rotation/reflections, perform a
+    simple reduction of the requested rotation first.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 251bcc32eed37ee10eb14ce2278ecbdcc40a7cde
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jul 10 21:01:57 2014 +0100
+
+    configure: Provide a poor man's replacement for getline()
+    
+    uClibc is one such library that doesn't implement getline()
+    
+    Reported-by: Ben Widawsky <benjamin.widawsky@intel.com>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8587b2fff218537c6ff568ac3ef561f0d39f03ff
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jul 8 11:53:13 2014 +0100
+
+    sna: Rewrite rotation setup on top of universal drm planes
+    
+    The kernel interface has changed slightly since the early proposals. Now
+    the rotation property is only on the plane and so we have to lookup the
+    primary prime as well.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f24a9d335273fec20679397abcc3d5405d9613df
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jul 5 14:40:38 2014 +0100
+
+    sna: Fix a couple of DBG messages
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 790e7492bdb5c0c77c53ae769f0d408b04d5c99b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jul 5 09:46:00 2014 +0100
+
+    test/lowlevel-blt-bench: Add common PDF operators
+    
+    Applications are starting to use PDF operators, so far I have spotted
+    multiply, dodge and lighten.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8fa22964f69d3ec8700f177dd7cb3cbc396a9f35
+Author: Matthieu Herrb <matthieu@herrb.eu>
+Date:   Fri Jul 4 18:26:09 2014 +0200
+
+    backlight: Fix security issues in handling of the interface path name.
+    
+    - don't allow '/' in the interface name to avoid escaping the /sys
+      hierarchy
+    - check snprintf() return value for overflow.
+    
+    Problems reported by  Adam Sampson. Thanks.
+    
+    Signed-off-by: Matthieu Herrb <matthieu@herrb.eu>
+    Reviewed-by: Reviewed-by: Hans de Goede <hdegoede@redhat.com>
+
+commit 6a64a3ae55ad5f743d2b7a4852b6ca7b54d2a142
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jul 4 13:04:02 2014 +0100
+
+    sna: Discard operations to either CPU or GPU bo when overwriting with RenderRectangles
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2c8ab77fcd71b7f96ad7bc379e5c68b3b45a5069
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jul 4 12:43:55 2014 +0100
+
+    sna: Tweak number of threads for short areas
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d3ccb3f3b2a3cb4c8b51d58d185dd10b85e025eb
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jul 4 12:39:01 2014 +0100
+
+    sna: Convert a clear tile into a solid fill
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2e0763088f8e159b414cec5c056cc4c91a34766e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jul 4 12:26:43 2014 +0100
+
+    sna: Fix typo s/num_threads/max_threads/
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 04ddea075e9e07cf3158594130d5ba7d1f50f7f1
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jul 4 12:14:11 2014 +0100
+
+    sna: Do a quirk early check for short areas before threading
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 228a22fe8db044a18556a9fdb989323274817771
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jul 4 12:10:10 2014 +0100
+
+    sna: Disable use of threaded compositor when using threaded renderer
+    
+    Reported-by: Zdenek Kabelac <zkabelac@redhat.com>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 64bcb91f58fba3956f2c66fa37707b9e496da936
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jul 4 11:02:39 2014 +0100
+
+    sna: Utilise existing cached upload for promoting to GPU bo
+    
+    If we already have a buffer that represents the data on the GPU, we can
+    simply use that when we need to promote the pixmap onto the GPU.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 821ef20b27f84cc26aec266b0f616a7f39ba9e3d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jul 4 10:43:35 2014 +0100
+
+    sna: Promote tile pixmaps to GPU when reused
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c6407f7380829f822a462100d26bc531aed0fd6f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jul 4 10:14:54 2014 +0100
+
+    sna/gen8: Disable the unaligned check
+    
+    Note sure if this is strictly required -- but at the moment it fails for
+    1x1R solids, causing us to skip glyphs. The simulator doesn't complain,
+    so just skip the check for now.
+    
+    Reported-by: Ben Widawsky <ben@bwidawsk.net>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e64d14d7bc72fe7b150e5427feeb1a163ec600a7
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jul 4 09:55:04 2014 +0100
+
+    sna: Tighten assertions for using upload proxies concurrently with CPU reads
+    
+    After relaxing some of the rules on when to discard the upload proxies,
+    we also need to relax some of the complementary asserts.
+    
+    Reported-by: Zdenek Kabelac <zkabelac@redhat.com>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4e12d5ca26bdfafd7b9cd02c36e6d991f068f29b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jul 4 09:48:53 2014 +0100
+
+    sna: Prevent creating a GPU bo for an inplace read
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 18ae7722dbdf6ab61560962ed6ca8d39f353b1f9
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jul 3 18:18:04 2014 +0000
+
+    sna: Wrap xf86DPMSSet
+    
+    We need to wrap xf86DPMSSet() so that we can reintialize our bookkeeping
+    and auxiliary planes after disabling/re-enabling CRTC during DPMS
+    operations.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 57d0cc82d851b95d4e3b1821287dd3ffd1cf6e3b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jul 3 09:07:44 2014 +0100
+
+    sna: Clear the cursor reference from the CRTC if the update fails
+    
+    This should allow it to be restored correctly the next time it gets
+    shown.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 24c9bac7eb6e17b55044d719bab74d16fd68c450
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 2 21:17:54 2014 +0100
+
+    sna: Limit the size of the tiling object to be smaller than either the originals
+    
+    When we tile, we do so in order to fit an operation involving two
+    objects larger than the aperture. If we then choose an intermediate
+    tiling object that is larger than either of those two, the error will
+    persist and we will be forced to recuse.
+    
+    In the worst case, this will provide an upper bound to the recursion.
+    
+    Reported-by: Bruno Prémont <bonbons@linux-vserver.org>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 710bb0d37c681f2ffdeaf263b6ee7d9488670bc0
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 2 09:16:07 2014 +0000
+
+    test: Create separate SHM segments for ref/out
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 87e659b887f4c738cfc91439efdac0d48fd294f0
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 2 10:47:32 2014 +0000
+
+    sna: Use the threaded compositor for picture conversions
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2bf36d54ebdfa2a59bf7ef71134b953628ae5d50
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 2 11:31:54 2014 +0100
+
+    sna/gen6+: Tweak consideration of compositing on BLT
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 732cd11cf0ca813fdc06f9f09fab120ea4e3a7da
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jul 1 17:54:49 2014 +0100
+
+    sna: Fix typo in LinearFramebuffer handling
+    
+    Eeek, when not using LinearFramebuffer we still want to create the GPU
+    bo: s/,/;/
+    
+    Reported-by: Ilia Mirkin <imirkin@alum.mit.edu>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b5fa463b90c49ebc635d79b1561c94a4857e9cf6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jul 1 17:53:56 2014 +0100
+
+    sna: Correct migration flags for initial scanout creation
+    
+    We want to preserve any contents preloaded (not that there should be
+    any...)
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b88866aa5ebf813a999e194dec24e9ef2ac4f59d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jul 1 16:59:31 2014 +0100
+
+    sna/dri2: Add a DBG option to select copy method
+    
+    Often when debugging it is useful to force either use of the BLT or 3D
+    pipelines for copies.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a10781b70f222f3997928fa979f6292617f79316
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jul 1 15:11:07 2014 +0100
+
+    sna: Enforce LinearFramebuffer option
+    
+    This option should only be used for compatibility. Previously this was
+    done at a high level, this changes it to enforce the tiling as we apply
+    the CRTC.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 75745cd5861481c5a9a31125d357f339349dd0f8
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jul 1 14:31:32 2014 +0100
+
+    sna/dri2: Use CPU fallback if possible
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 02715490db13dcd47c5e4bef713f400838d94b99
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jul 1 13:10:32 2014 +0100
+
+    sna/dri2: Set depth/bpp on scratch DrawableRec
+    
+    We need to initialise both depth and bitsPerPixel on the drawable struct
+    we pass around as they are used for selecting for the format when
+    copying.
+    
+    Reported-by: Vedran Rodic <vrodic@gmail.com>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e6e5330857097eb2caafa89d571d12e4bb15f539
+Author: Damien Lespiau <damien.lespiau@intel.com>
+Date:   Mon Jun 30 19:24:13 2014 +0100
+
+    intel: Use the i845 info structure for INTEL_I845G_IDS()
+    
+    I assume the intention was to provide a different structure for each of
+    the gen 2 devices.
+    
+    This doesn't change anything really.
+    
+    Signed-off-by: Damien Lespiau <damien.lespiau@intel.com>
+
+commit e1c3e6ce79c73d12c814cfda76dbc0df184902ee
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 30 19:56:39 2014 +0100
+
+    sna: Add DBG breadcrumbs before flushes in BLT
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 43176b9bfafe389c4b9ed676f4e50e3b06f858c4
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 30 21:01:11 2014 +0100
+
+    sna/dri2: Pass around the correct DrawableRec for sampling from the foriegn bo
+    
+    One day, we will move the width/height/bpp to the bo itself...
+    
+    Reported-by: Ilia Mirkin <imirkin@alum.mit.edu>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6c3399715e316be970c696b8949e3c14e83ea5df
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 30 16:32:45 2014 +0100
+
+    sna/dri2: Apply the paraniod buffer clip in the correct coordinate system
+    
+    We need to only clip to the extents of the copy in the buffer space -
+    which implies that we need to translate the region into that space before
+    doing the clip.
+    
+    Reported-by: Ilia Mirkin <imirkin@alum.mit.edu>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c25fa2216a3674f564a7e35d263a5d405aa97816
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 30 14:13:13 2014 +0100
+
+    sna: Tweak preference for small GPU bo
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 19a62e088f5202026bdfde7a8af36598b69f8243
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 30 11:20:54 2014 +0100
+
+    test/lowlevel-blt-bench: Update progress more frequently
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit fab3bc70a450d94104c96ddbe7fa6e6ace1bb8f8
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 30 11:05:33 2014 +0100
+
+    sna: Reduce assertion when using asynchronous CPU access
+    
+    If we are not actually accessing the memory through the pointer, we do
+    not care if it not currently coherent.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ffe8bd4d6e296a0ded0e118aee05aa6cb3051c56
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 30 10:55:20 2014 +0100
+
+    sna: Silence snarky compliers
+    
+    0 != (void *)0
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 05f6183075867d582b7f9f74aec42e632e3d83dd
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 30 10:46:00 2014 +0100
+
+    sna: Mollify assert to be consistent with the scanout flush
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2e0000688d034535083950b98bc61745dd965352
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 30 08:44:33 2014 +0100
+
+    test/lowlevel-blt-bench: Exercise masks
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 37ac34c4e4500bfc272222754949edc1dbb8c7e2
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 30 08:44:33 2014 +0100
+
+    test/lowlevel-blt-bench: Exercise SHM pixmaps
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 901d889dd7397dfa4c291f96af657e4b3433d795
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 30 07:44:25 2014 +0100
+
+    intel-virtual-output: Remove one redundant cleanup on error
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a8b0ba0ed5f27e0d671b650d6f4bfe2fd86a0f3f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 29 15:25:19 2014 +0100
+
+    intel-virtual-output: Cleanup singleton on failure
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 81889664851e3a2218d1ac5d39ebd2bd3b6a4954
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 29 08:29:36 2014 +0100
+
+    intel-virtual-output: Convert debugging messages to verbosity
+    
+    Original patch by main.haarp:
+    "A verbose switch is quite useful for debugging, it shouldn't require
+    editing and recompilation to gain more useful output. I added it."
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=80664
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 665d012b8e1b9666e535a3081404406f31b8a3ef
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 29 09:26:10 2014 +0100
+
+    sna: Ensure CPU bo is synchronized before writing
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6b906ae742ec96eeef403191d3cdded6a23a70b7
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 29 07:02:44 2014 +0100
+
+    sna: Update allocation of CPU bo to avoid creating active buffers
+    
+    Since we now prefer CPU detiling, exactly when we want active/inactive
+    buffers is a little more complex - and we also need to take into account
+    when we want to use the CPU bo as a render target.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b961d7323369284ea2c3db47d30c27ffe01a9040
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 29 07:00:58 2014 +0100
+
+    sna: Sync CPU bo before writes
+    
+    Fixes regression from
+    
+    commit 961139f5878572ebea268a0bbf47caf05af9093f [2.99.912]
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Fri May 30 09:45:15 2014 +0100
+    
+        sna: Use manual detiling for downloads
+    
+    Reported-by: Harald Judt <h.judt@gmx.at>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=80560
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 53ef9e762a6e7802b3d5f8fba9ac17ff95545c10
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jun 28 21:07:08 2014 +0100
+
+    sna: Only preferentially upload through the GTT for large transfers
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0955f12ae04011593b71817e3151b8fb7c228899
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jun 28 17:38:54 2014 +0100
+
+    sna: Prefer linear if below tile_width
+    
+    Be stricter in order to allow greater use of CPU bo.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 3ef966f4c5bae07108ce2720f4da3c3c4e41e1aa
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jun 28 14:23:29 2014 +0100
+
+    sna/io: Prefer CPU copies on LLC
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 9fc052da5c4246402d2707b3a91efffa7dd81e08
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jun 28 14:22:17 2014 +0100
+
+    sna: Don't discard damage for SHM pixmaps
+    
+    We don't really want to rendering into SHM pixmaps except for copying
+    back due to the strict serialisation requirements.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0f8b39d24ff15cf3373ac7293f12772ebe16b68b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jun 28 14:21:36 2014 +0100
+
+    sna: Check for a mappable GPU bo before migrating damage
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit cfdaee4a7e45689b0fbbc8c3166d28d69797e759
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jun 28 14:20:00 2014 +0100
+
+    sna: Skip adding damage if it is already contained
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 80752fb2794faa581d891b24148eaf51c42afd25
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jun 28 14:19:22 2014 +0100
+
+    sna: Tidy calling memcpy_from_tiled
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2a0176379f0ff290d276adc72d44dfddafd96da5
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jun 28 14:18:23 2014 +0100
+
+    sna: Micro-optimise unswizzling tiling/detiling
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 24cb50e53c789cb7a05d59ad103dda1c3a009485
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jun 28 07:05:55 2014 +0100
+
+    sna/trapezoids: Handle mono traps just in case
+    
+    I disabled a few paths and ended up in an assert that mono trapezoids
+    shouldn't get that far...
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 72c041e57b99367f327c51c50fce2a55d618fc63
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 27 16:26:24 2014 +0100
+
+    uxa: Update Screen Pixmap width/height first
+    
+    Since commit dd6db82680b05cde4a47116b7096c054f3837e20 [2.99.912]
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Fri May 9 20:26:19 2014 +0100
+    
+        uxa: Add DRI3 and miSyncShm support
+    
+    we verify that the attaching bo meets the constraints required for the
+    Pixmap. However, when updating the ScreenPixmap following a resize, we
+    did not update the Pixmap size until after we tried to update the bo,
+    resulting in a validation failure when shrinking the screen.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0584604b53c8676adfa1f8f4d3def22c93ea822f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 27 16:12:35 2014 +0100
+
+    test: Expand number of sources for basic benchmarking
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit edd2b789568b14c29a004a64b6ff82bb6e4e9620
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 27 16:00:03 2014 +0100
+
+    sna/dri2: DBG compile fixes
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a6ba93283b20a50ff36758624d2967562b7bdae9
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 27 13:42:37 2014 +0100
+
+    sna/glyphs: Add DBG option for glyph tolerance
+    
+    And bump it to 3 so that glyph filtering doesn't force us to use the
+    mask too often.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=77436
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ee5c74deee77db4292ce197ab7facca422f86021
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 27 12:56:43 2014 +0100
+
+    sna/glyphs: Add DBG option for forcing glyphs-to-dst
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6ba4ee1fe842e975c94a01f93c6d39c20eadadbe
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 27 10:38:59 2014 +0100
+
+    sna: Check source bo is suitable for BLT before doing so
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 157e22cb8e96b0a9ffa7d58625fe2396f6084ff9
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 26 20:19:52 2014 +0100
+
+    sna: Only reuse pinned batches for 830/845
+    
+    Trying to fly too close to the sun. :(
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=80558
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f027b4f628b6d0f4c00f8aba7b27dcf51f91211d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 26 20:24:05 2014 +0100
+
+    sna/dri2: Slightly improved DBG messages
+    
+    Missing git add from
+    
+    commit 2e8c09f3fe468abba9c307ba3d7b2d22908e1172
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Wed Jun 25 22:19:23 2014 +0100
+    
+        sna/dri2: Hook into ClientGone callback to clear dangling references
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2ae5d7d9415a77c76078bc340066df73dce72d27
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 26 20:21:12 2014 +0100
+
+    sna: Tidy selection of a near-miss active buffer.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=80560
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8cad98eca64224534887efbcd1c60604cd491c35
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 26 12:42:30 2014 +0100
+
+    sna: Fix userptr defines to match i915_drm.h
+    
+    Now that we are starting to see userptr in the headers, we see that the
+    definitions slightly changed.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c5c7dd24a55f04322d5eec10dc4352d8a8e92b1e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 26 09:25:06 2014 +0100
+
+    sna: Remove scare quotes from hotplug detection "enabled"
+    
+    Tidy up the log message by improving its formatting, and making it more
+    accurate.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2e8c09f3fe468abba9c307ba3d7b2d22908e1172
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 25 22:19:23 2014 +0100
+
+    sna/dri2: Hook into ClientGone callback to clear dangling references
+    
+    As the Window may exist for multiple Clients, we cannot rely on the
+    destruction of the Window decoupling all outstanding events and
+    preventing chasing a stale Client pointer.
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=80157
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 12a349974b63a47ad55384abe0d7a839af48f31a
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 26 06:59:07 2014 +0100
+
+    sna: Make output destroy more defensive
+    
+    We may never create the properties as it may be ignored or the
+    allocation may fail, so we need to be careful when freeing we do not
+    stumble over invalid pointers.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=80355#c28
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2ec2164ba4bd3a266949cdb379b6da1090475c08
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 25 18:05:46 2014 +0100
+
+    sna/dri2: Compile fixes for ancient Xorg
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 258f8983daa3a8fe315c440f5e298ae1b02fd678
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 25 17:20:52 2014 +0100
+
+    sna: Fix uninitialisable variable
+    
+    sna_render.c: In function 'sna_render_picture_downsample':
+    sna_render.c:822: warning: 'priv' may be used uninitialized in this function
+    
+    introduced in
+    
+    commit ded05e8abb248664124d2b86f77c27497a252c4e
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Mon Jun 23 22:15:56 2014 +0100
+    
+        sna: Allow scratch pixmap to allocate linear GPU bo
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ca0d06add926eb17fcec6c031adabb656498d744
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 25 14:19:33 2014 +0100
+
+    sna: Improve throttling during bo allocation
+    
+    By controlling how long we may block during buffer allocation, we can
+    relax the throttle elsewhere to prevent render lag buildup.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=77436
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 5ad1661b870b5b189e52383e45a9b8f570b40501
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 25 13:21:58 2014 +0100
+
+    sna: Only mark throttle as done after success
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=77436
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c3e4518e84300aeb8e12a0af56c2d66a1df9d8d7
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 25 11:18:01 2014 +0100
+
+    sna: Track desired flushes better after starting a new batch
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 85bb55e4a62666fa51af34d08699950be362aa57
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 25 11:45:55 2014 +0100
+
+    intel: Fix weblinks (again)
+    
+    Julien pointed out that I fail at checking links.
+    
+    Reported-by: Julien Cristau <jcristau@debian.org>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ff31d49bfa48a74eb9d8cb0afb1e2882ffbc7573
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 25 11:31:58 2014 +0100
+
+    intel: Fix weblinks
+    
+    Matti reported a few outdated links to intellinuxgraphics.org, now
+    superseded by 01.org.
+    
+    Reported-by: Matti Hämäläinen <ccr@tnsp.org>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8c1729aab6b49e7d4a3f48516a629b0d23e8591b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 25 09:00:04 2014 +0100
+
+    sna: Tweak scanout flush
+    
+    We now distinguish gpu_dirty whilst the bo is not flushed within a batch
+    and needs_flush for when it is dirty and still busy.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 26c4e850b8a7d13afc351097ee6f6b2f3f90e2b9
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 25 08:18:25 2014 +0100
+
+    sna: Throttle before doing a TearFree buffer replacement
+    
+    If the client is rendering fast, he may be rendering too fast and
+    starting to build up a backlog.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ea6b0bb8e1b358d728d80daac936ec6521154302
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 25 08:05:22 2014 +0100
+
+    sna: And fix the typo...
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 3f4da671b0a570de8734cc668d8e8975c2fdbd90
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 25 08:01:57 2014 +0100
+
+    sna: Disable userptr for bdw
+    
+    Something fishy is afoot. But let's kill this particularly worrisome
+    regression so that we can do a full round of testing.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=79053
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 204ec74a61ba0b9628c686b98c48fa1220866c2d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 25 07:31:33 2014 +0100
+
+    sna: Check all connectors for reuse
+    
+    Do not rely on the MST path being present to indicate a connector that
+    may be reused.
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=80355
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 43ad5dbc60e1f50a9cdcfc035bc271f1f28438c2
+Author: Rodrigo Vivi <rodrigo.vivi@intel.com>
+Date:   Tue Jun 24 03:14:54 2014 -0700
+
+    Add marketing names for Broadwell
+    
+    Even the unknown/reserved ones will stay with HD Graphics.
+    
+    v2: Add missing names to intel.man and README files as well. (Chris)
+    
+    Cc: Chris Wilson <chris@chris-wilson.co.uk>
+    Signed-off-by: Rodrigo Vivi <rodrigo.vivi@intel.com>
+
+commit 78053bb84217e842615669dfa2f1e7e971ce9860
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 24 20:51:54 2014 +0100
+
+    Add reserved PCD IDs for Broadwell
+    
+    Updating using kernel commit fb7023e0e248a33cb00d0a9cdce0bcedaa1ad284
+    Author: Rodrigo Vivi <rodrigo.vivi@intel.com>
+    Date:   Tue Jun 10 10:09:52 2014 -0700
+    
+        drm/i915: BDW: Adding Reserved PCI IDs.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 74c1cf60a7ce7e79bc727780151f4f233798e5f4
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 24 20:49:18 2014 +0100
+
+    sna: Add yet more DBG messages to MST discovery
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ca296c18316a3ce1682beefd5daa4702593cd529
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 24 16:37:52 2014 +0100
+
+    configure: Display our README before the summary
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d14d7efb28c3e323203139b7c1562b1e0bc526f0
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 24 16:33:43 2014 +0100
+
+    intel: Add a note about the myriad places we have identifier strings
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0c7cf7a6bb1c91b59ad326198f3364554e3dfeb5
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 24 11:50:55 2014 +0100
+
+    intel: Wait for our expected device node to appear
+    
+    If the path we want to open for the KMS device is not yet available,
+    wait a short while and try again.
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=80397
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 5c8829b30ad3acd2e59dac9ffa2aba8aadcada61
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 24 11:35:23 2014 +0100
+
+    sna: Add some more DBG around connector discovery
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=80355
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 271ed88e517745505c133bd68c40a8566ec8a625
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 24 11:24:26 2014 +0100
+
+    sna: Ensure serial is not 0 for runtime MST discovery
+    
+    We reserve serial==0 for the initial setup that is run before RandR is
+    configured. After the server is running, we have to take extra steps to
+    make the outputs visible to userspace.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 92dd13ae8dbddc31d0291dd12683fc7e3f65ffde
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 24 11:04:01 2014 +0100
+
+    sna: Fix the usual "x = y" typos in creating boxes
+    
+    Fixes regression from
+    
+    commit 1d74b2e07d125ad95b9db6c9c032e90faf2bfa60
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Tue Jun 24 08:58:51 2014 +0100
+    
+        sna: Decompose self-copy into overlapping/non-overlapping regions
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 92119ef0939897dd1850b417d04a2ba558aee8ca
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 24 10:23:03 2014 +0100
+
+    sna/glyphs: Clip damage to dst
+    
+    We only check if the hardware will automatically discard writes outside
+    of the target pixmap, but we must manually clip the damage before adding
+    it to our tracker.
+    
+    Reported-by: Jiri Slaby <jirislaby@gmail.com>
+    Reported-by: Zdenek Kabelac <zkabelac@redhat.com>
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=70461#c58
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b33be7fbac005eb222302ffbb533ded1cd700953
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 24 10:17:47 2014 +0100
+
+    sna: Trim composite region against dst clip extents
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f66e25def3431a900068cc1c23a6b1e8322ef046
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 16:14:28 2014 +0100
+
+    intel: Wait for the DRM device to load
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=80397
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1d74b2e07d125ad95b9db6c9c032e90faf2bfa60
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 24 08:58:51 2014 +0100
+
+    sna: Decompose self-copy into overlapping/non-overlapping regions
+    
+    We only need to stage the copy for the overlapping portion of the
+    self-copy, for the rest we can do in a single pass.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6e2cee27c379278b0321fd1db34ed80c439115a7
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 24 07:34:46 2014 +0100
+
+    sna/dri2: Add a dash more asserts
+    
+    References: https://bugs.freedesktop.org/attachment.cgi?id=101618
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 706480bde6120f84388a99085ed3d1cc3b759697
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 22:50:23 2014 +0100
+
+    sna: Disable CRTC after MST topology change
+    
+    In order to disable CRTC after marking outputs as removed after probing
+    MST topology updates, we must manually mark the CRTCs as no longer
+    enabled.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 5530cb4165da60f7b929b84d733d5eefcf4ec5fe
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 15:47:13 2014 +0100
+
+    sna: Silence compiler warning for shadowed variable
+    
+    sna_display.c: In function 'sna_mode_redisplay':
+    sna_display.c:6322:12: warning: declaration of 'fb_id' shadows a global declaration [-Wshadow]
+    sna_display.c:223:24: warning: shadowed declaration is here [-Wshadow]
+      CC     sna_display_fake.lo
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ded05e8abb248664124d2b86f77c27497a252c4e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 22:15:56 2014 +0100
+
+    sna: Allow scratch pixmap to allocate linear GPU bo
+    
+    When allocating a scratch pixmap, we do so in the expectation that
+    rendering on the GPU is always preferrable, so even allocate a small
+    linear bo.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6c5658b14451239b8e4333702a227d83eed09f96
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 14:11:27 2014 +0100
+
+    sna: Promote to full GPU bo after forced migration away from CPU bo
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 25776547bb7d76010f948769c8c08a7f418b15fd
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 14:02:51 2014 +0100
+
+    sna: Prefer rendering on the CPU to avoid damage migration
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a3c9cbefcb9971900638144286b59112e3cfd404
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 12:27:30 2014 +0100
+
+    sna: Force creation of GPU bo for drawing if need be
+    
+    Now that we are more eager to transfer to the GPU bo if we expect
+    rendering to the CPU bo to be either slow or risk potential corruption,
+    we can find ourselves in a recursive loop when we also decide not to
+    create the GPU bo. Prevent that by explicitly creating the GPU bo if
+    desired.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 827b89fa2d5fca0ffd709c17bcdbfdaf95da918f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 11:44:22 2014 +0100
+
+    sna/gen6+: Initialise src offset before use
+    
+    Fixes regression from
+    
+    commit 30348efd57135edee41fccb87133c572b6473aa8
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Mon Jun 23 11:14:25 2014 +0100
+    
+        sna/gen6+: Avoid adjusting copy coordinates until commited to using them
+    
+    which assumed that the render state was being zeroed.
+    
+    Reported-by: Jiri Slaby <jirislaby@gmail.com>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6848fb235b1bac84e91d1efde4094540180c4d48
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 11:27:20 2014 +0100
+
+    sna: Fix flushing empty batches
+    
+    A logic inversion in
+    
+    commit 1909910fdf89216d18703e50728f4604f75d5d66
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Sun Jun 22 20:19:22 2014 +0100
+    
+        sna: Inject a batch flush before adding a fresh bo
+    
+    also applied the injection to when the batch was empty.
+    
+    Reported-by: Jiri Slaby <jirislaby@gmail.com>
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=70461#c48
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 60fd6764eba05f51bb83efba5593975cf8d1285b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 11:25:47 2014 +0100
+
+    sna: Handle old busy_ioctl not reporting the active ring
+    
+    If we have an old kernel, just presume that the bo was last active on the
+    render ring.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 30348efd57135edee41fccb87133c572b6473aa8
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 11:14:25 2014 +0100
+
+    sna/gen6+: Avoid adjusting copy coordinates until commited to using them
+    
+    If we need to fallback to the BLT unit, we need to pass it the original
+    source/dest coordinates and not our transformed render coordinates. So
+    keep the original values intact until we start emitting the render
+    operation.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e1e853edee67c3ced43d5e4b1fbd52ca4c92966d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 10:14:09 2014 +0100
+
+    sna/gen4+: Add some more asserts around recreating vertex buffers
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=70461#c46
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 978790dc52fa9551b3bccbd91988b93988e937df
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 09:47:34 2014 +0100
+
+    sna: Allow the CPU bo to be created if GPU rendering is forced
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b2206eca00e497aff0d79a6e9feae3d9c5070dcc
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 09:42:37 2014 +0100
+
+    sna/gen6+: Encourage the compiler to inline a couple of key functions
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit bb4c057620fb0558a77a9b7db538786ffda7cf13
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 09:22:13 2014 +0100
+
+    sna: Prefer to render over damage into the GPU bo
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 416c223861aaeb61c6408e6537315b78e908df43
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 09:20:55 2014 +0100
+
+    sna: Do not set CAN_CREATE_GPU flag for untiled allocations
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit fb51ec44f4b6069ab854233d5d0da34eb79f754c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 09:07:13 2014 +0100
+
+    sna: Rename IGNORE_CPU to IGNORE_DAMAGE to better reflect its purpose
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 96d2749660e1738847222f2d9dbb7303b7deb5bf
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 08:18:23 2014 +0100
+
+    sna: Add DBG breadcrumbs to sna_output_discover()
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=80355
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a33aa554fa3df8ca34012cf1c6ecb11fa69ac7fc
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 07:42:30 2014 +0100
+
+    sna/gen4+: Add box emitters for the generic vertex paths
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1909910fdf89216d18703e50728f4604f75d5d66
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 22 20:19:22 2014 +0100
+
+    sna: Inject a batch flush before adding a fresh bo
+    
+    Fresh bo (those without a reservation already defined, ala
+    presumed_offset) will cause the kernel to do a full relocation pass. So,
+    if possible flush the already correct batch in the hope of trimming the
+    amount of checking the kernel has to perform on this new batch.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 83cbbcd816e449402f3d49aeba3c099a20b8bc1b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 23 07:29:20 2014 +0100
+
+    sna: Add missing string for DBG
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=80355#c12
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f22ea4e821a33eccd3a9283d7ab048857008f7e8
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 22 17:53:59 2014 +0100
+
+    sna: Disable unused CRTC after undock events
+    
+    If undocking removes output (as the MST topology changes and some
+    outputs then become unreachable), we may leave dangling CRTC. This
+    confuses us, so disable any enabled but unconnected CRTC after the
+    undock event.
+    
+    Reported-by: Sree Harsha Totakura <freedesktop@h.totakura.in>
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=80355#c5
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit dca0f1c2ccf14df38764ed12b971dc491cf22608
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 22 17:53:59 2014 +0100
+
+    sna: Track CRTC mode changes and discard old flips
+    
+    If we have a pending flip across a modeset we must be careful to drop
+    the stale flip_bo after the modeset.
+    
+    Reported-by: Sree Harsha Totakura <freedesktop@h.totakura.in>
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=80355#c8
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit dae370423ad85b9d9c576277da5a9fb92ab3d3df
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 22 11:45:35 2014 +0100
+
+    sna: Clean up CRTC on CloseScreen
+    
+    We need to do this to stop any stray references escaping through kernel
+    events now that we are passing the CRTC through the event.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 923dc207df7b05c138c628983ccaf2493dd63b62
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 19 10:17:11 2014 +0100
+
+    sna: Discard write hint from a couple more move-to-gpu
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2046a49be59866a16db776ba53a588dbf6c02b12
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jun 21 15:43:32 2014 +0100
+
+    sna: Clear the transform flag on disabling the CRTC
+    
+    In places, we assume that if the flag is set, we must have an active
+    CRTC. However, we were not clearing when disabling the CRTC.
+    
+    Reported-by: Sree Harsha Totakura <freedesktop@h.totakura.in>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=80325
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b3d3c0e8e75a963262e4dc463fef60d7e9f1f01a
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 20 20:01:23 2014 +0100
+
+    sna: Avoid blending with the render engine on snoopable bo
+    
+    This seems slightly weird, as there is nothing to indicate that this
+    would generate incorrect results only for snoopable bo. But no many of
+    flushes make my pnv box happy, so adjust the placement logic to move the
+    blending operation away from the snoopable target. This is sensible for
+    reasons of avoiding snoops from the render pipeline anyway.
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=80253
+    Reported-and-tested-by: Matti Hämäläinen <ccr@tnsp.org>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 219f6bd9e863f9c89cc4168895f89741ce6dbcbb
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 20 17:06:55 2014 +0100
+
+    sna: Be more flexible in converting random subsamples to 8x8 tiles
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 91bc9e42e434abd56ce2e4fc5e08d07376fe8bd3
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 20 16:13:49 2014 +0100
+
+    sna: Mark up const boxes to keep the compiler happy
+    
+    Pass around const to suppress a few compiler warnings.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e5c68b4358ce541929681c8c1e0ad3ef8c1dc9ed
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 20 14:31:19 2014 +0100
+
+    sna: Feed more operations into the 8x8 BLT tiler
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d2b90ac969656de35ec86973f66074654b0e9b4b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 20 14:29:43 2014 +0100
+
+    sna: Color patterns for BLT are required to be aligned to 256 byte boundaries
+    
+    This so far appears to be the most restrictive alignment required, so
+    simply increase the upload alignment to 256 bytes.
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=80033
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8d7e7010e33d73a7d99948403b62d859d7a4dfaa
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 20 08:28:32 2014 +0100
+
+    test: Increase number of tiled sources
+    
+    Significantly improve the stress impose upon the tiled BLT operations.
+    Also start dumping pngs of the failures.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=80033
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit db6dfc3227155a4792ba3831681daf16839b14bb
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 20 07:28:02 2014 +0100
+
+    sna/dri2: Don't decouple front buffer tracking for invalid SwapBuffer calls
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 113a8b9be9dd7ffbc6f7c713bc40561bdf38e8b0
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 19 20:39:59 2014 +0100
+
+    sna: Mark upload from SHM segment as read-only
+    
+    As this may be mapped by the Xserver using a read-only SHM segment, we
+    are forced to treat it always as read-only. And this being X, that it is
+    using a SHM segment is opaque to the driver. Fantastic middlelayer.
+    
+    This was incorrectly removed in
+    commit e680e54eab6ffa72e5e1eb6cc0e3fe4b235b06a1
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Wed Jun 11 10:48:26 2014 +0100
+    
+        sna: Ignore setting read-only for temporary userptr maps
+    
+    Also let's not forget the ShmPutImage -> CopyArea path.
+    
+    Reported-by: Christoph Haag <haagch.christoph@googlemail.com>
+    Bugzilla: https://bugzilla.kernel.org/show_bug.cgi?id=78411
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit df89b4941130b5ff020c6ef3e244dcf5fec45f2a
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 19 20:39:59 2014 +0100
+
+    sna: Mark upload from SHM segment as read-only
+    
+    As this may be mapped by the Xserver using a read-only SHM segment, we
+    are forced to treat it always as read-only. And this being X, that it is
+    using a SHM segment is opaque to the driver. Fantastic middlelayer.
+    
+    This was incorrectly removed in
+    commit e680e54eab6ffa72e5e1eb6cc0e3fe4b235b06a1
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Wed Jun 11 10:48:26 2014 +0100
+    
+        sna: Ignore setting read-only for temporary userptr maps
+    
+    Reported-by: Christoph Haag <haagch.christoph@googlemail.com>
+    Bugzilla: https://bugzilla.kernel.org/show_bug.cgi?id=78411
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6b32cf3a3c908bd29496fcf5d190fd0f8c657ae6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 19 12:29:58 2014 +0100
+
+    sna: Missed fixing y tile offset in last commit
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit edeb2ddd170a1817ced45abada53346c5cd8c30b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 19 11:51:00 2014 +0100
+
+    sna: Use the right pattern origin for tiled 8x8 extraction
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=80033
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1752e2d647cdb7cbff0ae7d0f0d0b761b5942965
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 19 11:14:25 2014 +0100
+
+    sna: Fix up small extents for 8x8 tile construction
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f866a20c991d52fd2cf4ce63acc3cd44534ce5be
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 19 10:49:09 2014 +0100
+
+    sna: Wrap pointer access for 8x8 tile construction
+    
+    The kernel can quite happily send a SIGBUS whenever we read from an bo
+    (due to oom), so catch it and handle it.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b1aab55d594f03e51c3abf1743d00c56ef6d7797
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 19 09:47:02 2014 +0100
+
+    sna: Always readback shadow damage after replacing the buffer
+    
+    Instead track what we explicitly want to discard for the next operation,
+    so that we don't have to copy back the whole buffer if we have to
+    replace the shadow and intend to overwrite it all.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f4b930318c68e0e07d677ebc7b4caa27912561db
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 19 07:40:16 2014 +0100
+
+    sna/dri2: Replace assertion with code to skip updating the back buffer
+    
+    After a window resize or redirection, the DRI2BufferPtr become stale but
+    it may take a while for the Client to notice and reconfigure. Just
+    skip touching stale backbuffers and let the Client catch up.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c257c936b42b92827b784cee0b7caa54e6040364
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 18 22:15:42 2014 +0100
+
+    sna: Fix modulus for partial conversion of tiles to 8x8 patterns
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 9489cc6c70abf53d9ca45228b0aa9fb1fc3f9b72
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 18 21:28:11 2014 +0100
+
+    sna: Delete the silly typo
+    
+    Not checking DAMAGE_IS_ALL() correctly leads to an assertion failure.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 51a0559b120dd0a57a938b300bccefbf1142e495
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 18 20:55:02 2014 +0100
+
+    sna: Do not treat both src/dst having no clones as being the same
+    
+    Fixes regression from
+    commit 62aaf2ff4f8597067cf387865707baa00ed9a123
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Wed Jun 18 18:41:15 2014 +0100
+    
+        sna: Skip redundant copies when already cloned
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 377b0e8657aab13dc90134853a03feb95f515567
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 18 19:59:14 2014 +0100
+
+    sna: Add log breadcrumbs with valgrind
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 273c82a574896885f9f4a78a7463cc4620803624
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 18 18:47:14 2014 +0100
+
+    sna: Fix DBG compilation
+    
+    Missed updaing the DBG message in
+    
+    commit 83c0f034454ef0f474126a3398e5e790ac5ef842
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Wed Jun 18 16:51:46 2014 +0100
+    
+        sna: Pass desired CRTC viewport for completing single CRTC flips
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=80157
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 62aaf2ff4f8597067cf387865707baa00ed9a123
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 18 18:41:15 2014 +0100
+
+    sna: Skip redundant copies when already cloned
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=77436
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 83c0f034454ef0f474126a3398e5e790ac5ef842
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 18 16:51:46 2014 +0100
+
+    sna: Pass desired CRTC viewport for completing single CRTC flips
+    
+    We cannot simply compare against the crtc->shadow_bo for all our needs,
+    so pass in exactly the setup we want and apply that. In particular this
+    is required when flipping away from the single CRTC setup on secondary
+    pipes.
+    
+    Fixes TearFree multi-monitor regression from
+    commit 3932e97057fca16615adaefbc1eb25a0d51a1d8b [2.99.912]
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Mon Jun 9 08:58:15 2014 +0100
+    
+        sna/dri2: Allow TearFree flipping to individual CRTC
+    
+    Reported-by: Leo Wolf <jclw@ymail.com>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=80191
+
+commit 7119d394a673f40eb467d040c6febf3749924394
+Author: Hans de Goede <hdegoede@redhat.com>
+Date:   Wed Jun 18 15:01:37 2014 +0200
+
+    uxa: Mark the output as off before making pipe changes
+    
+    This is a partial "backport" of commit c6cd10f536, which makes the same
+    change for sna, to avoid users still using uxa ending up with a blackscreen
+    after plugging in an external monitor.
+    
+    Bugzilla: https://bugzilla.redhat.com/show_bug.cgi?id=1032978
+    Bugzilla: https://bugzilla.redhat.com/show_bug.cgi?id=1103806
+    Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+
+commit 52af321a11b5672194bc0bad033b0866221bf4c7
+Author: Hans de Goede <hdegoede@redhat.com>
+Date:   Wed Jun 18 15:01:36 2014 +0200
+
+    uxa: When the output is off, report the cached backlight value
+    
+    This is a "backport" of commit b545e10c50cb to uxa, so that users who are
+    still using uxa, don't end up with a black screen after suspend / resume.
+    
+    Bugzilla: https://bugzilla.redhat.com/show_bug.cgi?id=1032978
+    Bugzilla: https://bugzilla.redhat.com/show_bug.cgi?id=1103806
+    Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+
+commit 44b5912ffcf8dcf4b4b8d3518dd0b62a284f6ee4
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 18 14:48:33 2014 +0100
+
+    sna/gen8: Fix cleanup after failing to convert channel
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 21b6e551528fdd939004cfb02a4f192e750a33a1
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 18 14:44:09 2014 +0100
+
+    sna/gen8: Fix unaligned() to return true when not aligned
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c5b063b8cc23cc43be458cb3b0d1b28652a24951
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 18 14:34:04 2014 +0100
+
+    sna: Assert that we do not try to mmap a proxy
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 40bd45fb802366aa013b9089848b67a28bf3b1ee
+Author: Hans de Goede <hdegoede@redhat.com>
+Date:   Wed Jun 18 14:11:05 2014 +0100
+
+    backlight: Fix compiler error
+    
+    /usr/include/xorg/os.h around line 579 reads:
+    
+    extern _X_EXPORT char *
+    strndup(const char *str, size_t n);
+    
+    However strndup is already defined by glibc, and this redefine causes a
+    compile error.
+    
+    This gets triggered because backlight.c does:
+    
+    Without first doing:
+    
+    Causing HAVE_STRNDUP to not be defined.
+    
+    Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+
+commit e52f917a2370026073ed6851161393a69ee94abe
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 18 10:18:26 2014 +0100
+
+    sna: Use nxm tiled blits for small regions of large tiles
+    
+    If the region we are blitting is either narrow or short, we may be able
+    to construct a tiling pattern out of a large pixmap.
+    
+    In the process, spot a regression due to
+    
+    commit 542aeca6e67fc64f9133ca3e27ac8eca28af6d25
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Tue Jun 17 12:26:30 2014 +0100
+    
+        sna: Tweak creation 8x8 tiled patterns
+    
+    which copied too much from the source line.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=79888
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b90f6c5aa7359ea6936ae4a7951fcd3bdad05d58
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 18 10:17:02 2014 +0100
+
+    sna: Simplify sna_pixmap_get_source
+    
+    kgem_bo_upload_image was open-coded, so replace it with a call to the
+    common function
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8ea2dd23ab85dc2d4ad0de326c2176354d61cf20
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 18 10:16:26 2014 +0100
+
+    sna: Add DBG option to disable snoop bo cacheing
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b2081345843152dadcaa4fbc843b38240d1a3484
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 18 07:37:00 2014 +0100
+
+    sna/dri2: fix invalid DBG string
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=80157
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 77f1a16f1145e69d69a76f2db4b1c60d9a7a4d53
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 17 23:27:16 2014 +0100
+
+    sna: Set the correct mapping type after calling mmap__async
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=80001
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d49f53cc00258e3b1e1a898c02e219b336716002
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 17 22:23:02 2014 +0100
+
+    sna: Fix computing source bo for BLT operations
+    
+    If we migrate the pixmap to the GPU, use the GPU bo. This may fix an issue
+    where we might end up using the CPU bo in a rare circumstance.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=80033
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 475562d713a00e2f60f7ca067d753fd965d71717
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 17 22:25:05 2014 +0100
+
+    sna: Align some function parameters
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c91fc0aad843ffc2660f6a3bf9b875d190e0b0dd
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 17 17:06:05 2014 +0100
+
+    sna: Remove invalid assert
+    
+    Present and flip fallback may queue self-flips, so the assertion that
+    the crtc->flip_bo != crtc->bo is false.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0ca25c7b49efa9c83a3ce5b727e5a339a73d8ee0
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 17 14:08:06 2014 +0100
+
+    sna: Cache small pixmaps rather than forcing a large fallback for BLT operations
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 322e51a3a552d89e5e5ecbb82a9243f134c8d36f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 17 13:47:32 2014 +0100
+
+    sna: Relax PREFER_GPU so that we don't needless create small GPU bo
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 542aeca6e67fc64f9133ca3e27ac8eca28af6d25
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 17 12:26:30 2014 +0100
+
+    sna: Tweak creation 8x8 tiled patterns
+    
+    Avoid reading back from a GTT mmapping.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4ff5cc539bc3f88ab9c05dc67c25aab08cbdf859
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 17 10:54:39 2014 +0100
+
+    sna/dri2: Fixup failure to do a render copy for DRI2CopyRegion
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 96d1fe314c4bb4d862b057a440e575bd32d63460
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 17 08:51:00 2014 +0100
+
+    sna: Add a few missing checks for all-damaged
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 30f521c717f7301004e7cb77ba66b840b3f773c6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 17 08:30:55 2014 +0100
+
+    sna: Discard GPU damage for the magic upload proxy
+    
+    The magic upload proxy is initially considered damaged in both the GPU
+    and CPU.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e5b94c2d9b29b78432aa72049934e365a2913710
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 17 08:12:42 2014 +0100
+
+    sna/glyphs: DBG compile fix
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a4d845bc8f77e4a36064f132720ce462d0bdd5b4
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 16 14:25:16 2014 +0100
+
+    sna: Regularly check the cache level on bo
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 09f0fe9b3943ae2ba1e0ebd679ea04177427a8cf
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 16 12:53:34 2014 +0100
+
+    sna/dri2: Allow single crtc exchanges to be queued up
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4ab99d67990d5834061a10b0bd1dd220d4611248
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 16 12:51:08 2014 +0100
+
+    uxa: Allocate frontbuffer to meet old fence constaints
+    
+    libdrm is a little lax and does not allocate sufficient space for us to
+    safely use buffers on old gen. So compute the size we want for
+    ourselves.
+    
+    Reported-by: Cem Aydin <cem.aydin@gmx.ch>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=80088
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 10cb36e1ddc6f4bf41941b24d6557343aa595a13
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 16 10:33:07 2014 +0100
+
+    sna/glyphs: Add DBG option to force use of the glyph image mask
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8f0fc2ed4cc19c90dd2f519080915ca0c54e1baf
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 16 10:27:16 2014 +0100
+
+    uxa: Add some explanation to why bo were rejected
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=80088
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 6b82962e58c0959c94f2df1f0ebd9a478b15cb6b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 16 10:13:09 2014 +0100
+
+    sna: Fix logic inversion for final placement in is_gpu_dst()
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 62102f505cd13840e4c910adbe762b3fb46dfaec
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 16 09:46:54 2014 +0100
+
+    sna: Promote better active buffer reuse
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 2877d018d3510e415f273ce955eb5c272c340e7d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 16 09:24:45 2014 +0100
+
+    sna/glyphs: Show number of glyphs in DBG
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 38434b29f4a7b324704bbb1e772371be3c0e397b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Jun 16 08:03:21 2014 +0100
+
+    sna: Fix some batch DBG
+    
+    Helps to check for a successful read when we want to show the batch
+    after execution.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 243bd26ad31776b2dc45563107e669cf7b45fd91
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 15 21:42:10 2014 +0100
+
+    sna: Clear our private hints about front rendering exported bo
+    
+    Unlike GLXWindows, GLXPixmaps are rendered directly into, without a
+    staging copy. Therefore we must treat those carefully when exported and
+    clear our hints everytime control passes back to the Client.
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=79999
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 500e77d765580e8581c95117b941a4daa940c21e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 15 20:55:30 2014 +0100
+
+    sna: Add more DBG to track transitions between CRTC and its shadow or flip bo
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0a6a94630f4fec26bed2aefb25de1a165193ff10
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Jun 15 14:04:50 2014 +0100
+
+    test: Add a simple SHM test skeleton
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 981aafe797f25aca4977a22f271d387b7fb4ae63
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 21:41:36 2014 +0100
+
+    sna: Enable TearFree by default for systems with PSR
+    
+    Panel Self-Refresh requires us to avoid frontbuffer rendering in order
+    to be power efficient. This is a job for TearFree!
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b27837d5372facde0f9f69eb8df664d2798f0911
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jun 14 06:51:34 2014 +0100
+
+    sna: Fix assertions for discarding upload caches
+    
+    The upload caches are special, along with having a bo->proxy, they also
+    claim to be completely damaged on both the GPU and CPU. Allow that to
+    pass through when discarding the proxy.
+    
+    Reported-by: Nick Bowler <nbowler@draconx.ca>
+    Bugzilla; https://bugs.freedesktop.org/show_bug.cgi?id=79992
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 15485602d8451bcf6c2e979ccbd9cdc11111bcce
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 20:30:25 2014 +0100
+
+    sna: Use the right is-clipped hint
+    
+    The region here has yet to be clipped, and so the only valid is-clipped
+    hint is from the flags computed from the PolyRect extents. Make sure we
+    use those when determining whether it is valid to discard damage.
+    
+    Fixes regression from
+    commit ad0390068832ad4727371902fe41a85a53de1894 [2.99.903]
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Tue Sep 24 10:00:03 2013 +0100
+    
+    	sna: Separate out copy preferrence from operating in place decision
+    
+    Reported-by: Nick Bowler <nbowler@draconx.ca>
+    Tested-by: Nick Bowler <nbowler@draconx.ca>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=79992
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b082a07a69ba5490fba47766c4f608b1cdf2427e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 18:56:57 2014 +0100
+
+    sna: Only discard the CPU bo if we have a GPU bo to transfer the damage to
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=79992
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 05fdfe3b2813495ea122471ed6dde340e538aa65
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 21:41:16 2014 +0100
+
+    intel-virtual-output: Compile fixes
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8a92261b22a8c134a48d1491627ac05136563603
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 19:59:16 2014 +0100
+
+    intel-virtual-output: Disable outputs on remote displays upon shutdown
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=79994
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0c6fa0cdf0cebcd592281e578da7a7f53cbfe186
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 19:29:41 2014 +0100
+
+    intel-virtual-output: Initialise image after clone
+    
+    As the image inherits its width/height from the clone, we need to set
+    those first on the clone.
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=79994
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 79b4e45ebe3a61f9b5937ad226eead9eebce87ac
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 19:15:08 2014 +0100
+
+    intel-virtual-output: Only call XShmDetach on a valid SHM segment
+    
+    Saves a couple of extraneous XErrors.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c8074b6bcfa8c208433574721135faa4d919d32a
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 18:37:15 2014 +0100
+
+    intel-virtual-output: Check for an error creating the DRI3 fd
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=79994
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0a0b9dc3538ef731463fb321852b8802cd04e457
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 16:14:43 2014 +0100
+
+    sna: Refine decision whether to use the GPU or render inplace
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit dd87aa8f85c4bafa105fd881a0cce45bda6143df
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 15:06:13 2014 +0100
+
+    sna: Track the pageflip bo's busyness
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8322e3e5c6ed19e029f365d869c80388863c424d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 13:50:34 2014 +0100
+
+    intel: Check that the fd points to i915 after authorising
+    
+    The call to GETPARAM requires either a rendernode or authorisation.
+    Therefore we can only assert that the fd is a valid i915 handle after
+    authorise() and not before.
+    
+    Reported-by: Hans de Goede <hdegoede@redhat.com>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 97003b1a2d6c8beb5c4df4bece5a2d5b03b5ae2f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 12:32:12 2014 +0100
+
+    sna/gen6+: Prefer the BLT for large overlapping copies
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 87fc78ac4f6bbfa8e9427d392356ee26942bf955
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 10:52:47 2014 +0100
+
+    sna: Try to reuse the current cursor if we fail to update
+    
+    As a last resort, continue to display the old cursor if we tried and
+    failed to create a new cursor.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit cd381ad96eadb72eb1a983c973a5dd47f547fc8b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 09:31:50 2014 +0100
+
+    xvmc: Refactor mutex locking
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit bccfb768ee14348b6db5b140fdd6df5fdbfcad0c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 09:14:47 2014 +0100
+
+    xvmc: Sanitize compile and library flags
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 5a0cb1049c2fa0586708719210a2d2cffa7a4491
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 09:15:30 2014 +0100
+
+    configure: Fix DRI2 build
+    
+    One s/DRI2/have_dri2/ too far.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d47a01fce4d3d9c043a45fc034dc436c0af41981
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 08:51:20 2014 +0100
+
+    sna: Reorder ignore_cpu_damage() to avoid asserts
+    
+    Tricksy asserts making sure that the correct arguments are passed
+    around!
+    
+    Reported-by: Arkadiusz Miskiewicz <arekm@maven.pl
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c4d4bd5d92c7e53a7be6fa7fe119e4507af213ec
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 08:32:34 2014 +0100
+
+    sna/gen8: Allow reads from scanout to be cached
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 8e743ccef8f19b1226ceb8d6a5ceab65584a620d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 08:27:05 2014 +0100
+
+    sna/gen8: Check for WT support before attempting to use the WT mocs
+    
+    It appears the kernel has a better idea when WT is supported on which
+    gen8 parts. I assumed it was always supported, but experience suggests
+    otherwise, so only use WT support when advertised.
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=79967
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 7bc669dd4b7e3e5978e95e4131d1f9215afbc041
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 13 07:48:15 2014 +0100
+
+    configure: Allow manual disabling of each DRI level
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ffe067705b524930d243b18e97508219ed26390c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 12 09:52:50 2014 +0100
+
+    sna: Try to use CPU uploads before BLT uploads
+    
+    As the BLT upload implies a sync (and a likely GPU boost), only do so if
+    we cannot do an immediate upload with the CPU, either directly to
+    backing memory or through the GTT.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 93444ea673be0ac11092a13ab3354f886f4aad63
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Jun 12 09:26:14 2014 +0100
+
+    sna: Refactor USE_INPLACE debug macro
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit abbf6d6b7962650607dc3517939991de56ce8a91
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 21:14:00 2014 +0100
+
+    sna/gen8: Clear a couple more push constants
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 7f9b015d87300810712a0b6f2680249fb0576f90
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 19:10:22 2014 +0100
+
+    sna: Remove bogus assertion
+    
+    The sna_pixmap is cleared afterwards, it does not need to be clear on
+    free.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e3a0e40310b6c46b2f887bc0d75b11cc06ec8fa0
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 18:07:46 2014 +0100
+
+    sna: Fix direction flags for memmove
+    
+    Under a compositor, the current deltas may invert the sense of the copy
+    direction, causing scrolling corruption. Simplify handling those flags
+    by making them invariant for the function.
+    
+    Reported-by: Bruno Prémont <bonbons@linux-vserver.org>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=79843
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 55660376d555131348e7efaaec66d6d27ffc1e6e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 17:43:33 2014 +0100
+
+    sna: Use the pixmap header creation routine
+    
+    A few more places could use the common pixmap creator, just remember to
+    handle the SHMPixmap complication!
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1beaa980ea6a9617f7dd4dc87b881c37cc7a277b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 16:41:22 2014 +0100
+
+    sna/gen6+: On small GT avoid the intermediate copy for overlaps
+    
+    If the memory bw is constrained on the GPU avoid doing the 2-pass copy
+    for overlaps on the render ring, and do the single pass slower BLT copy
+    instead - as since it has to transfer less data it will be faster.
+    
+    Reported-by: Ildar Nurislamov <absorbb@gmail.com>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=77436
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 31467b01e3f5ece0c8f8d4c03b52fc3f238b3d7e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 16:21:13 2014 +0100
+
+    sna/gen6+: Overlapping bo by definition have compatible depths
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 0dfe7d93de893b3ead6c3be662b3a17d9335c2ca
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 16:12:26 2014 +0100
+
+    sna: First copy to overlap temporary must be using GXcopy
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ad076b394028c40fc6cb88c64b72e46702a936b3
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 15:49:43 2014 +0100
+
+    sna: Remove debugging hunk
+    
+    Stray hunk in self-copy boxes.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit a90160dcecf0a3df21a04b4f467e660f69ddae54
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 15:40:25 2014 +0100
+
+    sna: Update damage pointer after the implicit reduction
+    
+    sna_damage_contains_box() routine implicitly reduces the damage before
+    performing its check. This may alter and even destroy the damage entry,
+    so pass in the handle so that it can be updated correctly.
+    
+    References: https://bugs.freedesktop.org/show_bug.cgi?id=77436
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c9003c6d9602dba682e577ea7ce39990ea378db3
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 15:29:59 2014 +0100
+
+    sna: Fix scanout creation routine for old kernels <= 3.11
+    
+    With an old kernel, we would fail to actually mark the display as part
+    of the scanout domain, but proceed to assign it a fb id. This caused our
+    asserts to report our bookkeeping error.
+    
+    Reported-by: Pavel Ondračka <pavel.ondracka@email.cz>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=79909
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 5705e66a329273c478f6ecd8f41b8f5633095581
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 14:34:33 2014 +0100
+
+    sna: Add some DBG to the memmove path
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b41a51e0f54c983ef72bc31125419382d666d48c
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 14:22:26 2014 +0100
+
+    sna: Tweak self-copy boxes to hit the GPU more often
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit b879de6246d3f2e66e9c7e326db93e5ff390159f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 14:08:31 2014 +0100
+
+    sna: Recheck source bo after migrating dst (in case of src == dst)
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 21c150a873a77f983fad29b4517844a0b92e0609
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 14:00:04 2014 +0100
+
+    sna: Skip redundant clears
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e1a4438f074f9cd5eba946cc1172c419c31b03c9
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 13:59:46 2014 +0100
+
+    sna/glyphs: Always print some DBG when performing fallback
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 040eccb9b10d0941c7d81fc9c66c259563370f2a
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 13:18:33 2014 +0100
+
+    sna: Add some asserts to track redundant damage operations
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 4fccfe3a516ab8383dfd99ccd7fe1840c88bbc01
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 6 08:30:59 2014 +0100
+
+    sna/gen8: Check offset alignment before using a userptr for RENDER
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=79053
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 1217dbc88e0901e4a657ee51e2e3b7d00bb72b77
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Apr 17 21:04:15 2014 +0100
+
+    sna: Support efficient cursor updates for old machines
+    
+    Given a kernel patch to fix coherency of physical objects, we can use a
+    more efficient method for updating cursors.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit ee7d2e0a8ef882c1d4e0e77a0148b54dcfbf4236
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Jun 6 12:00:35 2014 +0100
+
+    sna: MST topologies may change on any hotplug event
+    
+    As the kernel does not send out an explicit DISCOVER event, we have to
+    reinspect every connector after every hotplug event to detect topology
+    changes.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 782c920b01d5144125f2fe954e29fd7b07a1913e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu May 8 08:04:58 2014 +0100
+
+    sna: Create a stable output name based on MST topology
+    
+    In order to provide persistent names for MST devices, which may change
+    topology dynamically, the kernel exports a PATH blob. We can then use
+    this path to generate the output name, and so reuse existing XID when a
+    monitor is plugged back in.
+    
+    Based on the patch for -modesetting by Dave Airlie.
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e680e54eab6ffa72e5e1eb6cc0e3fe4b235b06a1
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 10:48:26 2014 +0100
+
+    sna: Ignore setting read-only for temporary userptr maps
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d9bf6f3fecb3d691937da086a5270334c6c0e69a
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 10:35:50 2014 +0100
+
+    sna: Prefer to operate inplace on the GPU rather than stall on the CPU
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 277e6ab84bb0c692358a34a76e7962c64efb0362
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 10:12:01 2014 +0100
+
+    sna: Discard TearFree damage before checking for an overwriting upload
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit eb9de37daaea45e917fa7f44444a9782070f7333
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 09:29:50 2014 +0100
+
+    sna: Silence compiler warnings for discarding const Region points
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 085141348cfe8386059062a58172855f72d5e5b6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 08:39:42 2014 +0100
+
+    sna: Squelch log messages for fb/pixmap tiling in the default case
+    
+    The output is confusing, so hide it unless it is modified by the user.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 53c1faa5093f8a0c969e3ebe9f27ee1ce5137e14
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jun 11 07:59:41 2014 +0100
+
+    sna: Mark the GPU as all damaged when discarding CPU bo during uploads
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit e2bfa715a9e115921263d572b9f4c496b550a494
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 10 21:28:32 2014 +0100
+
+    sna/dri2: Check that the window covers the whole CRTC before xchg
+    
+    Fixes TearFre regression from
+    
+    commit 3932e97057fca16615adaefbc1eb25a0d51a1d8b [2.99.912]
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Mon Jun 9 08:58:15 2014 +0100
+    
+        sna/dri2: Allow TearFree flipping to individual CRTC
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit d0f32a9d3afed4ea45644723fa1134957b981125
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 10 16:37:24 2014 +0100
+
+    sna: Cast away compiler warning
+    
+    sna_display.c: In function 'has_user_backlight_override':
+    sna_display.c:595:3: warning: return discards 'const' qualifier from pointer target type [enabled by default]
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit 216beed6dfcb3a8d6b0b480d0281fcadb0cd3036
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 10 09:09:30 2014 +0100
+
+    sna: Expand debugging to cover gen8 BLT variations
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit f19195f7ea317f5601543724c725c4b63fdc3f60
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 10 14:25:42 2014 +0100
+
+    sna: Fix arguments when flipping transformed TearFree outputs
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit c16b2a125929c9027b62c07d47e9602553153eef
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 10 13:25:57 2014 +0100
+
+    sna: Tidy a few asserts on the state of crtc->flip_bo
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+commit fd6aaec33d8ad70544cc02e061c9c5e68cf83414
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 10 11:01:38 2014 +0100
+
+    sna: Handle the user passing "Backlight" ""
+    
+    Allow the user to disable the backlight control by passing the empty
+    string in the xorg.conf.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
 commit cb7b27a705b477ae1b369786eea13fb14506d54a
 Author: Chris Wilson <chris@chris-wilson.co.uk>
 Date:   Mon Jun 2 09:36:13 2014 +0100
