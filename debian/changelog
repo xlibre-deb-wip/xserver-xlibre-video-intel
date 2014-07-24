@@ -1,3 +1,9 @@
+xserver-xorg-video-intel (2:2.99.914-1~exp1) UNRELEASED; urgency=medium
+
+  * New upstream prerelease 2.99.914.
+
+ -- Vincent Cheng <vcheng@debian.org>  Wed, 23 Jul 2014 22:49:08 -0700
+
 xserver-xorg-video-intel (2:2.99.912+git20140719-1~exp1) experimental; urgency=medium
 
   * New upstream snapshot.
