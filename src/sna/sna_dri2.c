@@ -142,19 +142,19 @@ sna_dri2_get_back(struct sna *sna,
 {
 	struct kgem_bo *bo;
 	uint32_t name;
+	bool reuse;
 
-	if ((draw->height << 16 | draw->width) != get_private(back)->size)
-		return;
-
-	get_private(back)->stale = false;
-
-	bo = get_private(back)->bo;
-	assert(bo->refcnt);
-	DBG(("%s: back buffer handle=%d, scanout?=%d, refcnt=%d\n",
-	     __FUNCTION__, bo->handle, bo->active_scanout, get_private(back)->refcnt));
-	if (bo->active_scanout == 0) {
-		DBG(("%s: reuse unattached back\n", __FUNCTION__));
-		return;
+	reuse = (draw->height << 16 | draw->width) == get_private(back)->size;
+	if (reuse) {
+		bo = get_private(back)->bo;
+		assert(bo->refcnt);
+		DBG(("%s: back buffer handle=%d, scanout?=%d, refcnt=%d\n",
+					__FUNCTION__, bo->handle, bo->active_scanout, get_private(back)->refcnt));
+		if (bo->active_scanout == 0) {
+			DBG(("%s: reuse unattached back\n", __FUNCTION__));
+			get_private(back)->stale = false;
+			return;
+		}
 	}
 
 	bo = NULL;
@@ -187,7 +187,7 @@ sna_dri2_get_back(struct sna *sna,
 	}
 	assert(bo->active_scanout == 0);
 
-	if (info) {
+	if (info && reuse) {
 		bool found = false;
 		struct dri_bo *c;
 
@@ -210,8 +210,13 @@ sna_dri2_get_back(struct sna *sna,
 
 	assert(bo != get_private(back)->bo);
 	kgem_bo_destroy(&sna->kgem, get_private(back)->bo);
+
 	get_private(back)->bo = bo;
+	get_private(back)->size = draw->height << 16 | draw->width;
+	back->pitch = bo->pitch;
 	back->name = name;
+
+	get_private(back)->stale = false;
 }
 
 struct dri2_window {
@@ -1476,14 +1481,7 @@ void sna_dri2_destroy_window(WindowPtr win)
 
 		DBG(("%s: freeing chain\n", __FUNCTION__));
 
-		info = priv->chain;
-		info->draw = NULL;
-		info->client = NULL;
-
-		chain = info->chain;
-		info->chain = NULL;
-
-		assert(info->queued);
+		chain = priv->chain;
 		while ((info = chain)) {
 			info->draw = NULL;
 			info->client = NULL;
@@ -1935,11 +1933,9 @@ static void sna_dri2_xchg_crtc(struct sna *sna, DrawablePtr draw, xf86CrtcPtr cr
 	sna_shadow_set_crtc(sna, crtc, get_private(back)->bo);
 	DamageRegionProcessPending(&win->drawable);
 
-	if (get_private(front)->size == (draw->height << 16 | draw->width)) {
-		front->attachment = DRI2BufferBackLeft;
-		get_private(front)->stale = true;
-	} else
-		front->attachment = -1;
+	front->attachment = DRI2BufferBackLeft;
+	get_private(front)->stale = true;
+
 	back->attachment = DRI2BufferFrontLeft;
 	if (get_private(back)->proxy == NULL) {
 		get_private(back)->proxy = sna_dri2_reference_buffer(sna_pixmap_get_buffer(pixmap));
@@ -3257,11 +3253,13 @@ bool sna_dri2_open(struct sna *sna, ScreenPtr screen)
 	driverNames[1] = info.driverName;
 #endif
 
+#if DRI2INFOREC_VERSION >= 6
 	if (xorg_can_triple_buffer(sna)) {
 		info.version = 6;
 		info.SwapLimitValidate = sna_dri2_swap_limit_validate;
 		info.ReuseBufferNotify = sna_dri2_reuse_buffer;
 	}
+#endif
 
 #if USE_ASYNC_SWAP
 	info.version = 10;

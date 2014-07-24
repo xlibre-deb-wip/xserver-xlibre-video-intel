@@ -1979,6 +1979,7 @@ sna_pixmap_make_cow(struct sna *sna,
 
 	assert(dst_priv->move_to_gpu == NULL);
 	assert(!dst_priv->flush);
+	assert(list_is_empty(&dst_priv->cow_list));
 
 	cow = COW(src_priv->cow);
 	if (cow == NULL) {
@@ -14714,7 +14715,7 @@ sna_poly_fill_rect(DrawablePtr draw, GCPtr gc, int n, xRectangle *rect)
 	}
 
 	if (!PM_IS_SOLID(draw, gc->planemask)) {
-		DBG(("%s: fallback -- planemask=%#lx (not-solid)\n",
+		DBG(("%s: fallback -- planemask=0x%lx (not-solid)\n",
 		     __FUNCTION__, gc->planemask));
 		goto fallback;
 	}

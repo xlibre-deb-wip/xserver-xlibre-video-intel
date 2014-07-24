@@ -869,8 +869,10 @@ rotation_set(struct sna *sna, struct plane *p, uint32_t desired)
 	if (desired == p->rotation.current)
 		return true;
 
-	if ((desired & p->rotation.supported) == 0)
+	if ((desired & p->rotation.supported) == 0) {
+		errno = EINVAL;
 		return false;
+	}
 
 	DBG(("%s: obj=%d, type=%x prop=%d set-rotation=%x\n",
 	     __FUNCTION__, p->id, LOCAL_MODE_OBJECT_PLANE, p->rotation.prop, desired));
@@ -961,8 +963,10 @@ sna_crtc_apply(xf86CrtcPtr crtc)
 		       xf86IsEntityShared(crtc->scrn->entityList[0]));
 
 		output_ids[output_count] = to_connector_id(output);
-		if (++output_count == ARRAY_SIZE(output_ids))
+		if (++output_count == ARRAY_SIZE(output_ids)) {
+			errno = EINVAL;
 			return false;
+		}
 	}
 
 	VG_CLEAR(arg);
@@ -1315,6 +1319,12 @@ static void sna_crtc_slave_damage(DamagePtr damage, RegionPtr region, void *clos
 	struct sna_crtc *crtc = closure;
 	struct sna *sna = to_sna(crtc->base->scrn);
 	RegionPtr scr;
+
+	DBG(("%s: pushing damage [(%d, %d), (%d, %d) x %d] to CRTC [pipe=%d] (%d, %d)\n",
+	     __FUNCTION__,
+	     region->extents.x1, region->extents.y1, region->extents.x2, region->extents.y2,
+	     region_num_rects(region),
+	     crtc->pipe, crtc->base->x, crtc->base->y));
 
 	assert(crtc->slave_damage == damage);
 	assert(sna->mode.shadow_damage);
@@ -2055,6 +2065,8 @@ retry: /* Attach per-crtc pixmap or direct */
 	sna_crtc->bo = bo;
 	mode_to_kmode(&sna_crtc->kmode, mode);
 	if (!sna_crtc_apply(crtc)) {
+		int err = errno;
+
 		kgem_bo_destroy(&sna->kgem, bo);
 
 		if (!sna_crtc->shadow) {
@@ -2063,7 +2075,7 @@ retry: /* Attach per-crtc pixmap or direct */
 		}
 
 		xf86DrvMsg(crtc->scrn->scrnIndex, X_ERROR,
-			   "failed to set mode: %s\n", strerror(errno));
+			   "failed to set mode: %s [%d]\n", strerror(err), err);
 
 		sna_crtc->offset = saved_offset;
 		sna_crtc->transform = saved_transform;
@@ -2172,13 +2184,17 @@ sna_crtc_set_scanout_pixmap(xf86CrtcPtr crtc, PixmapPtr pixmap)
 	if (sna_crtc == NULL)
 		return FALSE;
 
+	if (pixmap == sna_crtc->slave_pixmap)
+		return TRUE;
+
 	DBG(("%s: CRTC:%d, pipe=%d setting scanout pixmap=%ld\n",
 	     __FUNCTION__, sna_crtc->id,  sna_crtc->pipe,
 	     pixmap ? pixmap->drawable.serialNumber : 0));
 
+	/* Disable first so that we can unregister the damage tracking */
+	sna_crtc_disable_shadow(to_sna(crtc->scrn), sna_crtc);
+
 	sna_crtc->slave_pixmap = pixmap;
-	if (pixmap == NULL)
-		sna_crtc_disable(crtc);
 
 	return TRUE;
 }
@@ -4876,14 +4892,13 @@ sna_crtc_flip(struct sna *sna, struct sna_crtc *crtc, struct kgem_bo *bo, int x,
 	arg.mode = crtc->kmode;
 	arg.mode_valid = 1;
 
-	DBG(("%s: applying crtc [%d, pipe=%d] mode=%dx%d+%d+%d@%d, fb=%d%s update to %d outputs [%d...]\n",
+	DBG(("%s: applying crtc [%d, pipe=%d] mode=%dx%d+%d+%d@%d, fb=%d across %d outputs [%d...]\n",
 	     __FUNCTION__, crtc->id, crtc->pipe,
 	     arg.mode.hdisplay,
 	     arg.mode.vdisplay,
 	     arg.x, arg.y,
 	     arg.mode.clock,
 	     arg.fb_id,
-	     bo != crtc->bo ? " [shadow]" : "",
 	     output_count, output_count ? output_ids[0] : 0));
 
 	if (drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_SETCRTC, &arg))
@@ -4957,6 +4972,11 @@ fixup_flip:
 
 				crtc->bo = kgem_bo_reference(bo);
 				crtc->bo->active_scanout++;
+
+				if (data == NULL)
+					goto next_crtc;
+
+				/* queue a flip in order to send the event */
 			} else {
 				if (count && !xf86SetDesiredModes(sna->scrn)) {
 					xf86DrvMsg(sna->scrn->scrnIndex, X_ERROR,
@@ -5028,6 +5048,7 @@ retry_flip:
 			sna->mode.flip_active++;
 		}
 
+next_crtc:
 		count++;
 	}
 
@@ -5183,36 +5204,38 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 {
 	ScrnInfoPtr scrn = sna->scrn;
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(scrn);
-	const int user_overrides[] = {
-		OPTION_POSITION,
-		OPTION_BELOW,
-		OPTION_RIGHT_OF,
-		OPTION_ABOVE,
-		OPTION_LEFT_OF,
-		OPTION_ROTATE,
-		OPTION_PANNING,
-	};
 	int width, height;
 	int i, j;
 
 	assert((sna->flags & SNA_IS_HOSTED) == 0);
 
-	if (xf86ReturnOptValBool(sna->Options, OPTION_REPROBE, FALSE)) {
-		DBG(("%s: user requests reprobing\n", __FUNCTION__));
-		return false;
-	}
+	if ((sna->flags & SNA_IS_SLAVED) == 0) {
+		const int user_overrides[] = {
+			OPTION_POSITION,
+			OPTION_BELOW,
+			OPTION_RIGHT_OF,
+			OPTION_ABOVE,
+			OPTION_LEFT_OF,
+			OPTION_ROTATE,
+			OPTION_PANNING,
+		};
+		if (xf86ReturnOptValBool(sna->Options, OPTION_REPROBE, FALSE)) {
+			DBG(("%s: user requests reprobing\n", __FUNCTION__));
+			return false;
+		}
 
-	/* First scan through all outputs and look for user overrides */
-	for (i = 0; i < sna->mode.num_real_output; i++) {
-		xf86OutputPtr output = config->output[i];
+		/* First scan through all outputs and look for user overrides */
+		for (i = 0; i < sna->mode.num_real_output; i++) {
+			xf86OutputPtr output = config->output[i];
 
-		for (j = 0; j < ARRAY_SIZE(user_overrides); j++) {
-			if (xf86GetOptValString(output->options, user_overrides[j])) {
-				DBG(("%s: user placement [%d] for %s\n",
-				     __FUNCTION__,
-				     user_overrides[j],
-				     output->name));
-				return false;
+			for (j = 0; j < ARRAY_SIZE(user_overrides); j++) {
+				if (xf86GetOptValString(output->options, user_overrides[j])) {
+					DBG(("%s: user placement [%d] for %s\n",
+					     __FUNCTION__,
+					     user_overrides[j],
+					     output->name));
+					return false;
+				}
 			}
 		}
 	}
@@ -5257,6 +5280,8 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 
 		crtc_id = (uintptr_t)output->crtc;
 		output->crtc = NULL;
+		if (sna->flags & SNA_IS_SLAVED)
+			continue;
 
 		if (crtc_id == 0) {
 			DBG(("%s: not using output %s, disconnected\n",
@@ -5325,7 +5350,7 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 	}
 
 	width = height = 0;
-	for (i = 0; i < config->num_crtc; i++) {
+	for (i = 0; i < sna->mode.num_real_crtc; i++) {
 		xf86CrtcPtr crtc = config->crtc[i];
 		int w, h;
 
