@@ -50,6 +50,10 @@
 #include <xf86platformBus.h>
 #endif
 
+#ifndef XF86_ALLOCATE_GPU_SCREEN
+#define XF86_ALLOCATE_GPU_SCREEN 0
+#endif
+
 static const struct intel_device_info intel_generic_info = {
 	.gen = -1,
 };
@@ -543,7 +547,7 @@ intel_scrn_create(DriverPtr		driver,
 	scrn->driverVersion = INTEL_VERSION;
 	scrn->driverName = (char *)INTEL_DRIVER_NAME;
 	scrn->name = (char *)INTEL_NAME;
-	scrn->driverPrivate = (void *)(match_data | 1);
+	scrn->driverPrivate = (void *)(match_data | (flags & XF86_ALLOCATE_GPU_SCREEN) | 2);
 	scrn->Probe = NULL;
 
 	if (xf86IsEntitySharable(entity_num))

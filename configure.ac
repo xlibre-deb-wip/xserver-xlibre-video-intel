@@ -23,7 +23,7 @@
 # Initialize Autoconf
 AC_PREREQ([2.60])
 AC_INIT([xf86-video-intel],
-        [2.99.912],
+        [2.99.914],
         [https://bugs.freedesktop.org/enter_bug.cgi?product=xorg],
         [xf86-video-intel])
 AC_CONFIG_SRCDIR([Makefile.am])
@@ -839,6 +839,7 @@ AC_DEFINE_DIR([LIBEXEC_PATH], libexecdir, [libexec directory])
 AC_CONFIG_FILES([
                 Makefile
                 man/Makefile
+		libobj/Makefile
                 src/Makefile
                 src/legacy/Makefile
                 src/legacy/i810/Makefile
