@@ -114,6 +114,7 @@ struct sna_cursor;
 struct sna_crtc;
 
 struct sna_client {
+	struct list events;
 	int is_compositor; /* only 4 bits used */
 };
 
@@ -148,7 +149,7 @@ struct sna_pixmap {
 	uint32_t clear_color;
 
 #define SOURCE_BIAS 4
-	uint16_t source_count;
+	uint8_t source_count;
 	uint8_t pinned :4;
 #define PIN_SCANOUT 0x1
 #define PIN_DRI2 0x2
@@ -159,7 +160,7 @@ struct sna_pixmap {
 #define MAPPED_NONE 0
 #define MAPPED_GTT 1
 #define MAPPED_CPU 2
-	uint8_t flush :1;
+	uint8_t flush :2;
 	uint8_t shm :1;
 	uint8_t clear :1;
 	uint8_t header :1;
@@ -240,20 +241,21 @@ struct sna {
 	ScrnInfoPtr scrn;
 
 	unsigned flags;
-#define SNA_NO_WAIT		0x1
-#define SNA_NO_FLIP		0x2
-#define SNA_NO_VSYNC		0x4
-#define SNA_TRIPLE_BUFFER	0x8
-#define SNA_TEAR_FREE		0x10
-#define SNA_FORCE_SHADOW	0x20
-#define SNA_FLUSH_GTT		0x40
-#define SNA_IS_HOSTED		0x80
-#define SNA_PERFORMANCE		0x100
-#define SNA_POWERSAVE		0x200
-#define SNA_REMOVE_OUTPUTS	0x400
+#define SNA_IS_SLAVED		0x1
+#define SNA_IS_HOSTED		0x2
+#define SNA_NO_WAIT		0x10
+#define SNA_NO_FLIP		0x20
+#define SNA_NO_VSYNC		0x40
+#define SNA_TRIPLE_BUFFER	0x80
+#define SNA_TEAR_FREE		0x100
+#define SNA_FORCE_SHADOW	0x200
+#define SNA_FLUSH_GTT		0x400
+#define SNA_PERFORMANCE		0x1000
+#define SNA_POWERSAVE		0x2000
+#define SNA_REMOVE_OUTPUTS	0x4000
 #define SNA_HAS_FLIP		0x10000
 #define SNA_HAS_ASYNC_FLIP	0x20000
-#define SNA_REDISCOVER		0x40000000
+#define SNA_LINEAR_FB		0x40000
 #define SNA_REPROBE		0x80000000
 
 	unsigned cpu_features;
@@ -291,6 +293,7 @@ struct sna {
 
 		int max_crtc_width, max_crtc_height;
 		RegionRec shadow_region;
+		RegionRec shadow_cancel;
 		struct list shadow_crtc;
 		bool shadow_dirty;
 
@@ -334,6 +337,7 @@ struct sna {
 
 #if HAVE_DRI2
 		void *flip_pending;
+		unsigned client_count;
 #endif
 	} dri2;
 
@@ -357,11 +361,6 @@ struct sna {
 		XvAdaptorPtr adaptors;
 		int num_adaptors;
 	} xv;
-
-	unsigned int tiling;
-#define SNA_TILING_FB		0x1
-#define SNA_TILING_2D		0x2
-#define SNA_TILING_ALL (~0)
 
 	EntityInfoPtr pEnt;
 	const struct intel_device_info *info;
@@ -420,6 +419,7 @@ struct sna {
 
 bool sna_mode_pre_init(ScrnInfoPtr scrn, struct sna *sna);
 bool sna_mode_fake_init(struct sna *sna, int num_fake);
+bool sna_mode_wants_tear_free(struct sna *sna);
 void sna_mode_adjust_frame(struct sna *sna, int x, int y);
 extern void sna_mode_discover(struct sna *sna);
 extern void sna_mode_check(struct sna *sna);
@@ -428,8 +428,8 @@ extern void sna_mode_wakeup(struct sna *sna);
 extern void sna_mode_redisplay(struct sna *sna);
 extern void sna_shadow_set_crtc(struct sna *sna, xf86CrtcPtr crtc, struct kgem_bo *bo);
 extern void sna_shadow_unset_crtc(struct sna *sna, xf86CrtcPtr crtc);
-extern void sna_pixmap_discard_shadow_damage(struct sna_pixmap *priv,
-					     RegionPtr region);
+extern bool sna_pixmap_discard_shadow_damage(struct sna_pixmap *priv,
+					     const RegionRec *region);
 extern void sna_mode_close(struct sna *sna);
 extern void sna_mode_fini(struct sna *sna);
 
@@ -636,6 +636,7 @@ static inline bool sna_pixmap_is_scanout(struct sna *sna, PixmapPtr pixmap)
 
 static inline int sna_max_tile_copy_size(struct sna *sna, struct kgem_bo *src, struct kgem_bo *dst)
 {
+	int min_object;
 	int max_size;
 
 	max_size = sna->kgem.aperture_high * PAGE_SIZE;
@@ -647,6 +648,13 @@ static inline int sna_max_tile_copy_size(struct sna *sna, struct kgem_bo *src, s
 
 	if (max_size > sna->kgem.max_copy_tile_size)
 		max_size = sna->kgem.max_copy_tile_size;
+
+	min_object = MIN(kgem_bo_size(src), kgem_bo_size(dst)) / 2;
+	if (max_size > min_object)
+		max_size = min_object;
+	if (max_size <= 4096)
+		max_size = 0;
+
 	DBG(("%s: using max tile size of %d\n", __FUNCTION__, max_size));
 	return max_size;
 }
@@ -738,7 +746,7 @@ struct kgem_bo *sna_pixmap_change_tiling(PixmapPtr pixmap, uint32_t tiling);
 #define PREFER_GPU	0x1
 #define FORCE_GPU	0x2
 #define RENDER_GPU	0x4
-#define IGNORE_CPU	0x8
+#define IGNORE_DAMAGE	0x8
 #define REPLACES	0x10
 struct kgem_bo *
 sna_drawable_use_bo(DrawablePtr drawable, unsigned flags, const BoxRec *box,
@@ -804,7 +812,7 @@ region_subsumes_drawable(RegionPtr region, DrawablePtr drawable)
 }
 
 static inline bool
-region_subsumes_pixmap(RegionPtr region, PixmapPtr pixmap)
+region_subsumes_pixmap(const RegionRec *region, PixmapPtr pixmap)
 {
 	if (region->data)
 		return false;
@@ -1134,9 +1142,9 @@ inline static bool is_power_of_two(unsigned x)
 inline static bool is_clipped(const RegionRec *r,
 			      const DrawableRec *d)
 {
-	DBG(("%s: region[%ld]x(%d, %d),(%d, %d) against drawable %dx%d\n",
+	DBG(("%s: region[%d]x(%d, %d),(%d, %d) against drawable %dx%d\n",
 	     __FUNCTION__,
-	     (long)RegionNumRects(r),
+	     region_num_rects(r),
 	     r->extents.x1, r->extents.y1,
 	     r->extents.x2, r->extents.y2,
 	     d->width, d->height));
@@ -1214,5 +1222,10 @@ static inline void sigtrap_put(void)
 
 #define RR_Rotate_All (RR_Rotate_0 | RR_Rotate_90 | RR_Rotate_180 | RR_Rotate_270)
 #define RR_Reflect_All (RR_Reflect_X | RR_Reflect_Y)
+
+#ifndef HAVE_GETLINE
+#include <stdio.h>
+extern int getline(char **line, size_t *len, FILE *file);
+#endif
 
 #endif /* _SNA_H */

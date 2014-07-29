@@ -50,6 +50,8 @@ struct kgem_bo {
 #define RQ(rq) ((struct kgem_request *)((uintptr_t)(rq) & ~3))
 #define RQ_RING(rq) ((uintptr_t)(rq) & 3)
 #define RQ_IS_BLT(rq) (RQ_RING(rq) == KGEM_BLT)
+#define MAKE_REQUEST(rq, ring) ((struct kgem_request *)((uintptr_t)(rq) | (ring)))
+
 	struct drm_i915_gem_exec_object2 *exec;
 
 	struct kgem_bo *proxy;
@@ -169,6 +171,8 @@ struct kgem {
 	uint32_t need_purge:1;
 	uint32_t need_retire:1;
 	uint32_t need_throttle:1;
+	uint32_t needs_semaphore:1;
+	uint32_t needs_reservation:1;
 	uint32_t scanout_busy:1;
 	uint32_t busy:1;
 
@@ -569,10 +573,17 @@ void kgem_bo_pair_undo(struct kgem *kgem, struct kgem_bo *a, struct kgem_bo *b);
 
 bool __kgem_busy(struct kgem *kgem, int handle);
 
-static inline void kgem_bo_mark_busy(struct kgem_bo *bo, int ring)
+static inline void kgem_bo_mark_busy(struct kgem *kgem, struct kgem_bo *bo, int ring)
 {
 	assert(bo->refcnt);
-	bo->rq = (struct kgem_request *)((uintptr_t)bo->rq | ring);
+	bo->needs_flush = true;
+	if (bo->rq) {
+		bo->rq = MAKE_REQUEST(RQ(bo->rq), ring);
+	} else {
+		bo->rq = MAKE_REQUEST(kgem, ring);
+		list_add(&bo->request, &kgem->flushing);
+		kgem->need_retire = true;
+	}
 }
 
 inline static void __kgem_bo_clear_busy(struct kgem_bo *bo)
@@ -679,8 +690,9 @@ static inline void kgem_bo_mark_dirty(struct kgem_bo *bo)
 
 static inline bool kgem_bo_mapped(struct kgem *kgem, struct kgem_bo *bo)
 {
-	DBG(("%s: map=%p:%p, tiling=%d, domain=%d\n",
-	     __FUNCTION__, bo->map__gtt, bo->map__cpu, bo->tiling, bo->domain));
+	DBG(("%s: handle=%d, map=%p:%p, tiling=%d, domain=%d\n",
+	     __FUNCTION__, bo->handle, bo->map__gtt, bo->map__cpu, bo->tiling, bo->domain));
+	assert(bo->proxy == NULL);
 
 	if (bo->tiling == I915_TILING_NONE && (bo->domain == DOMAIN_CPU || kgem->has_llc))
 		return bo->map__cpu != NULL;
@@ -690,11 +702,13 @@ static inline bool kgem_bo_mapped(struct kgem *kgem, struct kgem_bo *bo)
 
 static inline bool kgem_bo_can_map(struct kgem *kgem, struct kgem_bo *bo)
 {
-	DBG(("%s: map=%p:%p, tiling=%d, domain=%d, offset=%ld\n",
-	     __FUNCTION__, bo->map__gtt, bo->map__cpu, bo->tiling, bo->domain, (long)bo->presumed_offset));
+	DBG(("%s: handle=%d, map=%p:%p, tiling=%d, domain=%d, offset=%ld\n",
+	     __FUNCTION__, bo->handle, bo->map__gtt, bo->map__cpu, bo->tiling, bo->domain, (long)bo->presumed_offset));
 
 	if (!bo->tiling && (kgem->has_llc || bo->domain == DOMAIN_CPU))
 		return true;
+
+	assert(bo->proxy == NULL);
 
 	if (bo->map__gtt != NULL)
 		return true;
@@ -773,6 +787,11 @@ memcpy_to_tiled_x(struct kgem *kgem,
 		  int16_t dst_x, int16_t dst_y,
 		  uint16_t width, uint16_t height)
 {
+	assert(kgem->memcpy_to_tiled_x);
+	assert(src_x >= 0 && src_y >= 0);
+	assert(dst_x >= 0 && dst_y >= 0);
+	assert(8*src_stride >= (src_x+width) * bpp);
+	assert(8*dst_stride >= (dst_x+width) * bpp);
 	return kgem->memcpy_to_tiled_x(src, dst, bpp,
 				       src_stride, dst_stride,
 				       src_x, src_y,
@@ -788,6 +807,11 @@ memcpy_from_tiled_x(struct kgem *kgem,
 		    int16_t dst_x, int16_t dst_y,
 		    uint16_t width, uint16_t height)
 {
+	assert(kgem->memcpy_from_tiled_x);
+	assert(src_x >= 0 && src_y >= 0);
+	assert(dst_x >= 0 && dst_y >= 0);
+	assert(8*src_stride >= (src_x+width) * bpp);
+	assert(8*dst_stride >= (dst_x+width) * bpp);
 	return kgem->memcpy_from_tiled_x(src, dst, bpp,
 					 src_stride, dst_stride,
 					 src_x, src_y,

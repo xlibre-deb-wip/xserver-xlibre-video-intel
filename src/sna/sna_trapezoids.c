@@ -595,12 +595,10 @@ sna_composite_trapezoids(CARD8 op,
 	}
 
 	if (FORCE_FALLBACK == 0 &&
-	    (too_small(priv) || DAMAGE_IS_ALL(priv->cpu_damage)) &&
-	    !picture_is_gpu(sna, src, 0) && untransformed(src)) {
-		DBG(("%s: force fallbacks -- (too small, %dx%d? %d || all-cpu? %d) && (src-is-cpu? %d && untransformed? %d)\n",
+	    !is_gpu_dst(priv) && !picture_is_gpu(sna, src, 0) && untransformed(src)) {
+		DBG(("%s: force fallbacks -- (!gpu dst, %dx%d? %d) && (src-is-cpu? %d && untransformed? %d)\n",
 		     __FUNCTION__, dst->pDrawable->width, dst->pDrawable->height,
-		     too_small(priv), (int)DAMAGE_IS_ALL(priv->cpu_damage),
-		     !picture_is_gpu(sna, src, 0), untransformed(src)));
+		     !is_gpu_dst(priv), !picture_is_gpu(sna, src, 0), untransformed(src)));
 
 force_fallback:
 		force_fallback = true;
@@ -803,8 +801,8 @@ trap_upload(PicturePtr picture,
 	/* XXX clip boxes */
 	get_drawable_deltas(picture->pDrawable, pixmap, &x, &y);
 	sna->render.copy_boxes(sna, GXcopy,
-			       scratch, __sna_pixmap_get_bo(scratch), -extents.x1, -extents.x1,
-			       pixmap, priv->gpu_bo, x, y,
+			       &scratch->drawable, __sna_pixmap_get_bo(scratch), -extents.x1, -extents.x1,
+			       &pixmap->drawable, priv->gpu_bo, x, y,
 			       &extents, 1, 0);
 	mark_damaged(pixmap, priv, &extents, x, y);
 

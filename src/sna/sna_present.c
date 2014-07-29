@@ -193,15 +193,12 @@ static bool
 check_flip__crtc(struct sna *sna,
 		 RRCrtcPtr crtc)
 {
-	if (!sna->scrn->vtSema) {
-		DBG(("%s: not master\n", __FUNCTION__));
-		return false;
-	}
-
 	if (!sna_crtc_is_on(crtc->devPrivate)) {
 		DBG(("%s: CRTC off\n", __FUNCTION__));
 		return false;
 	}
+
+	assert(sna->scrn->vtSema);
 
 	if (sna->mode.shadow_active) {
 		DBG(("%s: shadow buffer active\n", __FUNCTION__));
@@ -351,6 +348,7 @@ page_flip(ScreenPtr screen,
 static struct kgem_bo *
 get_flip_bo(PixmapPtr pixmap)
 {
+	struct sna *sna = to_sna_from_pixmap(pixmap);
 	struct sna_pixmap *priv;
 
 	DBG(("%s(pixmap=%ld)\n", __FUNCTION__, pixmap->drawable.serialNumber));
@@ -361,9 +359,16 @@ get_flip_bo(PixmapPtr pixmap)
 		return NULL;
 	}
 
+	if (sna->flags & SNA_LINEAR_FB &&
+	    priv->gpu_bo->tiling &&
+	    !sna_pixmap_change_tiling(pixmap, I915_TILING_NONE)) {
+		DBG(("%s: invalid tiling for scanout, user requires linear\n", __FUNCTION__));
+		return NULL;
+	}
+
 	if (priv->gpu_bo->tiling == I915_TILING_Y &&
 	    !sna_pixmap_change_tiling(pixmap, I915_TILING_X)) {
-		DBG(("%s: bad tiling, cannot convert\n", __FUNCTION__));
+		DBG(("%s: invalid Y-tiling, cannot convert\n", __FUNCTION__));
 		return NULL;
 	}
 
@@ -407,19 +412,28 @@ sna_present_flip(RRCrtcPtr crtc,
 static void
 sna_present_unflip(ScreenPtr screen, uint64_t event_id)
 {
+	struct sna *sna = to_sna_from_screen(screen);
 	struct kgem_bo *bo;
 
 	DBG(("%s(event=%lld)\n", __FUNCTION__, (long long)event_id));
-	bo = get_flip_bo(screen->GetScreenPixmap(screen));
-	if (bo == NULL || !page_flip(screen, NULL, event_id, bo)) {
-		struct sna *sna = to_sna_from_screen(screen);
+	if (sna->mode.front_active == 0) {
 		const struct ust_msc *swap;
-		DBG(("%s: failed, trying to restore original mode\n", __FUNCTION__));
-		xf86SetDesiredModes(sna->scrn);
+
+		DBG(("%s: no CRTC active, perform no-op flip\n", __FUNCTION__));
+
+notify:
 		swap = sna_crtc_last_swap(sna_mode_first_crtc(sna));
 		present_event_notify(event_id,
 				     ust64(swap->tv_sec, swap->tv_usec),
 				     swap->msc);
+		return;
+	}
+
+	bo = get_flip_bo(screen->GetScreenPixmap(screen));
+	if (bo == NULL || !page_flip(screen, NULL, event_id, bo)) {
+		DBG(("%s: failed, trying to restore original mode\n", __FUNCTION__));
+		xf86SetDesiredModes(sna->scrn);
+		goto notify;
 	}
 }
 

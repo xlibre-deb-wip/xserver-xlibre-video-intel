@@ -1,3 +1,26 @@
+xserver-xorg-video-intel (2:2.99.914-1~exp1) experimental; urgency=medium
+
+  * New upstream prerelease 2.99.914.
+  * Update upstream changelog.
+  * Fix FTBFS on kfreebsd by not installing non-existent files.
+
+ -- Vincent Cheng <vcheng@debian.org>  Wed, 23 Jul 2014 22:49:08 -0700
+
+xserver-xorg-video-intel (2:2.99.912+git20140719-1~exp1) experimental; urgency=medium
+
+  * New upstream snapshot.
+
+ -- maximilian attems <maks@debian.org>  Sat, 19 Jul 2014 14:18:15 +0200
+
+xserver-xorg-video-intel (2:2.99.912+git20140705-1~exp1) experimental; urgency=medium
+
+  * New upstream snapshot.
+
+  [ Julien Cristau ]
+  * Remove Cyril from Uploaders.
+
+ -- maximilian attems <maks@debian.org>  Sat, 05 Jul 2014 20:47:01 +0200
+
 xserver-xorg-video-intel (2:2.99.912-1~exp1) experimental; urgency=medium
 
   * New upstream prerelease 2.99.912.

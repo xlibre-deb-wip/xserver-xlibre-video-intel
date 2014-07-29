@@ -320,6 +320,14 @@ intel_crtc_apply(xf86CrtcPtr crtc)
 		xf86OutputPtr output = xf86_config->output[i];
 		struct intel_output *intel_output;
 
+		/* Make sure we mark the output as off (and save the backlight)
+		 * before the kernel turns it off due to changing the pipe.
+		 * This is necessary as the kernel may turn off the backlight
+		 * and we lose track of the user settings.
+		 */
+		if (output->crtc == NULL)
+			output->funcs->dpms(output, DPMSModeOff);
+
 		if (output->crtc != crtc)
 			continue;
 
@@ -511,7 +519,7 @@ intel_crtc_shadow_allocate(xf86CrtcPtr crtc, int width, int height)
 	ScrnInfoPtr scrn = crtc->scrn;
 	struct intel_crtc *intel_crtc = crtc->driver_private;
 	struct intel_mode *mode = intel_crtc->mode;
-	unsigned long rotate_pitch;
+	int rotate_pitch;
 	uint32_t tiling;
 	int ret;
 
@@ -1257,9 +1265,13 @@ intel_output_get_property(xf86OutputPtr output, Atom property)
 		if (!intel_output->backlight.iface)
 			return FALSE;
 
-		val = intel_output_backlight_get(output);
-		if (val < 0)
-			return FALSE;
+		if (intel_output->dpms_mode == DPMSModeOn) {
+			val = intel_output_backlight_get(output);
+			if (val < 0)
+				return FALSE;
+		} else {
+			val = intel_output->backlight_active_level;
+		}
 
 		err = RRChangeOutputProperty(output->randr_output, property,
 					     XA_INTEGER, 32, PropModeReplace, 1, &val,
@@ -1401,7 +1413,7 @@ intel_xf86crtc_resize(ScrnInfoPtr scrn, int width, int height)
 	Bool	    ret;
 	uint32_t    old_fb_id;
 	int	    i, old_width, old_height, old_pitch;
-	unsigned long pitch;
+	int pitch;
 	uint32_t tiling;
 	ScreenPtr screen;
 
@@ -1431,8 +1443,7 @@ intel_xf86crtc_resize(ScrnInfoPtr scrn, int width, int height)
 	intel->front_buffer = intel_allocate_framebuffer(scrn,
 							 width, height,
 							 intel->cpp,
-							 &pitch,
-							 &tiling);
+							 &pitch, &tiling);
 	if (!intel->front_buffer)
 		goto fail;
 
@@ -1450,6 +1461,9 @@ intel_xf86crtc_resize(ScrnInfoPtr scrn, int width, int height)
 	scrn->virtualX = width;
 	scrn->virtualY = height;
 
+	if (!intel_uxa_create_screen_resources(scrn->pScreen))
+		goto fail;
+
 	for (i = 0; i < xf86_config->num_crtc; i++) {
 		xf86CrtcPtr crtc = xf86_config->crtc[i];
 
@@ -1459,8 +1473,6 @@ intel_xf86crtc_resize(ScrnInfoPtr scrn, int width, int height)
 		if (!intel_crtc_apply(crtc))
 			goto fail;
 	}
-
-	intel_uxa_create_screen_resources(scrn->pScreen);
 
 	if (old_fb_id)
 		drmModeRmFB(mode->fd, old_fb_id);

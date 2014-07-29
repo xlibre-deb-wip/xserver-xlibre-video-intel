@@ -64,6 +64,7 @@ search_snoop_cache(struct kgem *kgem, unsigned int num_pages, unsigned flags);
 #define DBG_NO_EXEC 0
 #define DBG_NO_TILING 0
 #define DBG_NO_CACHE 0
+#define DBG_NO_SNOOP_CACHE 0
 #define DBG_NO_CACHE_LEVEL 0
 #define DBG_NO_CPU 0
 #define DBG_NO_CREATE2 0
@@ -90,7 +91,8 @@ search_snoop_cache(struct kgem *kgem, unsigned int num_pages, unsigned flags);
 #define DEBUG_SYNC 0
 #endif
 
-#define SHOW_BATCH 0
+#define SHOW_BATCH_BEFORE 0
+#define SHOW_BATCH_AFTER 0
 
 #if 0
 #define ASSERT_IDLE(kgem__, handle__) assert(!__kgem_busy(kgem__, handle__))
@@ -104,8 +106,12 @@ search_snoop_cache(struct kgem *kgem, unsigned int num_pages, unsigned flags);
  * is being simultaneously being read by the GPU, or within the sampler
  * prefetch. In general, the chipsets seem to have a requirement that sampler
  * offsets be aligned to a cacheline (64 bytes).
+ *
+ * Actually, it turns out the BLT color pattern (BR15) has the most severe
+ * alignment restrictions, 64 bytes for 8-bpp, 128 bytes for 16-bpp and 256
+ * bytes for 32-bpp.
  */
-#define UPLOAD_ALIGNMENT 128
+#define UPLOAD_ALIGNMENT 256
 
 #define PAGE_ALIGN(x) ALIGN(x, PAGE_SIZE)
 #define NUM_PAGES(x) (((x) + PAGE_SIZE-1) / PAGE_SIZE)
@@ -116,8 +122,6 @@ search_snoop_cache(struct kgem *kgem, unsigned int num_pages, unsigned flags);
 
 #define MAKE_USER_MAP(ptr) ((void*)((uintptr_t)(ptr) | 1))
 #define IS_USER_MAP(ptr) ((uintptr_t)(ptr) & 1)
-
-#define MAKE_REQUEST(rq, ring) ((struct kgem_request *)((uintptr_t)(rq) | (ring)))
 
 #define LOCAL_I915_PARAM_HAS_BLT		11
 #define LOCAL_I915_PARAM_HAS_RELAXED_FENCING	12
@@ -155,8 +159,8 @@ struct local_i915_gem_userptr {
 	uint64_t user_ptr;
 	uint64_t user_size;
 	uint32_t flags;
-#define I915_USERPTR_READ_ONLY (1<<0)
-#define I915_USERPTR_UNSYNCHRONIZED (1<<31)
+#define I915_USERPTR_READ_ONLY		0x1
+#define I915_USERPTR_UNSYNCHRONIZED	0x80000000
 	uint32_t handle;
 };
 
@@ -249,6 +253,20 @@ static void assert_tiling(struct kgem *kgem, struct kgem_bo *bo)
 	assert(tiling.tiling_mode == bo->tiling);
 }
 
+static void assert_cacheing(struct kgem *kgem, struct kgem_bo *bo)
+{
+	struct local_i915_gem_caching arg;
+	int expect = kgem->has_llc ? SNOOPED : UNCACHED;
+
+	VG_CLEAR(arg);
+	arg.handle = bo->handle;
+	arg.caching = expect;
+
+	(void)do_ioctl(kgem->fd, LOCAL_IOCTL_I915_GEM_GET_CACHING, &arg);
+
+	assert(arg.caching == expect);
+}
+
 static void assert_bo_retired(struct kgem_bo *bo)
 {
 	DBG(("%s: handle=%d, domain: %d exec? %d, rq? %d\n", __FUNCTION__,
@@ -258,9 +276,9 @@ static void assert_bo_retired(struct kgem_bo *bo)
 	assert(bo->exec == NULL);
 	assert(list_is_empty(&bo->request));
 }
-
 #else
 #define assert_tiling(kgem, bo)
+#define assert_cacheing(kgem, bo)
 #define assert_bo_retired(bo)
 #endif
 
@@ -345,15 +363,29 @@ static uint32_t gem_userptr(int fd, void *ptr, int size, int read_only)
 	return arg.handle;
 }
 
+static bool __kgem_throttle(struct kgem *kgem, bool harder)
+{
+	/* Let this be woken up by sigtimer so that we don't block here
+	 * too much and completely starve X. We will sleep again shortly,
+	 * and so catch up or detect the hang.
+	 */
+	do {
+		if (ioctl(kgem->fd, DRM_IOCTL_I915_GEM_THROTTLE) == 0) {
+			kgem->need_throttle = 0;
+			return false;
+		}
+
+		if (errno == EIO)
+			return true;
+	} while (harder);
+
+	return false;
+}
+
 static bool __kgem_throttle_retire(struct kgem *kgem, unsigned flags)
 {
-	if (flags & CREATE_NO_RETIRE) {
-		DBG(("%s: not retiring per-request\n", __FUNCTION__));
-		return false;
-	}
-
-	if (!kgem->need_retire) {
-		DBG(("%s: nothing to retire\n", __FUNCTION__));
+	if (flags & CREATE_NO_RETIRE || !kgem->need_retire) {
+		DBG(("%s: not retiring\n", __FUNCTION__));
 		return false;
 	}
 
@@ -365,7 +397,7 @@ static bool __kgem_throttle_retire(struct kgem *kgem, unsigned flags)
 		return false;
 	}
 
-	kgem_throttle(kgem);
+	__kgem_throttle(kgem, false);
 	return kgem_retire(kgem);
 }
 
@@ -943,18 +975,6 @@ static bool test_has_semaphores_enabled(struct kgem *kgem)
 	return detected;
 }
 
-static bool __kgem_throttle(struct kgem *kgem)
-{
-	/* Let this be woken up by sigtimer so that we don't block here
-	 * too much and completely starve X. We will sleep again shortly,
-	 * and so catch up or detect the hang.
-	 */
-	if (ioctl(kgem->fd, DRM_IOCTL_I915_GEM_THROTTLE) == 0)
-		return false;
-
-	return errno == EIO;
-}
-
 static bool is_hw_supported(struct kgem *kgem,
 			    struct pci_device *dev)
 {
@@ -1044,6 +1064,9 @@ static bool test_has_userptr(struct kgem *kgem)
 	/* Incoherent blt and sampler hangs the GPU */
 	if (kgem->gen == 040)
 		return false;
+
+	if (kgem->gen >= 0100)
+		return false; /* FIXME https://bugs.freedesktop.org/show_bug.cgi?id=79053 */
 
 	if (posix_memalign(&ptr, PAGE_SIZE, PAGE_SIZE))
 		return false;
@@ -1329,7 +1352,7 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 		xf86DrvMsg(kgem_get_screen_index(kgem), X_WARNING,
 			   "Detected unsupported/dysfunctional hardware, disabling acceleration.\n");
 		kgem->wedged = 1;
-	} else if (__kgem_throttle(kgem)) {
+	} else if (__kgem_throttle(kgem, false)) {
 		xf86DrvMsg(kgem_get_screen_index(kgem), X_WARNING,
 			   "Detected a hung GPU, disabling acceleration.\n");
 		kgem->wedged = 1;
@@ -1793,7 +1816,6 @@ static void kgem_fixup_self_relocs(struct kgem *kgem, struct kgem_bo *bo)
 		}
 
 	}
-
 }
 
 static void kgem_bo_binding_free(struct kgem *kgem, struct kgem_bo *bo)
@@ -1890,6 +1912,7 @@ inline static void kgem_bo_move_to_inactive(struct kgem *kgem,
 	assert(!bo->needs_flush);
 	assert(list_is_empty(&bo->vma));
 	assert_tiling(kgem, bo);
+	assert_cacheing(kgem, bo);
 	ASSERT_IDLE(kgem, bo->handle);
 
 	if (bucket(bo) >= NUM_CACHE_BUCKETS) {
@@ -2054,6 +2077,11 @@ static void kgem_bo_move_to_snoop(struct kgem *kgem, struct kgem_bo *bo)
 	assert(!bo->needs_flush);
 	assert(bo->refcnt == 0);
 	assert(bo->exec == NULL);
+
+	if (DBG_NO_SNOOP_CACHE) {
+		kgem_bo_free(kgem, bo);
+		return;
+	}
 
 	if (num_pages(bo) > kgem->max_cpu_size >> 13) {
 		DBG(("%s handle=%d discarding large CPU buffer (%d >%d pages)\n",
@@ -2265,6 +2293,7 @@ static void __kgem_bo_destroy(struct kgem *kgem, struct kgem_bo *bo)
 	assert(bo->snoop == false);
 	assert(bo->io == false);
 	assert(bo->scanout == false);
+	assert_cacheing(kgem, bo);
 
 	kgem_bo_undo(kgem, bo);
 	assert(bo->refcnt == 0);
@@ -2544,6 +2573,29 @@ bool __kgem_ring_is_idle(struct kgem *kgem, int ring)
 	return true;
 }
 
+#if 0
+static void kgem_commit__check_reloc(struct kgem *kgem)
+{
+	struct kgem_request *rq = kgem->next_request;
+	struct kgem_bo *bo;
+	bool has_64bit = kgem->gen >= 0100;
+	int i;
+
+	for (i = 0; i < kgem->nreloc; i++) {
+		list_for_each_entry(bo, &rq->buffers, request) {
+			if (bo->target_handle == kgem->reloc[i].target_handle) {
+				uint64_t value = 0;
+				gem_read(kgem->fd, rq->bo->handle, &value, kgem->reloc[i].offset, has_64bit ? 8 : 4);
+				assert(bo->exec->offset == -1 || value == bo->exec->offset + (int)kgem->reloc[i].delta);
+				break;
+			}
+		}
+	}
+}
+#else
+#define kgem_commit__check_reloc(kgem)
+#endif
+
 #ifndef NDEBUG
 static void kgem_commit__check_buffers(struct kgem *kgem)
 {
@@ -2560,6 +2612,8 @@ static void kgem_commit(struct kgem *kgem)
 {
 	struct kgem_request *rq = kgem->next_request;
 	struct kgem_bo *bo, *next;
+
+	kgem_commit__check_reloc(kgem);
 
 	list_for_each_entry_safe(bo, next, &rq->buffers, request) {
 		assert(next->request.prev == &bo->request);
@@ -2968,6 +3022,8 @@ void kgem_reset(struct kgem *kgem)
 	kgem->nbatch = 0;
 	kgem->surface = kgem->batch_size;
 	kgem->mode = KGEM_NONE;
+	kgem->needs_semaphore = false;
+	kgem->needs_reservation = false;
 	kgem->flush = 0;
 	kgem->batch_flags = kgem->batch_flags_base;
 
@@ -3046,29 +3102,33 @@ out_16384:
 		}
 	}
 
-	if (kgem->gen == 020 && !kgem->has_pinned_batches) {
-		assert(size <= 16384);
+	if (kgem->gen == 020) {
+		bo = kgem_create_linear(kgem, size, CREATE_CACHED | CREATE_TEMPORARY);
+		if (bo)
+			return bo;
 
-		bo = list_first_entry(&kgem->pinned_batches[size > 4096],
-				      struct kgem_bo,
-				      list);
-		list_move_tail(&bo->list, &kgem->pinned_batches[size > 4096]);
+		if (size < 16384) {
+			bo = list_first_entry(&kgem->pinned_batches[size > 4096],
+					      struct kgem_bo,
+					      list);
+			list_move_tail(&bo->list, &kgem->pinned_batches[size > 4096]);
 
-		DBG(("%s: syncing due to busy batches\n", __FUNCTION__));
+			DBG(("%s: syncing due to busy batches\n", __FUNCTION__));
 
-		VG_CLEAR(set_domain);
-		set_domain.handle = bo->handle;
-		set_domain.read_domains = I915_GEM_DOMAIN_GTT;
-		set_domain.write_domain = I915_GEM_DOMAIN_GTT;
-		if (do_ioctl(kgem->fd, DRM_IOCTL_I915_GEM_SET_DOMAIN, &set_domain)) {
-			DBG(("%s: sync: GPU hang detected\n", __FUNCTION__));
-			kgem_throttle(kgem);
-			return NULL;
+			VG_CLEAR(set_domain);
+			set_domain.handle = bo->handle;
+			set_domain.read_domains = I915_GEM_DOMAIN_GTT;
+			set_domain.write_domain = I915_GEM_DOMAIN_GTT;
+			if (do_ioctl(kgem->fd, DRM_IOCTL_I915_GEM_SET_DOMAIN, &set_domain)) {
+				DBG(("%s: sync: GPU hang detected\n", __FUNCTION__));
+				kgem_throttle(kgem);
+				return NULL;
+			}
+
+			kgem_retire(kgem);
+			assert(bo->rq == NULL);
+			return kgem_bo_reference(bo);
 		}
-
-		kgem_retire(kgem);
-		assert(bo->rq == NULL);
-		return kgem_bo_reference(bo);
 	}
 
 	return kgem_create_linear(kgem, size, CREATE_NO_THROTTLE);
@@ -3170,7 +3230,7 @@ void _kgem_submit(struct kgem *kgem)
 
 	kgem_finish_buffers(kgem);
 
-#if SHOW_BATCH
+#if SHOW_BATCH_BEFORE
 	__kgem_batch_debug(kgem, batch_end);
 #endif
 
@@ -3305,6 +3365,10 @@ void _kgem_submit(struct kgem *kgem)
 			}
 		}
 	}
+#if SHOW_BATCH_AFTER
+	if (gem_read(kgem->fd, rq->bo->handle, kgem->batch, 0, batch_end*sizeof(uint32_t) == 0))
+		__kgem_batch_debug(kgem, batch_end);
+#endif
 	kgem_commit(kgem);
 	if (kgem->wedged)
 		kgem_cleanup(kgem);
@@ -3340,11 +3404,10 @@ static void find_hang_state(struct kgem *kgem, char *path, int maxlen)
 
 void kgem_throttle(struct kgem *kgem)
 {
-	kgem->need_throttle = 0;
 	if (kgem->wedged)
 		return;
 
-	kgem->wedged = __kgem_throttle(kgem);
+	kgem->wedged = __kgem_throttle(kgem, true);
 	if (kgem->wedged) {
 		char path[128];
 
@@ -3356,6 +3419,8 @@ void kgem_throttle(struct kgem *kgem)
 			xf86DrvMsg(kgem_get_screen_index(kgem), X_ERROR,
 				   "When reporting this, please include %s and the full dmesg.\n",
 				   path);
+
+		kgem->need_throttle = false;
 	}
 }
 
@@ -3981,13 +4046,15 @@ struct kgem_bo *kgem_create_for_prime(struct kgem *kgem, int name, uint32_t size
 	switch (caching.caching) {
 	case 0:
 		if (kgem->has_llc) {
-			DBG(("%s: interpreting handle=%d as a foreign scanout\n"));
+			DBG(("%s: interpreting handle=%d as a foreign scanout\n",
+			     __FUNCTION__, args.handle));
 			bo->scanout = true;
 		}
 		break;
 	case 1:
 		if (!kgem->has_llc) {
-			DBG(("%s: interpreting handle=%d as a foreign snooped buffer\n"));
+			DBG(("%s: interpreting handle=%d as a foreign snooped buffer\n",
+			     __FUNCTION__, args.handle));
 			bo->snoop = true;
 			if (bo->tiling) {
 				DBG(("%s: illegal snooped tiled buffer\n", __FUNCTION__));
@@ -3997,7 +4064,8 @@ struct kgem_bo *kgem_create_for_prime(struct kgem *kgem, int name, uint32_t size
 		}
 		break;
 	case 2:
-		DBG(("%s: interpreting handle=%d as a foreign scanout\n"));
+		DBG(("%s: interpreting handle=%d as a foreign scanout\n",
+		     __FUNCTION__, args.handle));
 		bo->scanout = true;
 		break;
 	}
@@ -4129,13 +4197,13 @@ int kgem_choose_tiling(struct kgem *kgem, int tiling, int width, int height, int
 		goto done;
 	}
 
-	if (tiling == I915_TILING_X && width * bpp <= 8*8*512/10) {
+	if (tiling == I915_TILING_X && width * bpp <= 8*512) {
 		DBG(("%s: too thin [width %d, %d bpp] for TILING_X\n",
 		     __FUNCTION__, width, bpp));
 		tiling = I915_TILING_NONE;
 		goto done;
 	}
-	if (tiling == I915_TILING_Y && width * bpp <= 8*8*128/10) {
+	if (tiling == I915_TILING_Y && width * bpp < 8*128) {
 		DBG(("%s: too thin [%d] for TILING_Y\n",
 		     __FUNCTION__, width));
 		tiling = I915_TILING_NONE;
@@ -4205,7 +4273,7 @@ unsigned kgem_can_create_2d(struct kgem *kgem,
 	if (size > 0) {
 		if (size <= kgem->max_cpu_size)
 			flags |= KGEM_CAN_CREATE_CPU;
-		if (size <= kgem->max_gpu_size)
+		if (size > 4096 && size <= kgem->max_gpu_size)
 			flags |= KGEM_CAN_CREATE_GPU;
 		if (size <= PAGE_SIZE*kgem->aperture_mappable/4)
 			flags |= KGEM_CAN_CREATE_GTT;
@@ -4227,8 +4295,6 @@ unsigned kgem_can_create_2d(struct kgem *kgem,
 		DBG(("%s: tiled[%d] size=%d\n", __FUNCTION__, tiling, size));
 		if (size > 0 && size <= kgem->max_gpu_size)
 			flags |= KGEM_CAN_CREATE_GPU;
-		if (size > kgem->max_gpu_size)
-			flags &= ~KGEM_CAN_CREATE_GPU;
 		if (size > 0 && size <= PAGE_SIZE*kgem->aperture_mappable/4)
 			flags |= KGEM_CAN_CREATE_GTT;
 		if (size > PAGE_SIZE*kgem->aperture_mappable/4)
@@ -4330,6 +4396,8 @@ static void __kgem_bo_make_scanout(struct kgem *kgem,
 		container_of(kgem, struct sna, kgem)->scrn;
 	struct drm_mode_fb_cmd arg;
 
+	assert(bo->proxy == NULL);
+
 	if (!scrn->vtSema)
 		return;
 
@@ -4344,18 +4412,23 @@ static void __kgem_bo_make_scanout(struct kgem *kgem,
 	arg.depth = scrn->depth;
 	arg.handle = bo->handle;
 
-	if (gem_set_caching(kgem->fd, bo->handle, DISPLAY)) {
-		bo->scanout = true;
+	/* First move the scanout out of cached memory */
+	if (kgem->has_llc) {
+		if (!gem_set_caching(kgem->fd, bo->handle, DISPLAY) &&
+		    !gem_set_caching(kgem->fd, bo->handle, UNCACHED))
+			return;
+	}
 
-		/* Pre-emptively move the object into the mappable
-		 * portion to avoid rebinding later when busy.
-		 */
-		if (bo->map__gtt == NULL)
-			bo->map__gtt = __kgem_bo_map__gtt(kgem, bo);
-		if (bo->map__gtt) {
-			*(uint32_t *)bo->map__gtt = 0;
-			bo->domain = DOMAIN_GTT;
-		}
+	bo->scanout = true;
+
+	/* Then pre-emptively move the object into the mappable
+	 * portion to avoid rebinding later when busy.
+	 */
+	if (bo->map__gtt == NULL)
+		bo->map__gtt = __kgem_bo_map__gtt(kgem, bo);
+	if (bo->map__gtt) {
+		*(uint32_t *)bo->map__gtt = 0;
+		bo->domain = DOMAIN_GTT;
 	}
 
 	if (do_ioctl(kgem->fd, DRM_IOCTL_MODE_ADDFB, &arg) == 0) {
@@ -4405,6 +4478,7 @@ struct kgem_bo *kgem_create_2d(struct kgem *kgem,
 		list_for_each_entry_reverse(bo, &kgem->scanout, list) {
 			assert(bo->scanout);
 			assert(!bo->flush);
+			assert(!bo->refcnt);
 			assert_tiling(kgem, bo);
 
 			if (size > num_pages(bo) || num_pages(bo) > 2*size)
@@ -4452,6 +4526,7 @@ struct kgem_bo *kgem_create_2d(struct kgem *kgem,
 				struct drm_mode_fb_cmd arg;
 
 				assert(bo->scanout);
+				assert(!bo->refcnt);
 
 				if (size > num_pages(bo) || num_pages(bo) > 2*size)
 					continue;
@@ -4693,7 +4768,7 @@ large_inactive:
 	retry = NUM_CACHE_BUCKETS - bucket;
 	if (retry > 3 && (flags & CREATE_TEMPORARY) == 0)
 		retry = 3;
-search_again:
+search_active:
 	assert(bucket < NUM_CACHE_BUCKETS);
 	cache = &kgem->active[bucket][tiling];
 	if (tiling) {
@@ -4771,52 +4846,44 @@ search_again:
 		}
 	}
 
-	if (--retry && exact) {
-		if (kgem->gen >= 040) {
-			for (i = I915_TILING_NONE; i <= I915_TILING_Y; i++) {
-				if (i == tiling)
+	if (kgem->gen >= 040) {
+		for (i = I915_TILING_Y; i >= I915_TILING_NONE; i--) {
+			cache = &kgem->active[bucket][i];
+			list_for_each_entry(bo, cache, list) {
+				assert(!bo->purged);
+				assert(bo->refcnt == 0);
+				assert(bo->reusable);
+				assert(!bo->scanout);
+				assert(bo->flush == false);
+				assert_tiling(kgem, bo);
+
+				if (num_pages(bo) < size)
 					continue;
 
-				cache = &kgem->active[bucket][i];
-				list_for_each_entry(bo, cache, list) {
-					assert(!bo->purged);
-					assert(bo->refcnt == 0);
-					assert(bo->reusable);
-					assert(!bo->scanout);
-					assert(bo->flush == false);
-					assert_tiling(kgem, bo);
-
-					if (num_pages(bo) < size)
-						continue;
-
+				if (bo->tiling != tiling ||
+				    (tiling != I915_TILING_NONE && bo->pitch != pitch)) {
 					if (!gem_set_tiling(kgem->fd,
 							    bo->handle,
 							    tiling, pitch))
 						continue;
-
-					kgem_bo_remove_from_active(kgem, bo);
-
-					bo->unique_id = kgem_get_unique_id(kgem);
-					bo->pitch = pitch;
-					bo->tiling = tiling;
-					bo->delta = 0;
-					DBG(("  1:from active: pitch=%d, tiling=%d, handle=%d, id=%d\n",
-					     bo->pitch, bo->tiling, bo->handle, bo->unique_id));
-					assert(bo->pitch*kgem_aligned_height(kgem, height, bo->tiling) <= kgem_bo_size(bo));
-					assert_tiling(kgem, bo);
-					bo->refcnt = 1;
-					return bo;
 				}
+
+				kgem_bo_remove_from_active(kgem, bo);
+
+				bo->unique_id = kgem_get_unique_id(kgem);
+				bo->pitch = pitch;
+				bo->tiling = tiling;
+				bo->delta = 0;
+				DBG(("  1:from active: pitch=%d, tiling=%d, handle=%d, id=%d\n",
+				     bo->pitch, bo->tiling, bo->handle, bo->unique_id));
+				assert(bo->pitch*kgem_aligned_height(kgem, height, bo->tiling) <= kgem_bo_size(bo));
+				assert_tiling(kgem, bo);
+				bo->refcnt = 1;
+				return bo;
 			}
 		}
-
-		bucket++;
-		goto search_again;
-	}
-
-	if (!exact) { /* allow an active near-miss? */
-		i = tiling;
-		while (--i >= 0) {
+	} else if (!exact) { /* allow an active near-miss? */
+		for (i = tiling; i >= I915_TILING_NONE; i--) {
 			tiled_height = kgem_surface_size(kgem, kgem->has_relaxed_fencing, flags,
 							 width, height, bpp, tiling, &pitch);
 			cache = active(kgem, tiled_height / PAGE_SIZE, i);
@@ -4854,6 +4921,11 @@ search_again:
 				return bo;
 			}
 		}
+	}
+
+	if (--retry) {
+		bucket++;
+		goto search_active;
 	}
 
 skip_active_search:
@@ -4916,16 +4988,60 @@ search_inactive:
 		return bo;
 	}
 
-	if (flags & CREATE_INACTIVE &&
-	    !list_is_empty(&kgem->active[bucket][tiling]) &&
-	    __kgem_throttle_retire(kgem, flags)) {
-		flags &= ~CREATE_INACTIVE;
-		goto search_inactive;
+	if ((flags & CREATE_NO_RETIRE) == 0) {
+		list_for_each_entry_reverse(bo, &kgem->active[bucket][tiling], list) {
+			if (bo->exec)
+				break;
+
+			if (size > num_pages(bo))
+				continue;
+
+			if (__kgem_busy(kgem, bo->handle)) {
+				if (flags & CREATE_NO_THROTTLE)
+					goto no_retire;
+
+				do {
+					if (!kgem->need_throttle) {
+						DBG(("%s: not throttling for active handle=%d\n", __FUNCTION__, bo->handle));
+						goto no_retire;
+					}
+
+					__kgem_throttle(kgem, false);
+				} while (__kgem_busy(kgem, bo->handle));
+			}
+
+			DBG(("%s: flushed active handle=%d\n", __FUNCTION__, bo->handle));
+
+			kgem_bo_remove_from_active(kgem, bo);
+			__kgem_bo_clear_busy(bo);
+
+			if (tiling != I915_TILING_NONE && bo->pitch != pitch) {
+				if (!gem_set_tiling(kgem->fd, bo->handle, tiling, pitch)) {
+					kgem_bo_free(kgem, bo);
+					goto no_retire;
+				}
+			}
+
+			bo->pitch = pitch;
+			bo->unique_id = kgem_get_unique_id(kgem);
+			bo->delta = 0;
+			DBG(("  2:from active: pitch=%d, tiling=%d, handle=%d, id=%d\n",
+			     bo->pitch, bo->tiling, bo->handle, bo->unique_id));
+			assert(bo->pitch*kgem_aligned_height(kgem, height, bo->tiling) <= kgem_bo_size(bo));
+			assert_tiling(kgem, bo);
+			bo->refcnt = 1;
+
+			if (flags & CREATE_SCANOUT)
+				__kgem_bo_make_scanout(kgem, bo, width, height);
+
+			return bo;
+		}
+no_retire:
+		flags |= CREATE_NO_RETIRE;
 	}
 
 	if (--retry) {
 		bucket++;
-		flags &= ~CREATE_INACTIVE;
 		goto search_inactive;
 	}
 
@@ -5112,9 +5228,10 @@ static void __kgem_flush(struct kgem *kgem, struct kgem_bo *bo)
 
 void kgem_scanout_flush(struct kgem *kgem, struct kgem_bo *bo)
 {
-	kgem_bo_submit(kgem, bo);
 	if (!bo->needs_flush)
 		return;
+
+	kgem_bo_submit(kgem, bo);
 
 	/* If the kernel fails to emit the flush, then it will be forced when
 	 * we assume direct access. And as the usual failure is EIO, we do
@@ -5132,9 +5249,55 @@ void kgem_scanout_flush(struct kgem *kgem, struct kgem_bo *bo)
 	bo->domain = DOMAIN_NONE;
 }
 
+inline static bool nearly_idle(struct kgem *kgem)
+{
+	int ring = kgem->ring == KGEM_BLT;
+
+	if (list_is_singular(&kgem->requests[ring]))
+		return true;
+
+	return __kgem_ring_is_idle(kgem, ring);
+}
+
 inline static bool needs_semaphore(struct kgem *kgem, struct kgem_bo *bo)
 {
-	return kgem->nreloc && bo->rq && RQ_RING(bo->rq) != kgem->ring;
+	if (kgem->needs_semaphore)
+		return false;
+
+	if (bo->rq == NULL || RQ_RING(bo->rq) == kgem->ring)
+		return false;
+
+	kgem->needs_semaphore = true;
+	return true;
+}
+
+inline static bool needs_reservation(struct kgem *kgem, struct kgem_bo *bo)
+{
+	if (kgem->needs_reservation)
+		return false;
+
+	if (bo->presumed_offset)
+		return false;
+
+	kgem->needs_reservation = true;
+	return nearly_idle(kgem);
+}
+
+inline static bool needs_batch_flush(struct kgem *kgem, struct kgem_bo *bo)
+{
+	bool flush = false;
+
+	if (needs_semaphore(kgem, bo)) {
+		DBG(("%s: flushing before handle=%d for required semaphore\n", __FUNCTION__, bo->handle));
+		flush = true;
+	}
+
+	if (needs_reservation(kgem, bo)) {
+		DBG(("%s: flushing before handle=%d for new reservation\n", __FUNCTION__, bo->handle));
+		flush = true;
+	}
+
+	return kgem->nreloc ? flush : false;
 }
 
 static bool aperture_check(struct kgem *kgem, unsigned num_pages)
@@ -5204,8 +5367,7 @@ bool kgem_check_bo(struct kgem *kgem, ...)
 		if (bo->exec)
 			continue;
 
-		if (needs_semaphore(kgem, bo)) {
-			DBG(("%s: flushing for required semaphore\n", __FUNCTION__));
+		if (needs_batch_flush(kgem, bo)) {
 			va_end(ap);
 			return false;
 		}
@@ -5292,10 +5454,8 @@ bool kgem_check_bo_fenced(struct kgem *kgem, struct kgem_bo *bo)
 	if (kgem->nexec >= KGEM_EXEC_SIZE(kgem) - 1)
 		return false;
 
-	if (needs_semaphore(kgem, bo)) {
-		DBG(("%s: flushing for required semaphore\n", __FUNCTION__));
+	if (needs_batch_flush(kgem, bo))
 		return false;
-	}
 
 	assert_tiling(kgem, bo);
 	if (kgem->gen < 040 && bo->tiling != I915_TILING_NONE) {
@@ -5373,8 +5533,7 @@ bool kgem_check_many_bo_fenced(struct kgem *kgem, ...)
 			continue;
 		}
 
-		if (needs_semaphore(kgem, bo)) {
-			DBG(("%s: flushing for required semaphore\n", __FUNCTION__));
+		if (needs_batch_flush(kgem, bo)) {
 			va_end(ap);
 			return false;
 		}
@@ -5574,6 +5733,8 @@ uint64_t kgem_add_reloc64(struct kgem *kgem,
 		assert(bo->rq == MAKE_REQUEST(kgem->next_request, kgem->ring));
 		assert(RQ_RING(bo->rq) == kgem->ring);
 
+		DBG(("%s[%d] = (delta=%d, target handle=%d, presumed=%llx)\n",
+					__FUNCTION__, index, delta, bo->target_handle, (long long)bo->presumed_offset));
 		kgem->reloc[index].delta = delta;
 		kgem->reloc[index].target_handle = bo->target_handle;
 		kgem->reloc[index].presumed_offset = bo->presumed_offset;
@@ -5585,6 +5746,8 @@ uint64_t kgem_add_reloc64(struct kgem *kgem,
 
 		delta += bo->presumed_offset;
 	} else {
+		DBG(("%s[%d] = (delta=%d, target handle=batch)\n",
+					__FUNCTION__, index, delta));
 		kgem->reloc[index].delta = delta;
 		kgem->reloc[index].target_handle = ~0U;
 		kgem->reloc[index].presumed_offset = 0;
@@ -5765,6 +5928,7 @@ void *kgem_bo_map__gtt(struct kgem *kgem, struct kgem_bo *bo)
 	DBG(("%s: handle=%d, offset=%ld, tiling=%d, map=%p:%p, domain=%d\n", __FUNCTION__,
 	     bo->handle, (long)bo->presumed_offset, bo->tiling, bo->map__gtt, bo->map__cpu, bo->domain));
 
+	assert(bo->proxy == NULL);
 	assert(bo->exec == NULL);
 	assert(list_is_empty(&bo->list));
 	assert_tiling(kgem, bo);
@@ -5807,6 +5971,7 @@ void *kgem_bo_map__cpu(struct kgem *kgem, struct kgem_bo *bo)
 	assert(!bo->purged);
 	assert(list_is_empty(&bo->list));
 	assert(bo->proxy == NULL);
+	assert_tiling(kgem, bo);
 
 	if (bo->map__cpu)
 		return MAP(bo->map__cpu);
@@ -5925,6 +6090,8 @@ void kgem_bo_sync__cpu(struct kgem *kgem, struct kgem_bo *bo)
 {
 	DBG(("%s: handle=%d\n", __FUNCTION__, bo->handle));
 	assert(!bo->scanout);
+	assert_tiling(kgem, bo);
+
 	kgem_bo_submit(kgem, bo);
 
 	/* SHM pixmaps use proxies for subpage offsets */
@@ -5959,6 +6126,7 @@ void kgem_bo_sync__cpu_full(struct kgem *kgem, struct kgem_bo *bo, bool write)
 {
 	DBG(("%s: handle=%d\n", __FUNCTION__, bo->handle));
 	assert(!bo->scanout || !write);
+	assert_tiling(kgem, bo);
 
 	if (write || bo->needs_flush)
 		kgem_bo_submit(kgem, bo);
@@ -6004,6 +6172,7 @@ void kgem_bo_sync__gtt(struct kgem *kgem, struct kgem_bo *bo)
 	DBG(("%s: handle=%d\n", __FUNCTION__, bo->handle));
 	assert(bo->refcnt);
 	assert(bo->proxy == NULL);
+	assert_tiling(kgem, bo);
 
 	kgem_bo_submit(kgem, bo);
 
@@ -6934,6 +7103,8 @@ kgem_replace_bo(struct kgem *kgem,
 	dst->pitch = pitch;
 	dst->unique_id = kgem_get_unique_id(kgem);
 	dst->refcnt = 1;
+	assert(dst->tiling == I915_TILING_NONE);
+	assert(kgem_bo_can_blt(kgem, dst));
 
 	kgem_set_mode(kgem, KGEM_BLT, dst);
 	if (!kgem_check_batch(kgem, 10) ||

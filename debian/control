@@ -3,7 +3,11 @@ Section: x11
 Priority: optional
 Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
 XSBC-Original-Maintainer: Debian X Strike Force <debian-x@lists.debian.org>
-Uploaders: Drew Parsons <dparsons@debian.org>, Cyril Brulebois <kibi@debian.org>, Michael Stapelberg <stapelberg@debian.org>, maximilian attems <maks@debian.org>, Vincent Cheng <vcheng@debian.org>
+Uploaders:
+ Drew Parsons <dparsons@debian.org>,
+ Michael Stapelberg <stapelberg@debian.org>,
+ maximilian attems <maks@debian.org>,
+ Vincent Cheng <vcheng@debian.org>,
 Build-Depends:
  debhelper (>= 8),
  dh-autoreconf,

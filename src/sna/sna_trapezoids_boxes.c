@@ -73,9 +73,9 @@ static void _assert_pixmap_contains_box(PixmapPtr pixmap, BoxPtr box, const char
 
 static void apply_damage(struct sna_composite_op *op, RegionPtr region)
 {
-	DBG(("%s: damage=%p, region=%ldx[(%d, %d), (%d, %d)]\n",
+	DBG(("%s: damage=%p, region=%dx[(%d, %d), (%d, %d)]\n",
 	     __FUNCTION__, op->damage,
-	     (long)REGION_NUM_RECTS(region),
+	     region_num_rects(region),
 	     region->extents.x1, region->extents.y1,
 	     region->extents.x2, region->extents.y2));
 
@@ -202,7 +202,7 @@ composite_aligned_boxes(struct sna *sna,
 				   clip.extents.y2 - clip.extents.y1,
 				   COMPOSITE_PARTIAL, memset(&tmp, 0, sizeof(tmp)))) {
 		unsigned int flags;
-		pixman_box16_t *b;
+		const pixman_box16_t *b;
 		int i, count;
 
 		DBG(("%s: composite render op not supported\n",
@@ -237,8 +237,8 @@ composite_aligned_boxes(struct sna *sna,
 			RegionIntersect(&region, &region, &clip);
 
 			if (sigtrap_get() == 0) {
-				b = REGION_RECTS(&region);
-				count = REGION_NUM_RECTS(&region);
+				b = region_rects(&region);
+				count = region_num_rects(&region);
 				for (i = 0; i < count; i++) {
 					fbComposite(op, src, NULL, dst,
 						    src_x + b[i].x1 - boxes[0].x1,
@@ -254,8 +254,8 @@ composite_aligned_boxes(struct sna *sna,
 			for (n = 0; n < num_boxes; n++) {
 				pixman_region_init_rects(&region, &boxes[n], 1);
 				RegionIntersect(&region, &region, &clip);
-				b = REGION_RECTS(&region);
-				count = REGION_NUM_RECTS(&region);
+				b = region_rects(&region);
+				count = region_num_rects(&region);
 				if (sigtrap_get() == 0) {
 					for (i = 0; i < count; i++) {
 						fbComposite(op, src, NULL, dst,
@@ -280,10 +280,10 @@ composite_aligned_boxes(struct sna *sna,
 	    num_boxes == 1) {
 		pixman_region_init_rects(&region, boxes, num_boxes);
 		RegionIntersect(&region, &region, &clip);
-		if (REGION_NUM_RECTS(&region)) {
+		if (region_num_rects(&region)) {
 			tmp.boxes(sna, &tmp,
-				  REGION_RECTS(&region),
-				  REGION_NUM_RECTS(&region));
+				  region_rects(&region),
+				  region_num_rects(&region));
 			apply_damage(&tmp, &region);
 		}
 		pixman_region_fini(&region);
@@ -291,10 +291,10 @@ composite_aligned_boxes(struct sna *sna,
 		for (n = 0; n < num_boxes; n++) {
 			pixman_region_init_rects(&region, &boxes[n], 1);
 			RegionIntersect(&region, &region, &clip);
-			if (REGION_NUM_RECTS(&region)) {
+			if (region_num_rects(&region)) {
 				tmp.boxes(sna, &tmp,
-					  REGION_RECTS(&region),
-					  REGION_NUM_RECTS(&region));
+					  region_rects(&region),
+					  region_num_rects(&region));
 				apply_damage(&tmp, &region);
 			}
 			pixman_region_fini(&region);
@@ -330,10 +330,10 @@ composite_unaligned_box(struct sna *sna,
 
 		pixman_region_init_rects(&region, box, 1);
 		RegionIntersect(&region, &region, clip);
-		if (REGION_NUM_RECTS(&region))
+		if (region_num_rects(&region))
 			tmp->boxes(sna, tmp,
-				   REGION_RECTS(&region),
-				   REGION_NUM_RECTS(&region),
+				   region_rects(&region),
+				   region_num_rects(&region),
 				   opacity);
 		pixman_region_fini(&region);
 	} else
@@ -472,7 +472,7 @@ composite_unaligned_trap(struct sna *sna,
 
 			pixman_region_init_rects(&region, &box, 1);
 			RegionIntersect(&region, &region, clip);
-			if (REGION_NUM_RECTS(&region))
+			if (region_num_rects(&region))
 				apply_damage(&tmp->base, &region);
 			RegionUninit(&region);
 		} else
@@ -681,8 +681,8 @@ pixsolid_opacity(struct pixman_inplace *pi,
 		*pi->bits = pi->color;
 	else
 		*pi->bits = mul_4x8_8(pi->color, opacity);
-	pixman_image_composite(pi->op, pi->source, NULL, pi->image,
-			       0, 0, 0, 0, pi->dx + x, pi->dy + y, w, h);
+	sna_image_composite(pi->op, pi->source, NULL, pi->image,
+			    0, 0, 0, 0, pi->dx + x, pi->dy + y, w, h);
 }
 
 static void
@@ -771,7 +771,7 @@ composite_unaligned_boxes_inplace__solid(struct sna *sna,
 	     __FUNCTION__, n));
 	do {
 		RegionRec clip;
-		BoxPtr extents;
+		const BoxRec *extents;
 		int count;
 
 		clip.extents.x1 = pixman_fixed_to_int(t->left.p1.x);
@@ -797,8 +797,8 @@ composite_unaligned_boxes_inplace__solid(struct sna *sna,
 
 		if (sigtrap_get() == 0) {
 			RegionTranslate(&clip, dx, dy);
-			count = REGION_NUM_RECTS(&clip);
-			extents = REGION_RECTS(&clip);
+			count = region_num_rects(&clip);
+			extents = region_rects(&clip);
 			while (count--) {
 				int16_t y1 = dy + pixman_fixed_to_int(t->top);
 				uint16_t fy1 = pixman_fixed_frac(t->top);
@@ -855,7 +855,7 @@ pixman:
 	do {
 		struct pixman_inplace pi;
 		RegionRec clip;
-		BoxPtr extents;
+		const BoxRec *extents;
 		int count;
 
 		clip.extents.x1 = pixman_fixed_to_int(t->left.p1.x);
@@ -887,8 +887,8 @@ pixman:
 		pi.op = op;
 
 		if (sigtrap_get() == 0) {
-			count = REGION_NUM_RECTS(&clip);
-			extents = REGION_RECTS(&clip);
+			count = region_num_rects(&clip);
+			extents = region_rects(&clip);
 			while (count--) {
 				int16_t y1 = pixman_fixed_to_int(t->top);
 				uint16_t fy1 = pixman_fixed_frac(t->top);
@@ -1071,7 +1071,7 @@ composite_unaligned_boxes_inplace(struct sna *sna,
 	src_y -= pixman_fixed_to_int(t[0].left.p1.y);
 	do {
 		RegionRec clip;
-		BoxPtr extents;
+		const BoxRec *extents;
 		int count;
 		int num_threads;
 
@@ -1128,8 +1128,8 @@ composite_unaligned_boxes_inplace(struct sna *sna,
 			pi.op = op;
 
 			if (sigtrap_get() == 0) {
-				count = REGION_NUM_RECTS(&clip);
-				extents = REGION_RECTS(&clip);
+				count = region_num_rects(&clip);
+				extents = region_rects(&clip);
 				while (count--) {
 					int16_t y1 = pixman_fixed_to_int(t->top);
 					uint16_t fy1 = pixman_fixed_frac(t->top);

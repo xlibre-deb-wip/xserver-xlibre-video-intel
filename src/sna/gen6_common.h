@@ -36,7 +36,7 @@
 static inline bool is_uncached(struct sna *sna,
 			       struct kgem_bo *bo)
 {
-	return bo->scanout && !sna->kgem.has_wt;
+	return bo->io || (bo->scanout && !sna->kgem.has_wt);
 }
 
 inline static bool can_switch_to_blt(struct sna *sna,
@@ -56,6 +56,9 @@ inline static bool can_switch_to_blt(struct sna *sna,
 		return true;
 
 	if (bo && RQ_IS_BLT(bo->rq))
+		return true;
+
+	if (sna->render_state.gt < 2)
 		return true;
 
 	return kgem_ring_is_idle(&sna->kgem, KGEM_BLT);
