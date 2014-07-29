@@ -1,3 +1,11 @@
+xserver-xorg-video-intel (2:2.99.914-1~exp1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge from released experimental.
+  * Add patch to fix broken flushing with dri3/sna.
+    - dri3-flush-broken.patch (fd.org #81551)
+
+ -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Tue, 29 Jul 2014 10:36:36 +0200
+
 xserver-xorg-video-intel (2:2.99.914-1~exp1) experimental; urgency=medium
 
   * New upstream prerelease 2.99.914.
