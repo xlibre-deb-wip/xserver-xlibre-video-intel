@@ -1,0 +1,95 @@
+commit 43ad5dbc60e1f50a9cdcfc035bc271f1f28438c2
+Author: Rodrigo Vivi <rodrigo.vivi@intel.com>
+Date:   Tue Jun 24 03:14:54 2014 -0700
+
+    Add marketing names for Broadwell
+    
+    Even the unknown/reserved ones will stay with HD Graphics.
+    
+    v2: Add missing names to intel.man and README files as well. (Chris)
+    
+    Cc: Chris Wilson <chris@chris-wilson.co.uk>
+    Signed-off-by: Rodrigo Vivi <rodrigo.vivi@intel.com>
+
+diff --git a/README b/README
+index dc64ff7..386e07d 100644
+--- a/README
++++ b/README
+@@ -15,6 +15,9 @@ Intel graphics chipsets including:
+ 	G/Q33,G/Q35,G41,G/Q43,G/GM/Q45
+ 	PineView-M (Atom N400 series)
+ 	PineView-D (Atom D400/D500 series)
++	Intel(R) HD Graphics: 2000-6000,
++	Intel(R) Iris(TM) Graphics: 5100/6100, and
++	Intel(R) Iris(TM) Pro Graphics: 5200/6200/P6300.
+ 
+ Where to get more information about the driver
+ ----------------------------------------------
+diff --git a/man/intel.man b/man/intel.man
+index 9deac41..917f7f8 100644
+--- a/man/intel.man
++++ b/man/intel.man
+@@ -25,8 +25,11 @@ the 830M and later.
+ .B intel
+ supports the i810, i810-DC100, i810e, i815, i830M, 845G, 852GM, 855GM,
+ 865G, 915G, 915GM, 945G, 945GM, 965G, 965Q, 946GZ, 965GM, 945GME,
+-G33, Q33, Q35, G35, GM45, G45, Q45, G43, G41 chipsets, and Pineview-M in
+-Atom N400 series, Pineview-D in Atom D400/D500 series.
++G33, Q33, Q35, G35, GM45, G45, Q45, G43, G41 chipsets, Pineview-M in
++Atom N400 series, Pineview-D in Atom D400/D500 series,
++Intel(R) HD Graphics: 2000-6000,
++Intel(R) Iris(TM) Graphics: 5100/6100, and
++Intel(R) Iris(TM) Pro Graphics: 5200/6200/P6300.
+ 
+ .SH CONFIGURATION DETAILS
+ Please refer to __xconfigfile__(__filemansuffix__) for general configuration
+diff --git a/src/intel_module.c b/src/intel_module.c
+index a47427a..35c24a2 100644
+--- a/src/intel_module.c
++++ b/src/intel_module.c
+@@ -224,6 +224,32 @@ static const SymTabRec intel_chipsets[] = {
+ 	{0x0155, "HD Graphics"},
+ 	{0x0157, "HD Graphics"},
+ 
++	/* Broadwell Marketing names */
++	{0x1602, "HD graphics"},
++	{0x1606, "HD graphics"},
++	{0x160B, "HD graphics"},
++	{0x160A, "HD graphics"},
++	{0x160D, "HD graphics"},
++	{0x160E, "HD graphics"},
++	{0x1612, "HD graphics 5600"},
++	{0x1616, "HD graphics 5500"},
++	{0x161B, "HD graphics"},
++	{0x161A, "HD graphics"},
++	{0x161D, "HD graphics"},
++	{0x161E, "HD graphics 5300"},
++	{0x1622, "Iris Pro graphics 6200"},
++	{0x1626, "HD graphics 6000"},
++	{0x162B, "Iris graphics 6100"},
++	{0x162A, "Iris Pro graphics P6300"},
++	{0x162D, "HD graphics"},
++	{0x162E, "HD graphics"},
++	{0x1632, "HD graphics"},
++	{0x1636, "HD graphics"},
++	{0x163B, "HD graphics"},
++	{0x163A, "HD graphics"},
++	{0x163D, "HD graphics"},
++	{0x163E, "HD graphics"},
++
+ 	{-1, NULL} /* Sentinel */
+ };
+ 
+@@ -407,9 +433,9 @@ static void intel_identify(int flags)
+ 	if (unique != stack)
+ 		free(unique);
+ 
+-	xf86Msg(X_INFO, INTEL_NAME ": Driver for Intel(R) HD Graphics: 2000-5000\n");
+-	xf86Msg(X_INFO, INTEL_NAME ": Driver for Intel(R) Iris(TM) Graphics: 5100\n");
+-	xf86Msg(X_INFO, INTEL_NAME ": Driver for Intel(R) Iris(TM) Pro Graphics: 5200\n");
++	xf86Msg(X_INFO, INTEL_NAME ": Driver for Intel(R) HD Graphics: 2000-6000\n");
++	xf86Msg(X_INFO, INTEL_NAME ": Driver for Intel(R) Iris(TM) Graphics: 5100, 6100\n");
++	xf86Msg(X_INFO, INTEL_NAME ": Driver for Intel(R) Iris(TM) Pro Graphics: 5200, 6200, P6300\n");
+ }
+ 
+ static Bool intel_driver_func(ScrnInfoPtr pScrn,

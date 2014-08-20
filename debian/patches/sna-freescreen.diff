@@ -1,0 +1,19 @@
+commit f5469681b620d9d6ccaf53e92ed31f931cb03b0d
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Aug 18 14:37:44 2014 +0100
+
+    sna: Be defensive during FreeScreen()
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+--- a/src/sna/sna_driver.c
++++ b/src/sna/sna_driver.c
+@@ -1085,7 +1085,7 @@
+ 	struct sna *sna = to_sna(scrn);
+ 
+ 	DBG(("%s\n", __FUNCTION__));
+-	if ((uintptr_t)sna & 1)
++	if (sna == NULL || (uintptr_t)sna & 1) /* beware thieves */
+ 		return;
+ 
+ 	scrn->driverPrivate = (void *)((uintptr_t)sna->info | 1);

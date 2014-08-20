@@ -1,3 +1,10 @@
 # XMir series
-
 xmir.patch
+uxa-bdw-0.diff
+uxa-bdw-1.diff
+uxa-bdw-2.diff
+add-pci-ids-crv.diff
+add-pci-ids-brw.diff
+add-names-brw.diff
+
+sna-freescreen.diff

@@ -1,0 +1,42 @@
+commit 78053bb84217e842615669dfa2f1e7e971ce9860
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 24 20:51:54 2014 +0100
+
+    Add reserved PCD IDs for Broadwell
+    
+    Updating using kernel commit fb7023e0e248a33cb00d0a9cdce0bcedaa1ad284
+    Author: Rodrigo Vivi <rodrigo.vivi@intel.com>
+    Date:   Tue Jun 10 10:09:52 2014 -0700
+    
+        drm/i915: BDW: Adding Reserved PCI IDs.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+diff --git a/src/i915_pciids.h b/src/i915_pciids.h
+index 0572035..a70d456 100644
+--- a/src/i915_pciids.h
++++ b/src/i915_pciids.h
+@@ -237,13 +237,21 @@
+ #define INTEL_BDW_GT3D_IDS(info) \
+ 	_INTEL_BDW_D_IDS(3, info)
+ 
++#define INTEL_BDW_RSVDM_IDS(info) \
++	_INTEL_BDW_M_IDS(4, info)
++
++#define INTEL_BDW_RSVDD_IDS(info) \
++	_INTEL_BDW_D_IDS(4, info)
++
+ #define INTEL_BDW_M_IDS(info) \
+ 	INTEL_BDW_GT12M_IDS(info), \
+-	INTEL_BDW_GT3M_IDS(info)
++	INTEL_BDW_GT3M_IDS(info), \
++	INTEL_BDW_RSVDM_IDS(info)
+ 
+ #define INTEL_BDW_D_IDS(info) \
+ 	INTEL_BDW_GT12D_IDS(info), \
+-	INTEL_BDW_GT3D_IDS(info)
++	INTEL_BDW_GT3D_IDS(info), \
++	INTEL_BDW_RSVDD_IDS(info)
+ 
+ #define INTEL_CHV_IDS(info) \
+ 	INTEL_VGA_DEVICE(0x22b0, info), \

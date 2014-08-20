@@ -1,3 +1,19 @@
+xserver-xorg-video-intel (2:2.99.910-0ubuntu1.1) UNRELEASED; urgency=medium
+
+  * Backport fixes from upstream driver for fglrx and broadwell. (LP: #1359105)
+  * Add more pci-ids for broadwell.
+    - add-pci-ids-crv.diff
+    - add-pci-ids-brw.diff
+    - add-names-brw.diff
+  * Enable basic UXA blit acceleration for broadwell.
+    - uxa-bdw-0.diff
+    - uxa-bdw-1.diff
+    - uxa-bdw-2.diff
+  * Fix a crash in FreeScreen with sna when used with fglrx.
+    - sna-freescreen.diff
+
+ -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Wed, 20 Aug 2014 10:11:21 +0200
+
 xserver-xorg-video-intel (2:2.99.910-0ubuntu1) trusty; urgency=medium
 
   * Merge from Debian git. (LP: #1277143)
