@@ -121,7 +121,7 @@ enum {
 
 struct kgem {
 	int fd;
-	int wedged;
+	unsigned wedged;
 	unsigned gen;
 
 	uint32_t unique_id;
@@ -195,7 +195,7 @@ struct kgem {
 
 	uint16_t fence_max;
 	uint16_t half_cpu_cache_pages;
-	uint32_t aperture_total, aperture_high, aperture_low, aperture_mappable;
+	uint32_t aperture_total, aperture_high, aperture_low, aperture_mappable, aperture_fenceable;
 	uint32_t aperture, aperture_fenced, aperture_max_fence;
 	uint32_t max_upload_tile_size, max_copy_tile_size;
 	uint32_t max_gpu_size, max_cpu_size;
@@ -273,6 +273,7 @@ unsigned kgem_can_create_2d(struct kgem *kgem, int width, int height, int depth)
 #define KGEM_CAN_CREATE_CPU	0x2
 #define KGEM_CAN_CREATE_LARGE	0x4
 #define KGEM_CAN_CREATE_GTT	0x8
+#define KGEM_CAN_CREATE_TILED	0x10
 
 bool kgem_check_surface_size(struct kgem *kgem,
 			     uint32_t width,
@@ -761,6 +762,7 @@ struct kgem_bo *kgem_create_buffer_2d(struct kgem *kgem,
 bool kgem_buffer_is_inplace(struct kgem_bo *bo);
 void kgem_buffer_read_sync(struct kgem *kgem, struct kgem_bo *bo);
 
+int kgem_is_wedged(struct kgem *kgem);
 void kgem_throttle(struct kgem *kgem);
 #define MAX_INACTIVE_TIME 10
 bool kgem_expire_cache(struct kgem *kgem);

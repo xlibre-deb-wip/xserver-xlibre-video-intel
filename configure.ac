@@ -23,7 +23,7 @@
 # Initialize Autoconf
 AC_PREREQ([2.60])
 AC_INIT([xf86-video-intel],
-        [2.99.914],
+        [2.99.916],
         [https://bugs.freedesktop.org/enter_bug.cgi?product=xorg],
         [xf86-video-intel])
 AC_CONFIG_SRCDIR([Makefile.am])
@@ -61,6 +61,9 @@ m4_ifndef([XORG_DRIVER_CHECK_EXT],
 AC_DISABLE_STATIC
 AC_PROG_LIBTOOL
 AC_SYS_LARGEFILE
+
+# Check for common libc routines redefined by os.h
+AC_CHECK_FUNCS([strlcpy strlcat strndup], [], [])
 
 # Platform specific settings
 case $host_os in
@@ -202,8 +205,26 @@ if test "x$UDEV" != "xno"; then
 	fi
 fi
 
-PKG_CHECK_MODULES(X11, [x11 xrender xrandr xext xfixes pixman-1 libpng], [x11="yes"], [x11="no"])
+PKG_CHECK_MODULES(X11, [x11 xrender xrandr xext xfixes cairo cairo-xlib-xrender pixman-1 libpng], [x11="yes"], [x11="no"])
 AM_CONDITIONAL(HAVE_X11, test "x$x11" = "xyes")
+
+cpuid="yes"
+AC_TRY_LINK([
+	#include <cpuid.h>
+	#include <stddef.h>
+	],
+	[
+	int eax, ebx, ecx, edx;
+	if (__get_cpuid_max(0, NULL) < 4)
+		return 0;
+	__cpuid_count(4, 0, eax, ebx, ecx, edx);
+	],
+	[cpuid="yes"],
+	[cpuid="no"]
+)
+if test "x$cpuid" = "xyes"; then
+	AC_DEFINE(HAVE_CPUID_H,1,[Found a useable cpuid.h])
+fi
 
 shm=yes
 AC_CHECK_HEADERS([sys/ipc.h sys/ipc.h], [], [shm="no"])
@@ -246,10 +267,12 @@ if test "x$shm" = "xyes"; then
 		  AC_MSG_RESULT(yes),
 		  AC_MSG_RESULT(no),
 		  AC_MSG_RESULT(assuming no))
+	AC_DEFINE([HAVE_MIT_SHM], 1, [Define to 1 if MIT-SHM is available])
 fi
 
 PKG_CHECK_MODULES(X11_DRI3, [xcb-dri3 xcb-sync xcb-present x11-xcb xshmfence x11 xrender xext libdrm], [x11_dri3="yes"], [x11_dri3="no"])
 AM_CONDITIONAL(X11_DRI3, test "x$x11_dri3" = "xyes" -a "x$shm" = "xyes")
+AM_CONDITIONAL(X11_SHM, test "x$shm" = "xyes")
 
 AC_ARG_ENABLE(tools,
               AS_HELP_STRING([--disable-tools],
@@ -646,7 +669,7 @@ fi
 
 AC_ARG_WITH(default-accel,
 	    AS_HELP_STRING([--with-default-accel],
-			   [Select the default acceleration method [default=sna if enabled, otherwise uxa]]),
+			   [Select the default acceleration method out of glamor, none, sna, or uxa  [default is sna if enabled, otherwise uxa]]),
 			   [accel="$withval"],
 			   [accel="auto"])
 if test "x$accel" = "xyes"; then
@@ -698,7 +721,11 @@ fi
 
 if test "x$have_accel" = "xnone"; then
 	if test "x$KMS" = "xyes"; then
-		AC_MSG_ERROR([Invalid default acceleration option])
+		if test "x$SNA" != "xno" -o "x$UXA" != "xno"; then
+			AC_DEFINE(DEFAULT_ACCEL_METHOD, NOACCEL, [Default acceleration method])
+		else
+			AC_MSG_ERROR([Invalid default acceleration option])
+		fi
 	fi
 	accel="none"
 fi
@@ -736,17 +763,6 @@ AM_CONDITIONAL(USE_CREATE2, test "x$CREATE2" = "xyes")
 if test "x$CREATE2" = "xyes"; then
 	AC_DEFINE(USE_CREATE2,1,[Assume "create2" support])
 	xp_msg="$xp_msg create2"
-fi
-
-AC_ARG_ENABLE(rotation,
-	      AS_HELP_STRING([--enable-rotation],
-			     [Enable use of native rotations (experimental) [default=no]]),
-	      [ROTATION="$enableval"],
-	      [ROTATION="no"])
-AM_CONDITIONAL(USE_ROTATION, test "x$ROTATION" = "xyes")
-if test "x$ROTATION" = "xyes"; then
-	AC_DEFINE(USE_ROTATION,1,[Assume "rotation" support])
-	xp_msg="$xp_msg rotation"
 fi
 
 AC_ARG_ENABLE(async-swap,
@@ -865,6 +881,11 @@ test -e `pwd $0`/README && cat `pwd $0`/README
 
 accel_msg=""
 if test "x$SNA" != "xno"; then
+	if test "$accel" = "none"; then
+		accel_msg="$accel_msg *none"
+	else
+		accel_msg="$accel_msg none"
+	fi
 	if test "$accel" = "sna"; then
 		accel_msg="$accel_msg *sna"
 	else
@@ -872,6 +893,13 @@ if test "x$SNA" != "xno"; then
 	fi
 fi
 if test "x$UXA" != "xno"; then
+	if test "x$SNA" = "xno"; then
+		if test "$accel" = "none"; then
+			accel_msg="$accel_msg *none"
+		else
+			accel_msg="$accel_msg none"
+		fi
+	fi
 	if test "$accel" = "uxa"; then
 		accel_msg="$accel_msg *uxa"
 	else

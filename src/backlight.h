@@ -44,6 +44,7 @@ struct backlight {
 
 enum backlight_type backlight_exists(const char *iface);
 
+void backlight_init(struct backlight *backlight);
 int backlight_open(struct backlight *backlight, char *iface);
 int backlight_set(struct backlight *backlight, int level);
 int backlight_get(struct backlight *backlight);

@@ -188,6 +188,8 @@ static inline WindowPtr get_root_window(ScreenPtr screen)
 
 static inline PixmapPtr get_window_pixmap(WindowPtr window)
 {
+	assert(window);
+	assert(window->drawable.type != DRAWABLE_PIXMAP);
 	return fbGetWindowPixmap(window);
 }
 
@@ -430,6 +432,7 @@ extern void sna_shadow_set_crtc(struct sna *sna, xf86CrtcPtr crtc, struct kgem_b
 extern void sna_shadow_unset_crtc(struct sna *sna, xf86CrtcPtr crtc);
 extern bool sna_pixmap_discard_shadow_damage(struct sna_pixmap *priv,
 					     const RegionRec *region);
+extern void sna_mode_set_primary(struct sna *sna);
 extern void sna_mode_close(struct sna *sna);
 extern void sna_mode_fini(struct sna *sna);
 
@@ -702,6 +705,7 @@ sna_pixmap_undo_cow(struct sna *sna, struct sna_pixmap *priv, unsigned flags);
 #define __MOVE_FORCE 0x40
 #define __MOVE_DRI 0x80
 #define __MOVE_SCANOUT 0x100
+#define __MOVE_TILED 0x200
 
 struct sna_pixmap *
 sna_pixmap_move_area_to_gpu(PixmapPtr pixmap, const BoxRec *box, unsigned int flags);
@@ -711,7 +715,7 @@ static inline struct sna_pixmap *
 sna_pixmap_force_to_gpu(PixmapPtr pixmap, unsigned flags)
 {
 	/* Unlike move-to-gpu, we ignore wedged and always create the GPU bo */
-	DBG(("%s(pixmap=%p, flags=%x)\n", __FUNCTION__, pixmap, flags));
+	DBG(("%s(pixmap=%ld, flags=%x)\n", __FUNCTION__, pixmap->drawable.serialNumber, flags));
 	return sna_pixmap_move_to_gpu(pixmap, flags | __MOVE_FORCE);
 }
 bool must_check _sna_pixmap_move_to_cpu(PixmapPtr pixmap, unsigned flags);
@@ -995,6 +999,8 @@ void sna_accel_block_handler(struct sna *sna, struct timeval **tv);
 void sna_accel_wakeup_handler(struct sna *sna);
 void sna_accel_watch_flush(struct sna *sna, int enable);
 void sna_accel_flush(struct sna *sna);
+void sna_accel_enter(struct sna *sna);
+void sna_accel_leave(struct sna *sna);
 void sna_accel_close(struct sna *sna);
 void sna_accel_free(struct sna *sna);
 

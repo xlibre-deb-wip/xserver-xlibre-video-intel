@@ -1421,6 +1421,10 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 	DBG(("%s: aperture mappable=%d [%d MiB]\n", __FUNCTION__,
 	     kgem->aperture_mappable, kgem->aperture_mappable / (1024*1024)));
 
+	kgem->aperture_fenceable = MIN(256*1024*1024, kgem->aperture_mappable);
+	DBG(("%s: aperture fenceable=%d [%d MiB]\n", __FUNCTION__,
+	     kgem->aperture_fenceable, kgem->aperture_fenceable / (1024*1024)));
+
 	kgem->buffer_size = 64 * 1024;
 	while (kgem->buffer_size < kgem->aperture_mappable >> 10)
 		kgem->buffer_size *= 2;
@@ -1466,7 +1470,7 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 	if (kgem->has_llc)
 		kgem->max_upload_tile_size = kgem->max_copy_tile_size;
 	else
-		kgem->max_upload_tile_size = kgem->aperture_mappable / 4;
+		kgem->max_upload_tile_size = kgem->aperture_fenceable / 4;
 	if (kgem->max_upload_tile_size > half_gpu_max)
 		kgem->max_upload_tile_size = half_gpu_max;
 	if (kgem->max_upload_tile_size > kgem->aperture_high/2)
@@ -1505,6 +1509,7 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 
 	/* Convert the aperture thresholds to pages */
 	kgem->aperture_mappable /= PAGE_SIZE;
+	kgem->aperture_fenceable /= PAGE_SIZE;
 	kgem->aperture_low /= PAGE_SIZE;
 	kgem->aperture_high /= PAGE_SIZE;
 	kgem->aperture_total /= PAGE_SIZE;
@@ -1650,15 +1655,21 @@ static uint32_t kgem_surface_size(struct kgem *kgem,
 
 	/* If it is too wide for the blitter, don't even bother.  */
 	if (tiling != I915_TILING_NONE) {
-		if (*pitch > 8192)
+		if (*pitch > 8192) {
+			DBG(("%s: too wide for tiled surface (pitch=%d, limit=%d)\n",
+			     __FUNCTION__, *pitch, 8192));
 			return 0;
+		}
 
 		for (size = tile_width; size < *pitch; size <<= 1)
 			;
 		*pitch = size;
 	} else {
-		if (*pitch >= 32768)
+		if (*pitch >= 32768) {
+			DBG(("%s: too wide for linear surface (pitch=%d, limit=%d)\n",
+			     __FUNCTION__, *pitch, 32767));
 			return 0;
+		}
 	}
 
 	size = *pitch * height;
@@ -3107,6 +3118,15 @@ out_16384:
 		if (bo)
 			return bo;
 
+		/* Nothing available for reuse, rely on the kernel wa */
+		if (kgem->has_pinned_batches) {
+			bo = kgem_create_linear(kgem, size, CREATE_CACHED | CREATE_TEMPORARY);
+			if (bo) {
+				kgem->batch_flags &= ~LOCAL_I915_EXEC_IS_PINNED;
+				return bo;
+			}
+		}
+
 		if (size < 16384) {
 			bo = list_first_entry(&kgem->pinned_batches[size > 4096],
 					      struct kgem_bo,
@@ -3198,7 +3218,8 @@ retry:
 	if (kgem_cleanup_cache(kgem))
 		goto retry;
 
-	return ret;
+	/* last gasp */
+	return do_ioctl(kgem->fd, DRM_IOCTL_I915_GEM_EXECBUFFER2, execbuf);
 }
 
 void _kgem_submit(struct kgem *kgem)
@@ -3378,7 +3399,7 @@ void _kgem_submit(struct kgem *kgem)
 	assert(kgem->next_request != NULL);
 }
 
-static void find_hang_state(struct kgem *kgem, char *path, int maxlen)
+static bool find_hang_state(struct kgem *kgem, char *path, int maxlen)
 {
 	int minor = kgem_get_minor(kgem);
 
@@ -3389,17 +3410,18 @@ static void find_hang_state(struct kgem *kgem, char *path, int maxlen)
 
 	snprintf(path, maxlen, "/sys/class/drm/card%d/error", minor);
 	if (access(path, R_OK) == 0)
-		return;
+		return true;
 
 	snprintf(path, maxlen, "/sys/kernel/debug/dri/%d/i915_error_state", minor);
 	if (access(path, R_OK) == 0)
-		return;
+		return true;
 
 	snprintf(path, maxlen, "/debug/dri/%d/i915_error_state", minor);
 	if (access(path, R_OK) == 0)
-		return;
+		return true;
 
 	path[0] = '\0';
+	return false;
 }
 
 void kgem_throttle(struct kgem *kgem)
@@ -3409,19 +3431,25 @@ void kgem_throttle(struct kgem *kgem)
 
 	kgem->wedged = __kgem_throttle(kgem, true);
 	if (kgem->wedged) {
+		static int once;
 		char path[128];
-
-		find_hang_state(kgem, path, sizeof(path));
 
 		xf86DrvMsg(kgem_get_screen_index(kgem), X_ERROR,
 			   "Detected a hung GPU, disabling acceleration.\n");
-		if (*path != '\0')
+		if (!once && find_hang_state(kgem, path, sizeof(path))) {
 			xf86DrvMsg(kgem_get_screen_index(kgem), X_ERROR,
 				   "When reporting this, please include %s and the full dmesg.\n",
 				   path);
+			once = 1;
+		}
 
 		kgem->need_throttle = false;
 	}
+}
+
+int kgem_is_wedged(struct kgem *kgem)
+{
+	return __kgem_throttle(kgem, true);
 }
 
 static void kgem_purge_cache(struct kgem *kgem)
@@ -4294,7 +4322,7 @@ unsigned kgem_can_create_2d(struct kgem *kgem,
 					 &pitch);
 		DBG(("%s: tiled[%d] size=%d\n", __FUNCTION__, tiling, size));
 		if (size > 0 && size <= kgem->max_gpu_size)
-			flags |= KGEM_CAN_CREATE_GPU;
+			flags |= KGEM_CAN_CREATE_GPU | KGEM_CAN_CREATE_TILED;
 		if (size > 0 && size <= PAGE_SIZE*kgem->aperture_mappable/4)
 			flags |= KGEM_CAN_CREATE_GTT;
 		if (size > PAGE_SIZE*kgem->aperture_mappable/4)
@@ -4311,8 +4339,8 @@ unsigned kgem_can_create_2d(struct kgem *kgem,
 			while (fence_size < size)
 				fence_size <<= 1;
 			if (fence_size > kgem->max_gpu_size)
-				flags &= ~KGEM_CAN_CREATE_GPU;
-			if (fence_size > PAGE_SIZE*kgem->aperture_mappable/4)
+				flags &= ~KGEM_CAN_CREATE_GPU | KGEM_CAN_CREATE_TILED;
+			if (fence_size > PAGE_SIZE*kgem->aperture_fenceable/4)
 				flags &= ~KGEM_CAN_CREATE_GTT;
 		}
 	}
@@ -4466,8 +4494,10 @@ struct kgem_bo *kgem_create_2d(struct kgem *kgem,
 
 	size = kgem_surface_size(kgem, kgem->has_relaxed_fencing, flags,
 				 width, height, bpp, tiling, &pitch);
-	if (size == 0)
+	if (size == 0) {
+		DBG(("%s: invalid surface size (too large?)\n", __FUNCTION__));
 		return NULL;
+	}
 
 	size /= PAGE_SIZE;
 	bucket = cache_bucket(size);
@@ -5046,17 +5076,22 @@ no_retire:
 	}
 
 create:
-	if (flags & CREATE_CACHED)
+	if (flags & CREATE_CACHED) {
+		DBG(("%s: no cached bo found, requested not to create a new bo\n", __FUNCTION__));
 		return NULL;
+	}
 
 	if (bucket >= NUM_CACHE_BUCKETS)
 		size = ALIGN(size, 1024);
 	handle = gem_create(kgem->fd, size);
-	if (handle == 0)
+	if (handle == 0) {
+		DBG(("%s: kernel allocation (gem_create) failure\n", __FUNCTION__));
 		return NULL;
+	}
 
 	bo = __kgem_bo_alloc(handle, size);
 	if (!bo) {
+		DBG(("%s: malloc failed\n", __FUNCTION__));
 		gem_close(kgem->fd, handle);
 		return NULL;
 	}
@@ -5070,6 +5105,7 @@ create:
 			__kgem_bo_make_scanout(kgem, bo, width, height);
 	} else {
 		if (flags & CREATE_EXACT) {
+			DBG(("%s: failed to set exact tiling (gem_set_tiling)\n", __FUNCTION__));
 			gem_close(kgem->fd, handle);
 			free(bo);
 			return NULL;
@@ -5426,7 +5462,7 @@ bool kgem_check_bo_fenced(struct kgem *kgem, struct kgem_bo *bo)
 				size = 3*kgem->aperture_fenced;
 				if (kgem->aperture_total == kgem->aperture_mappable)
 					size += kgem->aperture;
-				if (size > kgem->aperture_mappable &&
+				if (size > kgem->aperture_fenceable &&
 				    kgem_ring_is_idle(kgem, kgem->ring)) {
 					DBG(("%s: opportunistic fence flush\n", __FUNCTION__));
 					return false;
@@ -5441,9 +5477,9 @@ bool kgem_check_bo_fenced(struct kgem *kgem, struct kgem_bo *bo)
 				size = 2 * kgem->aperture_max_fence;
 			if (kgem->aperture_total == kgem->aperture_mappable)
 				size += kgem->aperture;
-			if (size > kgem->aperture_mappable) {
-				DBG(("%s: estimated fence space required %d (fenced=%d, max_fence=%d, aperture=%d) exceeds aperture %d\n",
-				     __FUNCTION__, size, kgem->aperture_fenced, kgem->aperture_max_fence, kgem->aperture, kgem->aperture_mappable));
+			if (size > kgem->aperture_fenceable) {
+				DBG(("%s: estimated fence space required %d (fenced=%d, max_fence=%d, aperture=%d) exceeds fenceable aperture %d\n",
+				     __FUNCTION__, size, kgem->aperture_fenced, kgem->aperture_max_fence, kgem->aperture, kgem->aperture_fenceable));
 				return false;
 			}
 		}
@@ -5470,7 +5506,7 @@ bool kgem_check_bo_fenced(struct kgem *kgem, struct kgem_bo *bo)
 			size = 3*kgem->aperture_fenced;
 			if (kgem->aperture_total == kgem->aperture_mappable)
 				size += kgem->aperture;
-			if (size > kgem->aperture_mappable &&
+			if (size > kgem->aperture_fenceable &&
 			    kgem_ring_is_idle(kgem, kgem->ring)) {
 				DBG(("%s: opportunistic fence flush\n", __FUNCTION__));
 				return false;
@@ -5485,9 +5521,9 @@ bool kgem_check_bo_fenced(struct kgem *kgem, struct kgem_bo *bo)
 			size = 2 * kgem->aperture_max_fence;
 		if (kgem->aperture_total == kgem->aperture_mappable)
 			size += kgem->aperture;
-		if (size > kgem->aperture_mappable) {
-			DBG(("%s: estimated fence space required %d (fenced=%d, max_fence=%d, aperture=%d) exceeds aperture %d\n",
-			     __FUNCTION__, size, kgem->aperture_fenced, kgem->aperture_max_fence, kgem->aperture, kgem->aperture_mappable));
+		if (size > kgem->aperture_fenceable) {
+			DBG(("%s: estimated fence space required %d (fenced=%d, max_fence=%d, aperture=%d) exceeds fenceable aperture %d\n",
+			     __FUNCTION__, size, kgem->aperture_fenced, kgem->aperture_max_fence, kgem->aperture, kgem->aperture_fenceable));
 			return false;
 		}
 	}
@@ -5564,7 +5600,7 @@ bool kgem_check_many_bo_fenced(struct kgem *kgem, ...)
 			size = 3*kgem->aperture_fenced;
 			if (kgem->aperture_total == kgem->aperture_mappable)
 				size += kgem->aperture;
-			if (size > kgem->aperture_mappable &&
+			if (size > kgem->aperture_fenceable &&
 			    kgem_ring_is_idle(kgem, kgem->ring)) {
 				DBG(("%s: opportunistic fence flush\n", __FUNCTION__));
 				return false;
@@ -5577,9 +5613,9 @@ bool kgem_check_many_bo_fenced(struct kgem *kgem, ...)
 			size = 2 * kgem->aperture_max_fence;
 		if (kgem->aperture_total == kgem->aperture_mappable)
 			size += kgem->aperture;
-		if (size > kgem->aperture_mappable) {
-			DBG(("%s: estimated fence space required %d (fenced=%d, max_fence=%d, aperture=%d) exceeds aperture %d\n",
-			     __FUNCTION__, size, kgem->aperture_fenced, kgem->aperture_max_fence, kgem->aperture, kgem->aperture_mappable));
+		if (size > kgem->aperture_fenceable) {
+			DBG(("%s: estimated fence space required %d (fenced=%d, max_fence=%d, aperture=%d) exceeds fenceable aperture %d\n",
+			     __FUNCTION__, size, kgem->aperture_fenced, kgem->aperture_max_fence, kgem->aperture, kgem->aperture_fenceable));
 			return false;
 		}
 	}
