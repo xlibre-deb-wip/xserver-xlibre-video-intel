@@ -1,9 +1,10 @@
-xserver-xorg-video-intel (2:2.99.916-1~exp1) UNRELEASED; urgency=medium
+xserver-xorg-video-intel (2:2.99.916-1~exp1) experimental; urgency=medium
 
   [ Vincent Cheng ]
   * New upstream prerelease 2.99.916.
     - sna: Add the current CRTC mode last (Closes: #750605)
   * Update debian/copyright. (Closes: #730643)
+  * Revert to source format 1.0.
 
   [ Laurent Bigonville ]
   * debian/xserver-xorg-video-intel.maintscript: Explicitly remove
