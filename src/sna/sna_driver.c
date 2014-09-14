@@ -272,6 +272,8 @@ static Bool sna_create_screen_resources(ScreenPtr screen)
 		return FALSE;
 	}
 
+	sna_mode_set_primary(sna);
+
 	/* Only preserve the fbcon, not any subsequent server regens */
 	if (serverGeneration == 1 && (sna->flags & SNA_IS_HOSTED) == 0)
 		sna_copy_fbcon(sna);
@@ -443,7 +445,13 @@ static Bool fb_supports_depth(int fd, int depth)
 {
 	struct drm_i915_gem_create create;
 	struct drm_mode_fb_cmd fb;
+	struct drm_mode_card_res res;
 	Bool ret;
+
+	memset(&res, 0, sizeof(res));
+	(void)drmIoctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &res);
+	if (res.count_crtcs == 0)
+		return TRUE;
 
 	VG_CLEAR(create);
 	create.handle = 0;
@@ -556,15 +564,19 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int probe)
 		return FALSE;
 
 	pEnt = xf86GetEntityInfo(scrn->entityList[0]);
-	if (pEnt == NULL)
+	if (pEnt == NULL) {
+		ERR(("%s: no EntityInfo found for scrn\n", __FUNCTION__));
 		return FALSE;
+	}
 
 	if (pEnt->location.type != BUS_PCI
 #ifdef XSERVER_PLATFORM_BUS
 	    && pEnt->location.type != BUS_PLATFORM
 #endif
-		)
+		) {
+		ERR(("%s: invalid EntityInfo found for scrn, location=%d\n", __FUNCTION__, pEnt->location.type));
 		return FALSE;
+	}
 
 	if (probe & PROBE_DETECT)
 		return TRUE;
@@ -892,10 +904,12 @@ static void sna_uevent_fini(struct sna *sna) { }
 static void sna_leave_vt(VT_FUNC_ARGS_DECL)
 {
 	SCRN_INFO_PTR(arg);
+	struct sna *sna = to_sna(scrn);
 
 	DBG(("%s\n", __FUNCTION__));
 
-	sna_mode_reset(to_sna(scrn));
+	sna_accel_leave(sna);
+	sna_mode_reset(sna);
 
 	if (intel_put_master(scrn))
 		xf86DrvMsg(scrn->scrnIndex, X_WARNING,
@@ -951,6 +965,7 @@ static Bool sna_late_close_screen(CLOSE_SCREEN_ARGS_DECL)
 	DBG(("%s\n", __FUNCTION__));
 
 	sna_accel_close(sna);
+	sna_video_close(sna);
 
 	depths = screen->allowedDepths;
 	for (d = 0; d < screen->numDepths; d++)
@@ -1178,8 +1193,8 @@ static void sna_free_screen(FREE_SCREEN_ARGS_DECL)
 	SCRN_INFO_PTR(arg);
 	struct sna *sna = to_sna(scrn);
 
-	DBG(("%s\n", __FUNCTION__));
-	if ((uintptr_t)sna & 1)
+	DBG(("%s [scrn=%p, sna=%p]\n", __FUNCTION__, scrn, sna));
+	if (sna == NULL || (uintptr_t)sna & 3) /* beware thieves */
 		return;
 
 	scrn->driverPrivate = (void *)((uintptr_t)sna->info | (sna->flags & SNA_IS_SLAVED) | 2);
@@ -1208,7 +1223,13 @@ static Bool sna_enter_vt(VT_FUNC_ARGS_DECL)
 		sna->flags &= ~SNA_REPROBE;
 	}
 
-	return sna_set_desired_mode(sna);
+	if (!sna_set_desired_mode(sna)) {
+		intel_put_master(scrn);
+		return FALSE;
+	}
+
+	sna_accel_enter(sna);
+	return TRUE;
 }
 
 static Bool sna_switch_mode(SWITCH_MODE_ARGS_DECL)

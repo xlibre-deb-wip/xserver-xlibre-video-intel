@@ -300,6 +300,9 @@ static bool add_fake_output(struct sna *sna, bool late)
 	}
 
 	sna->mode.num_fake++;
+	xf86DrvMsg(scrn->scrnIndex, X_INFO,
+		   "Enabled output %s\n",
+		   output->name);
 	return true;
 
 err:
@@ -328,8 +331,10 @@ bool sna_mode_fake_init(struct sna *sna, int num_fake)
 	if (num_fake == 0)
 		return true;
 
-	if (sna->mode.num_real_crtc == 0)
+	if (sna->mode.num_real_crtc == 0) {
 		xf86CrtcConfigInit(sna->scrn, &sna_mode_funcs);
+		xf86CrtcSetSizeRange(sna->scrn, 1, 1, INT16_MAX, INT16_MAX);
+	}
 
 	ret = true;
 	while (ret && num_fake--)
