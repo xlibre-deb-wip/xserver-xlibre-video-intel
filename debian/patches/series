@@ -8,3 +8,4 @@ add-pci-ids-brw.diff
 add-names-brw.diff
 
 sna-freescreen.diff
+disable-outputs-when-slaved.patch
