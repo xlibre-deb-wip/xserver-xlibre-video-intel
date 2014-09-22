@@ -1,3 +1,9 @@
+xserver-xorg-video-intel (2:2.99.914-1~exp1ubuntu3) utopic; urgency=medium
+
+  * Add patch to enable SNA with fglrx. (LP: #1359105)
+
+ -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Mon, 22 Sep 2014 15:29:05 +0200
+
 xserver-xorg-video-intel (2:2.99.914-1~exp1ubuntu2) utopic; urgency=medium
 
   * Rebuild for xorg 1.16 abi.
