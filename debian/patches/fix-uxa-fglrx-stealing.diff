@@ -1,0 +1,646 @@
+commit c139e2fb95f2db0b39aadcd58cc63b316a278951
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Oct 8 13:59:55 2014 +0100
+
+    intel: Store pointer to struct intel_device
+    
+    Beware the barbarians at the gate, who invade and steal your ScrnInfoPtr
+    and its Entity from underneath you. In some configurations, we lose
+    access to the struct intel_device stored on the Entity after
+    initialisation, causing havoc. Workaround this by storing the
+    intel_device that we open in our driverPrivate.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+--- a/src/intel_device.c
++++ b/src/intel_device.c
+@@ -65,9 +65,11 @@
+ #include "fd.h"
+ 
+ struct intel_device {
++	int idx;
+ 	char *master_node;
+ 	char *render_node;
+ 	int fd;
++	int device_id;
+ 	int open_count;
+ 	int master_count;
+ };
+@@ -97,7 +99,7 @@
+ 	if (dev == NULL)
+ 		return 0;
+ 
+-	return __intel_get_device_id(dev->fd);
++	return dev->device_id;
+ }
+ 
+ static inline struct intel_device *intel_device(ScrnInfoPtr scrn)
+@@ -108,11 +110,6 @@
+ 	return xf86GetEntityPrivate(scrn->entityList[0], intel_device_key)->ptr;
+ }
+ 
+-static inline void intel_set_device(ScrnInfoPtr scrn, struct intel_device *dev)
+-{
+-	xf86GetEntityPrivate(scrn->entityList[0], intel_device_key)->ptr = dev;
+-}
+-
+ static int is_i915_device(int fd)
+ {
+ 	drm_version_t version;
+@@ -511,6 +508,12 @@
+ 	if (geteuid() && is_master(fd))
+ 		master_count++;
+ 
++	if (pci)
++		dev->device_id = pci->device_id;
++	else
++		dev->device_id = __intel_get_device_id(fd);
++
++	dev->idx = entity_num;
+ 	dev->fd = fd;
+ 	dev->open_count = master_count;
+ 	dev->master_count = master_count;
+@@ -541,13 +544,15 @@
+ 	return dev->fd;
+ }
+ 
+-int intel_get_device(ScrnInfoPtr scrn)
++struct intel_device *intel_get_device(ScrnInfoPtr scrn, int *fd)
+ {
+ 	struct intel_device *dev;
+ 	int ret;
+ 
+ 	dev = intel_device(scrn);
+-	assert(dev && dev->fd != -1);
++	if (dev == NULL)
++		return NULL;
++	assert(dev->fd != -1);
+ 
+ 	if (dev->open_count++ == 0) {
+ 		drmSetVersion sv;
+@@ -575,16 +580,16 @@
+ 				   "[drm] failed to set drm interface version: %s [%d].\n",
+ 				   strerror(errno), errno);
+ 			dev->open_count--;
+-			return -1;
++			return NULL;
+ 		}
+ 	}
+ 
+-	return dev->fd;
++	*fd = dev->fd;
++	return dev;
+ }
+ 
+-const char *intel_get_client_name(ScrnInfoPtr scrn)
++const char *intel_get_client_name(struct intel_device *dev)
+ {
+-	struct intel_device *dev = intel_device(scrn);
+ 	assert(dev && dev->render_node);
+ 	return dev->render_node;
+ }
+@@ -600,14 +605,11 @@
+ 	return drmGetMagic(fd, &magic) == 0 && drmAuthMagic(dev->fd, magic) == 0;
+ }
+ 
+-int intel_get_client_fd(ScrnInfoPtr scrn)
++int intel_get_client_fd(struct intel_device *dev)
+ {
+-	struct intel_device *dev;
+ 	int fd = -1;
+ 
+-	dev = intel_device(scrn);
+-	assert(dev);
+-	assert(dev->fd != -1);
++	assert(dev && dev->fd != -1);
+ 	assert(dev->render_node);
+ 
+ #ifdef O_CLOEXEC
+@@ -628,16 +630,14 @@
+ 	return fd;
+ }
+ 
+-int intel_get_device_id(ScrnInfoPtr scrn)
++int intel_get_device_id(struct intel_device *dev)
+ {
+-	struct intel_device *dev = intel_device(scrn);
+ 	assert(dev && dev->fd != -1);
+-	return __intel_get_device_id(dev->fd);
++	return dev->device_id;
+ }
+ 
+-int intel_get_master(ScrnInfoPtr scrn)
++int intel_get_master(struct intel_device *dev)
+ {
+-	struct intel_device *dev = intel_device(scrn);
+ 	int ret;
+ 
+ 	assert(dev && dev->fd != -1);
+@@ -658,9 +658,8 @@
+ 	return ret;
+ }
+ 
+-int intel_put_master(ScrnInfoPtr scrn)
++int intel_put_master(struct intel_device *dev)
+ {
+-	struct intel_device *dev = intel_device(scrn);
+ 	int ret;
+ 
+ 	assert(dev && dev->fd != -1);
+@@ -676,10 +675,8 @@
+ 	return ret;
+ }
+ 
+-void intel_put_device(ScrnInfoPtr scrn)
++void intel_put_device(struct intel_device *dev)
+ {
+-	struct intel_device *dev = intel_device(scrn);
+-
+ 	assert(dev && dev->fd != -1);
+ 
+ 	assert(dev->open_count);
+@@ -687,7 +684,7 @@
+ 		return;
+ 
+ 	assert(!hosted());
+-	intel_set_device(scrn, NULL);
++	xf86GetEntityPrivate(dev->idx, intel_device_key)->ptr = NULL;
+ 
+ 	drmClose(dev->fd);
+ 	if (dev->render_node != dev->master_node)
+--- a/src/intel_driver.h
++++ b/src/intel_driver.h
+@@ -119,22 +119,24 @@
+ struct intel_device_info {
+ 	int gen;
+ };
++struct intel_device;
+ 
+ int intel_entity_get_devid(int index);
+ 
+-void intel_detect_chipset(ScrnInfoPtr scrn, EntityInfoPtr ent);
+-
+ int intel_open_device(int entity_num,
+ 		      const struct pci_device *pci,
+ 		      struct xf86_platform_device *dev);
+ int __intel_peek_fd(ScrnInfoPtr scrn);
+-int intel_get_device(ScrnInfoPtr scrn);
+-const char *intel_get_client_name(ScrnInfoPtr scrn);
+-int intel_get_client_fd(ScrnInfoPtr scrn);
+-int intel_get_device_id(ScrnInfoPtr scrn);
+-int intel_get_master(ScrnInfoPtr scrn);
+-int intel_put_master(ScrnInfoPtr scrn);
+-void intel_put_device(ScrnInfoPtr scrn);
++
++struct intel_device *intel_get_device(ScrnInfoPtr scrn, int *fd);
++const char *intel_get_client_name(struct intel_device *dev);
++int intel_get_client_fd(struct intel_device *dev);
++int intel_get_device_id(struct intel_device *dev);
++int intel_get_master(struct intel_device *dev);
++int intel_put_master(struct intel_device *dev);
++void intel_put_device(struct intel_device *dev);
++
++void intel_detect_chipset(ScrnInfoPtr scrn, struct intel_device *dev);
+ 
+ #define hosted() (xorgMir)
+ 
+--- a/src/intel_module.c
++++ b/src/intel_module.c
+@@ -318,27 +318,31 @@
+ };
+ 
+ void
+-intel_detect_chipset(ScrnInfoPtr scrn, EntityInfoPtr ent)
++intel_detect_chipset(ScrnInfoPtr scrn, struct intel_device *dev)
+ {
+-	MessageType from = X_PROBED;
+-	const char *name = NULL;
+ 	int devid;
++	const char *name = NULL;
+ 	int i;
+ 
+-	if (ent->device->chipID >= 0) {
+-		xf86DrvMsg(scrn->scrnIndex, from = X_CONFIG,
+-			   "ChipID override: 0x%04X\n",
+-			   ent->device->chipID);
+-		devid = ent->device->chipID;
+-	} else {
++	if (dev == NULL) {
++		EntityInfoPtr ent;
+ 		struct pci_device *pci;
+ 
+-		pci = xf86GetPciInfoForEntity(ent->index);
+-		if (pci != NULL)
+-			devid = pci->device_id;
+-		else
+-			devid = intel_get_device_id(scrn);
+-	}
++		ent = xf86GetEntityInfo(scrn->entityList[0]);
++		if (ent->device->chipID >= 0) {
++			xf86DrvMsg(scrn->scrnIndex, X_CONFIG,
++				   "ChipID override: 0x%04X\n",
++				   ent->device->chipID);
++			devid = ent->device->chipID;
++		} else {
++			pci = xf86GetPciInfoForEntity(ent->index);
++			if (pci)
++				devid = pci->device_id;
++			else
++				devid = ~0;
++		}
++	} else
++		devid = intel_get_device_id(dev);
+ 
+ 	for (i = 0; intel_chipsets[i].name != NULL; i++) {
+ 		if (devid == intel_chipsets[i].token) {
+@@ -358,7 +362,7 @@
+ 		}
+ 
+ 		if (gen) {
+-			xf86DrvMsg(scrn->scrnIndex, from,
++			xf86DrvMsg(scrn->scrnIndex, X_PROBED,
+ 				   "gen%d engineering sample\n", gen);
+ 		} else {
+ 			xf86DrvMsg(scrn->scrnIndex, X_WARNING,
+@@ -367,7 +371,7 @@
+ 
+ 		name = "unknown";
+ 	} else {
+-		xf86DrvMsg(scrn->scrnIndex, from,
++		xf86DrvMsg(scrn->scrnIndex, X_PROBED,
+ 			   "Integrated Graphics Chipset: Intel(R) %s\n",
+ 			   name);
+ 	}
+--- a/src/legacy/i810/i810_driver.c
++++ b/src/legacy/i810/i810_driver.c
+@@ -364,7 +364,7 @@
+     */
+    I810DoDDC(scrn, pI810->pEnt->index);
+ 
+-   intel_detect_chipset(scrn, pI810->pEnt);
++   intel_detect_chipset(scrn, NULL);
+ 
+    pI810->LinearAddr = pI810->PciInfo->regions[0].base_addr;
+    xf86DrvMsg(scrn->scrnIndex, X_PROBED, "Linear framebuffer at 0x%lX\n",
+--- a/src/sna/gen5_render.c
++++ b/src/sna/gen5_render.c
+@@ -3333,7 +3333,7 @@
+ #if !NO_COMPOSITE_SPANS
+ 	sna->render.check_composite_spans = gen5_check_composite_spans;
+ 	sna->render.composite_spans = gen5_render_composite_spans;
+-	if (intel_get_device_id(sna->scrn) == 0x0044)
++	if (intel_get_device_id(sna->dev) == 0x0044)
+ 		sna->render.prefer_gpu |= PREFER_GPU_SPANS;
+ #endif
+ 	sna->render.video = gen5_render_video;
+--- a/src/sna/gen6_render.c
++++ b/src/sna/gen6_render.c
+@@ -3633,7 +3633,7 @@
+ 
+ const char *gen6_render_init(struct sna *sna, const char *backend)
+ {
+-	int devid = intel_get_device_id(sna->scrn);
++	int devid = intel_get_device_id(sna->dev);
+ 
+ 	if (!gen6_render_setup(sna, devid))
+ 		return backend;
+--- a/src/sna/gen7_render.c
++++ b/src/sna/gen7_render.c
+@@ -3885,7 +3885,7 @@
+ 
+ const char *gen7_render_init(struct sna *sna, const char *backend)
+ {
+-	int devid = intel_get_device_id(sna->scrn);
++	int devid = intel_get_device_id(sna->dev);
+ 
+ 	if (!gen7_render_setup(sna, devid))
+ 		return backend;
+--- a/src/sna/gen8_render.c
++++ b/src/sna/gen8_render.c
+@@ -3887,7 +3887,7 @@
+ 	int i, j, k, l, m;
+ 	uint32_t devid;
+ 
+-	devid = intel_get_device_id(sna->scrn);
++	devid = intel_get_device_id(sna->dev);
+ 	if (devid & 0xf)
+ 		state->gt = ((devid >> 4) & 0xf) + 1;
+ 	DBG(("%s: gt=%d\n", __FUNCTION__, state->gt));
+--- a/src/sna/sna.h
++++ b/src/sna/sna.h
+@@ -239,6 +239,7 @@
+ 	struct kgem kgem;
+ 
+ 	ScrnInfoPtr scrn;
++	struct intel_device *dev;
+ 
+ 	unsigned flags;
+ #define SNA_IS_SLAVED		0x1
+--- a/src/sna/sna_dri2.c
++++ b/src/sna/sna_dri2.c
+@@ -3232,7 +3232,7 @@
+ 	memset(&info, '\0', sizeof(info));
+ 	info.fd = sna->kgem.fd;
+ 	info.driverName = dri_driver_name(sna);
+-	info.deviceName = intel_get_client_name(sna->scrn);
++	info.deviceName = intel_get_client_name(sna->dev);
+ 
+ 	DBG(("%s: loading dri driver '%s' [gen=%d] for device '%s'\n",
+ 	     __FUNCTION__, info.driverName, sna->kgem.gen, info.deviceName));
+--- a/src/sna/sna_dri3.c
++++ b/src/sna/sna_dri3.c
+@@ -178,7 +178,7 @@
+ 	int fd;
+ 
+ 	DBG(("%s()\n", __FUNCTION__));
+-	fd = intel_get_client_fd(xf86ScreenToScrn(screen));
++	fd = intel_get_client_fd(to_sna_from_screen(screen)->dev);
+ 	if (fd < 0)
+ 		return -fd;
+ 
+--- a/src/sna/sna_driver.c
++++ b/src/sna/sna_driver.c
+@@ -264,7 +264,7 @@
+ 	assert(sna->front == new_front);
+ 	screen->DestroyPixmap(new_front); /* transfer ownership to screen */
+ 
+-	if (intel_get_master(sna->scrn)) {
++	if (intel_get_master(sna->dev)) {
+ 		xf86DrvMsg(screen->myNum, X_ERROR,
+ 			   "[intel] Failed to become DRM master\n");
+ 		screen->DestroyPixmap(sna->front);
+@@ -595,8 +595,8 @@
+ 	scrn->progClock = TRUE;
+ 	scrn->rgbBits = 8;
+ 
+-	fd = intel_get_device(scrn);
+-	if (fd == -1) {
++	sna->dev = intel_get_device(scrn, &fd);
++	if (sna->dev == NULL) {
+ 		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
+ 			   "Failed to claim DRM device.\n");
+ 		goto cleanup;
+@@ -612,7 +612,7 @@
+ 		goto cleanup;
+ 	}
+ 
+-	intel_detect_chipset(scrn, pEnt);
++	intel_detect_chipset(scrn, sna->dev);
+ 	xf86DrvMsg(scrn->scrnIndex, X_PROBED, "CPU: %s\n",
+ 		   sna_cpu_features_to_string(sna->cpu_features, buf));
+ 
+@@ -720,6 +720,8 @@
+ 
+ cleanup:
+ 	scrn->driverPrivate = (void *)((uintptr_t)sna->info | (sna->flags & SNA_IS_SLAVED) | 2);
++	if (sna->dev)
++		intel_put_device(sna->dev);
+ 	free(sna);
+ 	return FALSE;
+ }
+@@ -901,12 +903,13 @@
+ static void sna_leave_vt(VT_FUNC_ARGS_DECL)
+ {
+ 	SCRN_INFO_PTR(arg);
++	struct sna *sna = to_sna(scrn);
+ 
+ 	DBG(("%s\n", __FUNCTION__));
+ 
+-	sna_mode_reset(to_sna(scrn));
++	sna_mode_reset(sna);
+ 
+-	if (intel_put_master(scrn))
++	if (intel_put_master(sna->dev))
+ 		xf86DrvMsg(scrn->scrnIndex, X_WARNING,
+ 			   "drmDropMaster failed: %s\n", strerror(errno));
+ }
+@@ -944,7 +947,7 @@
+ 	}
+ 
+ 	if (scrn->vtSema) {
+-		intel_put_master(scrn);
++		intel_put_master(sna->dev);
+ 		scrn->vtSema = FALSE;
+ 	}
+ 
+@@ -1197,9 +1200,9 @@
+ 
+ 	sna_mode_fini(sna);
+ 	sna_acpi_fini(sna);
+-	free(sna);
+ 
+-	intel_put_device(scrn);
++	intel_put_device(sna->dev);
++	free(sna);
+ }
+ 
+ static Bool sna_enter_vt(VT_FUNC_ARGS_DECL)
+@@ -1208,7 +1211,7 @@
+ 	struct sna *sna = to_sna(scrn);
+ 
+ 	DBG(("%s\n", __FUNCTION__));
+-	if (intel_get_master(scrn))
++	if (intel_get_master(sna->dev))
+ 		return FALSE;
+ 
+ 	if (sna->flags & SNA_REPROBE) {
+--- a/src/sna/sna_video_hwmc.c
++++ b/src/sna/sna_video_hwmc.c
+@@ -81,7 +81,7 @@
+ 		return BadAlloc;
+ 
+ 	if (sna->kgem.gen >= 040) {
+-		int devid = intel_get_device_id(sna->scrn);
++		int devid = intel_get_device_id(sna->dev);
+ 
+ 		if (sna->kgem.gen >= 045)
+ 			priv->type = XVMC_I965_MPEG2_VLD;
+--- a/src/uxa/intel.h
++++ b/src/uxa/intel.h
+@@ -54,7 +54,6 @@
+ #include "xorg-server.h"
+ #include "xf86_OSproc.h"
+ #include "compiler.h"
+-#include "xf86Pci.h"
+ #include "xf86Cursor.h"
+ #include "xf86xv.h"
+ #include "xf86Crtc.h"
+@@ -171,6 +170,7 @@
+ 
+ typedef struct intel_screen_private {
+ 	ScrnInfoPtr scrn;
++	struct intel_device *dev;
+ 	int cpp;
+ 
+ #define RENDER_BATCH			I915_EXEC_RENDER
+@@ -223,7 +223,6 @@
+ 
+ 	int Chipset;
+ 	EntityInfoPtr pEnt;
+-	struct pci_device *PciInfo;
+ 	const struct intel_device_info *info;
+ 
+ 	unsigned int BR[20];
+@@ -378,14 +377,14 @@
+ #define IS_HSW(intel) (INTEL_INFO(intel)->gen == 075)
+ 
+ /* Some chips have specific errata (or limits) that we need to workaround. */
+-#define IS_I830(intel) ((intel)->PciInfo->device_id == PCI_CHIP_I830_M)
+-#define IS_845G(intel) ((intel)->PciInfo->device_id == PCI_CHIP_845_G)
+-#define IS_I865G(intel) ((intel)->PciInfo->device_id == PCI_CHIP_I865_G)
++#define IS_I830(intel) (intel_get_device_id((intel)->dev) == PCI_CHIP_I830_M)
++#define IS_845G(intel) (intel_get_device_id((intel)->dev) == PCI_CHIP_845_G)
++#define IS_I865G(intel) (intel_get_device_id((intel)->dev) == PCI_CHIP_I865_G)
+ 
+-#define IS_I915G(pI810) ((intel)->PciInfo->device_id == PCI_CHIP_I915_G || (intel)->PciInfo->device_id == PCI_CHIP_E7221_G)
+-#define IS_I915GM(pI810) ((intel)->PciInfo->device_id == PCI_CHIP_I915_GM)
++#define IS_I915G(pI810) (intel_get_device_id((intel)->dev) == PCI_CHIP_I915_G || intel_get_device_id((intel)->dev) == PCI_CHIP_E7221_G)
++#define IS_I915GM(pI810) (intel_get_device_id((intel)->dev) == PCI_CHIP_I915_GM)
+ 
+-#define IS_965_Q(pI810) ((intel)->PciInfo->device_id == PCI_CHIP_I965_Q)
++#define IS_965_Q(pI810) (intel_get_device_id((intel)->dev) == PCI_CHIP_I965_Q)
+ 
+ /* supports Y tiled surfaces (pre-965 Mesa isn't ready yet) */
+ #define SUPPORTS_YTILING(pI810) (INTEL_INFO(intel)->gen >= 040)
+--- a/src/uxa/intel_dri3.c
++++ b/src/uxa/intel_dri3.c
+@@ -36,9 +36,11 @@
+                 RRProviderPtr provider,
+                 int *out)
+ {
++	ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
++	intel_screen_private *intel = intel_get_screen_private(scrn);
+ 	int fd;
+ 
+-	fd = intel_get_client_fd(xf86ScreenToScrn(screen));
++	fd = intel_get_client_fd(intel->dev);
+ 	if (fd < 0)
+ 		return -fd;
+ 
+--- a/src/uxa/intel_driver.c
++++ b/src/uxa/intel_driver.c
+@@ -181,7 +181,7 @@
+ static void intel_check_chipset_option(ScrnInfoPtr scrn)
+ {
+ 	intel_screen_private *intel = intel_get_screen_private(scrn);
+-	intel_detect_chipset(scrn, intel->pEnt);
++	intel_detect_chipset(scrn, intel->dev);
+ }
+ 
+ static Bool I830GetEarlyOptions(ScrnInfoPtr scrn)
+@@ -247,9 +247,8 @@
+ static Bool intel_open_drm_master(ScrnInfoPtr scrn)
+ {
+ 	intel_screen_private *intel = intel_get_screen_private(scrn);
+-
+-	intel->drmSubFD = intel_get_device(scrn);
+-	return intel->drmSubFD != -1;
++	intel->dev = intel_get_device(scrn, &intel->drmSubFD);
++	return intel->dev != NULL;
+ }
+ 
+ static int intel_init_bufmgr(intel_screen_private *intel)
+@@ -360,7 +359,7 @@
+ 	}
+ 
+ 	if (INTEL_INFO(intel)->gen == 060) {
+-		struct pci_device *const device = intel->PciInfo;
++		struct pci_device *const device = xf86GetPciInfoForEntity(intel->pEnt->index);
+ 
+ 		/* Sandybridge rev07 locks up easily, even with the
+ 		 * BLT ring workaround in place.
+@@ -461,8 +460,6 @@
+ 
+ 	scrn->displayWidth = 640;	/* default it */
+ 
+-	intel->PciInfo = xf86GetPciInfoForEntity(intel->pEnt->index);
+-
+ 	if (!intel_open_drm_master(scrn)) {
+ 		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
+ 			   "Failed to become DRM master.\n");
+@@ -862,7 +859,7 @@
+ #ifdef INTEL_XVMC
+ 	MessageType from;
+ #endif
+-	struct pci_device *const device = intel->PciInfo;
++	struct pci_device *const device = xf86GetPciInfoForEntity(intel->pEnt->index);
+ 	int fb_bar = IS_GEN2(intel) ? 0 : 2;
+ 
+ 	scrn->videoRam = device->regions[fb_bar].size / 1024;
+@@ -1072,7 +1069,7 @@
+ 	if (intel && !((uintptr_t)intel & 3)) {
+ 		intel_mode_fini(intel);
+ 		intel_bufmgr_fini(intel);
+-		intel_put_device(scrn);
++		intel_put_device(intel->dev);
+ 
+ 		free(intel);
+ 		scrn->driverPrivate = NULL;
+@@ -1082,12 +1079,13 @@
+ static void I830LeaveVT(VT_FUNC_ARGS_DECL)
+ {
+ 	SCRN_INFO_PTR(arg);
++	intel_screen_private *intel = intel_get_screen_private(scrn);
+ 
+ 	xf86RotateFreeShadow(scrn);
+ 
+ 	xf86_hide_cursors(scrn);
+ 
+-	if (intel_put_master(scrn))
++	if (intel_put_master(intel->dev))
+ 		xf86DrvMsg(scrn->scrnIndex, X_WARNING,
+ 			   "drmDropMaster failed: %s\n", strerror(errno));
+ }
+@@ -1098,8 +1096,9 @@
+ static Bool I830EnterVT(VT_FUNC_ARGS_DECL)
+ {
+ 	SCRN_INFO_PTR(arg);
++	intel_screen_private *intel = intel_get_screen_private(scrn);
+ 
+-	if (intel_get_master(scrn)) {
++	if (intel_get_master(intel->dev)) {
+ 		xf86DrvMsg(scrn->scrnIndex, X_WARNING,
+ 			   "drmSetMaster failed: %s\n",
+ 			   strerror(errno));
+--- a/src/uxa/intel_hwmc.c
++++ b/src/uxa/intel_hwmc.c
+@@ -191,6 +191,7 @@
+ {
+ 	ScrnInfoPtr scrn = xf86ScreenToScrn(pScreen);
+ 	intel_screen_private *intel = intel_get_screen_private(scrn);
++	struct pci_device *pci;
+ 	static XF86MCAdaptorRec *pAdapt;
+ 	char *name;
+ 	char buf[64];
+@@ -207,6 +208,10 @@
+ 		return FALSE;
+ 	}
+ 
++	pci = xf86GetPciInfoForEntity(intel->pEnt->index);
++	if (pci == NULL)
++		return FALSE;
++
+ 	pAdapt = calloc(1, sizeof(XF86MCAdaptorRec));
+ 	if (!pAdapt) {
+ 		ErrorF("Allocation error.\n");
+@@ -249,8 +254,7 @@
+ 	}
+ 
+ 	sprintf(buf, "pci:%04x:%02x:%02x.%d",
+-		intel->PciInfo->domain,
+-		intel->PciInfo->bus, intel->PciInfo->dev, intel->PciInfo->func);
++		pci->domain, pci->bus, pci->dev, pci->func);
+ 
+ 	xf86XvMCRegisterDRInfo(pScreen, INTEL_XVMC_LIBNAME,
+ 			       buf,
+--- a/src/uxa/intel_memory.c
++++ b/src/uxa/intel_memory.c
+@@ -168,7 +168,7 @@
+ void intel_set_gem_max_sizes(ScrnInfoPtr scrn)
+ {
+ 	intel_screen_private *intel = intel_get_screen_private(scrn);
+-	size_t agp_size = agp_aperture_size(intel->PciInfo,
++	size_t agp_size = agp_aperture_size(xf86GetPciInfoForEntity(intel->pEnt->index),
+ 					    INTEL_INFO(intel)->gen);
+ 
+ 	/* The chances of being able to mmap an object larger than

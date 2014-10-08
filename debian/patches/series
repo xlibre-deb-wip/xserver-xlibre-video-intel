@@ -4,3 +4,4 @@ dri3-flush-broken.patch
 
 xmir.patch
 sna-freescreen.diff
+fix-uxa-fglrx-stealing.diff
