@@ -9,3 +9,4 @@ add-names-brw.diff
 
 sna-freescreen.diff
 disable-outputs-when-slaved.patch
+fix-no-backlight.diff
