@@ -9,3 +9,14 @@ add-names-brw.diff
 
 sna-freescreen.diff
 disable-outputs-when-slaved.patch
+
+01-support-native-rotations.diff
+02-extend-native-rotation-to-sprites.diff
+03-reorganise-native-rotation.diff
+04-inherit-native-rotation.diff
+05-clear-transform-on-disable.diff
+06-set-color-key-once.diff
+07-show-sprites-on-all-outputs.diff
+08-rewrite-rotation-universal-planes.diff
+09-reduce-reflections-onto-rotations.diff
+10-handle-rotated-slaves.diff

@@ -1,0 +1,21 @@
+commit 8eb6335653e6e38228ecf95c3eef82ca2a864e45
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Feb 14 19:36:47 2014 +0000
+
+    sna: Inherit the native rotation on initial output probing
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+diff --git a/src/sna/sna_display.c b/src/sna/sna_display.c
+index 8d2ec8a..636217a 100644
+--- a/src/sna/sna_display.c
++++ b/src/sna/sna_display.c
+@@ -3692,7 +3692,7 @@ static bool sna_probe_initial_configuration(struct sna *sna)
+ 			continue;
+ 
+ 		mode_from_kmode(scrn, &mode.mode, &crtc->desiredMode);
+-		crtc->desiredRotation = RR_Rotate_0;
++		crtc->desiredRotation = sna_crtc->primary_rotation.current;
+ 		crtc->desiredX = mode.x;
+ 		crtc->desiredY = mode.y;
+ 		crtc->desiredTransformPresent = FALSE;

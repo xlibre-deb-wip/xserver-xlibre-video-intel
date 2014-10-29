@@ -1,0 +1,33 @@
+commit 2046a49be59866a16db776ba53a588dbf6c02b12
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sat Jun 21 15:43:32 2014 +0100
+
+    sna: Clear the transform flag on disabling the CRTC
+    
+    In places, we assume that if the flag is set, we must have an active
+    CRTC. However, we were not clearing when disabling the CRTC.
+    
+    Reported-by: Sree Harsha Totakura <freedesktop@h.totakura.in>
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=80325
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+--- a/src/sna/sna_display.c
++++ b/src/sna/sna_display.c
+@@ -1277,6 +1277,9 @@
+ 		kgem_bo_destroy(&sna->kgem, sna_crtc->bo);
+ 		sna_crtc->bo = NULL;
+ 	}
++
++	sna_crtc->transform = false;
++	assert(!sna_crtc->shadow);
+ }
+ 
+ static void update_flush_interval(struct sna *sna)
+@@ -4751,6 +4754,7 @@
+ 
+ 			assert(crtc->enabled);
+ 			assert(crtc->transform_in_use || sna->flags & SNA_TEAR_FREE);
++			assert(sna_crtc->bo);
+ 
+ 			damage.extents = crtc->bounds;
+ 			damage.data = NULL;

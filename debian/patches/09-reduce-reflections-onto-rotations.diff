@@ -1,0 +1,90 @@
+commit e0523ade28fa0da00d0bd70d8b22d53ed4e49f73
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Jul 9 12:10:15 2014 +0100
+
+    sna: Reduce reflections onto rotations
+    
+    In order to support a wider range of rotation/reflections, perform a
+    simple reduction of the requested rotation first.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+--- a/src/sna/sna_display.c
++++ b/src/sna/sna_display.c
+@@ -858,6 +858,33 @@
+ 	to_sna_crtc(crtc)->dpms_mode = DPMSModeOff;
+ }
+ 
++static unsigned
++rotation_reduce(struct plane *p, unsigned rotation)
++{
++	unsigned unsupported_rotations = rotation & ~p->rotation.supported;
++
++	if (unsupported_rotations == 0)
++		return rotation;
++
++#define RR_Reflect_XY (RR_Reflect_X | RR_Reflect_Y)
++
++	if ((unsupported_rotations & RR_Reflect_XY) == RR_Reflect_XY &&
++	    p->rotation.supported& RR_Rotate_180) {
++		rotation &= ~RR_Reflect_XY;
++		rotation ^= RR_Rotate_180;
++	}
++
++	if ((unsupported_rotations & RR_Rotate_180) &&
++	    (p->rotation.supported& RR_Reflect_XY) == RR_Reflect_XY) {
++		rotation ^= RR_Reflect_XY;
++		rotation &= ~RR_Rotate_180;
++	}
++
++#undef RR_Reflect_XY
++
++	return rotation;
++}
++
+ static bool
+ rotation_set(struct sna *sna, struct plane *p, uint32_t desired)
+ {
+@@ -912,7 +939,7 @@
+ 
+ 	return rotation_set(to_sna(crtc->scrn),
+ 			    &to_sna_crtc(crtc)->sprite,
+-			    rotation);
++			    rotation_reduce(&to_sna_crtc(crtc)->sprite, rotation));
+ }
+ 
+ static bool
+@@ -1432,10 +1459,11 @@
+ 			       &f_crtc_to_fb,
+ 			       &f_fb_to_crtc)) {
+ 		bool needs_transform = true;
++		unsigned rotation = rotation_reduce(&to_sna_crtc(crtc)->primary, crtc->rotation);
+ 		DBG(("%s: natively supported rotation? rotation=%x & supported=%x == %d\n",
+ 		     __FUNCTION__, crtc->rotation, to_sna_crtc(crtc)->primary.rotation.supported,
+ 		     !!(crtc->rotation & to_sna_crtc(crtc)->primary.rotation.supported)));
+-		if (to_sna_crtc(crtc)->primary.rotation.supported & crtc->rotation)
++		if (to_sna_crtc(crtc)->primary.rotation.supported & rotation)
+ 			needs_transform = RRTransformCompute(crtc->x, crtc->y,
+ 							     crtc->mode.HDisplay, crtc->mode.VDisplay,
+ 							     RR_Rotate_0, transform,
+@@ -1569,6 +1597,8 @@
+ 
+ 		return kgem_bo_reference(sna->mode.shadow);
+ 	} else {
++		unsigned rotation;
++
+ 		DBG(("%s: attaching to framebuffer\n", __FUNCTION__));
+ 		sna_crtc_disable_shadow(sna, sna_crtc);
+ 		bo = sna_pixmap_pin(sna->front, PIN_SCANOUT);
+@@ -1579,8 +1609,9 @@
+ 			return NULL;
+ 
+ 		assert(!sna_crtc->shadow);
+-		assert(sna_crtc->primary.rotation.supported & crtc->rotation);
+-		sna_crtc->rotation = crtc->rotation;
++		rotation = rotation_reduce(&sna_crtc->primary, crtc->rotation);
++		assert(sna_crtc->primary.rotation.supported & rotation);
++		sna_crtc->rotation = rotation;
+ 		return kgem_bo_reference(bo);
+ 	}
+ }

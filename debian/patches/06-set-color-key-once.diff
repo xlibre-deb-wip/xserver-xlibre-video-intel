@@ -1,0 +1,79 @@
+commit fa56f1062b926b15e554f46eb268a69b43dd8b9f
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 18 09:52:26 2014 +0100
+
+    sna/video: Only try to set the color key once
+    
+    So that we only report the error to the user a single time, and not
+    every frame.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+diff --git a/src/sna/kgem.c b/src/sna/kgem.c
+index 58f86d2..5d77799 100644
+--- a/src/sna/kgem.c
++++ b/src/sna/kgem.c
+@@ -540,7 +540,6 @@ bool kgem_bo_write(struct kgem *kgem, struct kgem_bo *bo,
+ 	int err;
+ 
+ 	assert(bo->refcnt);
+-	assert(!bo->purged);
+ 	assert(bo->proxy == NULL);
+ 	ASSERT_IDLE(kgem, bo->handle);
+ 
+diff --git a/src/sna/sna_video.h b/src/sna/sna_video.h
+index f906e95..337f928 100644
+--- a/src/sna/sna_video.h
++++ b/src/sna/sna_video.h
+@@ -87,7 +87,8 @@ struct sna_video {
+ 	uint32_t gamma5;
+ 
+ 	int color_key;
+-	int color_key_changed;
++	bool color_key_changed;
++	bool has_color_key;
+ 
+ 	/** YUV data buffers */
+ 	struct kgem_bo *old_buf[2];
+diff --git a/src/sna/sna_video_sprite.c b/src/sna/sna_video_sprite.c
+index f4dcb82..6fcc779 100644
+--- a/src/sna/sna_video_sprite.c
++++ b/src/sna/sna_video_sprite.c
+@@ -214,8 +214,9 @@ sna_video_sprite_show(struct sna *sna,
+ 		frame->height = tmp;
+ 	}
+ 
+-#if defined(DRM_I915_SET_SPRITE_COLORKEY)
+-	if (video->color_key_changed || video->plane != s.plane_id) {
++#define DRM_I915_SET_SPRITE_COLORKEY 0x2b
++	if ((video->color_key_changed || video->plane != s.plane_id) &&
++	    video->has_color_key) {
+ 		struct drm_intel_sprite_colorkey set;
+ 
+ 		DBG(("%s: updating color key: %x\n",
+@@ -231,13 +232,14 @@ sna_video_sprite_show(struct sna *sna,
+ 
+ 		if (drmIoctl(sna->kgem.fd,
+ 			     DRM_IOCTL_I915_SET_SPRITE_COLORKEY,
+-			     &set))
++			     &set)) {
+ 			xf86DrvMsg(sna->scrn->scrnIndex, X_ERROR,
+-				   "failed to update color key\n");
++				   "failed to update color key, disabling future updates\n");
++			video->has_color_key = false;
++		}
+ 
+ 		video->color_key_changed = false;
+ 	}
+-#endif
+ 
+ 	if (frame->bo->delta == 0) {
+ 		uint32_t offsets[4], pitches[4], handles[4];
+@@ -603,6 +605,7 @@ void sna_video_sprite_setup(struct sna *sna, ScreenPtr screen)
+ 	video->alignment = 64;
+ 	video->color_key = sna_video_sprite_color_key(sna);
+ 	video->color_key_changed = true;
++	video->has_color_key = true;
+ 	video->brightness = -19;	/* (255/219) * -16 */
+ 	video->contrast = 75;	/* 255/219 * 64 */
+ 	video->saturation = 146;	/* 128/112 * 128 */
