@@ -1,0 +1,38 @@
+Index: xserver-xorg-video-intel-2.99.910/src/sna/sna_display.c
+===================================================================
+--- xserver-xorg-video-intel-2.99.910.orig/src/sna/sna_display.c	2014-09-26 16:19:42.420356000 +0800
++++ xserver-xorg-video-intel-2.99.910/src/sna/sna_display.c	2014-09-26 16:20:00.001464561 +0800
+@@ -2386,8 +2386,12 @@
+ 						   sna_output->backlight_active_level);
+ 	} else {
+ 		/* Only save the current backlight value if we're going from on to off. */
+-		if (oldmode == DPMSModeOn)
+-			sna_output->backlight_active_level = sna_output_backlight_get(output);
++	if (oldmode == DPMSModeOn) {
++		int brightness = sna_output_backlight_get(output);
++		if (brightness > 0) {
++			sna_output->backlight_active_level = brightness;
++		}
++	}
+ 		sna_output_backlight_set(output, 0);
+ 	}
+ }
+diff --git a/src/uxa/intel_display.c b/src/uxa/intel_display.c
+index 39d8507..51727a5 100644
+--- a/src/uxa/intel_display.c
++++ b/src/uxa/intel_display.c
+@@ -1095,8 +1095,12 @@ intel_output_dpms_backlight(xf86OutputPtr output, int oldmode, int mode)
+ 						   intel_output->backlight_active_level);
+ 	} else {
+ 		/* Only save the current backlight value if we're going from on to off. */
+-		if (oldmode == DPMSModeOn)
+-			intel_output->backlight_active_level = intel_output_backlight_get(output);
++	if (oldmode == DPMSModeOn) {
++		int brightness = intel_output_backlight_get(output);
++		if (brightness > 0) {
++			intel_output->backlight_active_level = brightness;
++		}
++	}
+ 		intel_output_backlight_set(output, 0);
+ 	}
+ }

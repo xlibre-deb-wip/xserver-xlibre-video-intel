@@ -9,6 +9,7 @@ add-names-brw.diff
 
 sna-freescreen.diff
 disable-outputs-when-slaved.patch
+fix-no-backlight.diff
 
 01-support-native-rotations.diff
 02-extend-native-rotation-to-sprites.diff
