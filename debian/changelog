@@ -1,16 +1,21 @@
-xserver-xorg-video-intel (2:2.99.910-0ubuntu1.2) trusty-proposed; urgency=medium
+xserver-xorg-video-intel (2:2.99.910-0ubuntu1.3) UNRELEASED; urgency=medium
 
-  [ Timo Aaltonen ]
-  * fix-no-backlight.diff: Don't let backlight switch off when cycling
-    through display modes. (LP: #1373776)
-
-  [ Maarten Lankhorst ]
-  * Fix black screen with SNA. (LP: #1365695)
   * Prevent crash when using SNA with fglrx.
     - disable-outputs-when-slaved.patch
   * Backport support for rotation with SNA. (LP: #1386620)
 
  -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Mon, 03 Nov 2014 12:36:52 +0100
+
+xserver-xorg-video-intel (2:2.99.910-0ubuntu1.2) trusty-proposed; urgency=medium
+
+  [ Maarten Lankhorst ]
+  * Fix black screen with SNA. (LP: #1365695)
+
+  [ Timo Aaltonen ]
+  * fix-no-backlight.diff: Don't let backlight switch off when cycling
+    through display modes. (LP: #1373776)
+
+ -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>   Mon, 20 Oct 2014 09:54:57 +0200
 
 xserver-xorg-video-intel (2:2.99.910-0ubuntu1.1) trusty; urgency=medium
 
