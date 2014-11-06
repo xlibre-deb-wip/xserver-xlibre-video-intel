@@ -1,8 +1,6 @@
 xserver-xorg-video-intel (2:2.99.910-0ubuntu1.3) trusty-proposed; urgency=medium
 
   [ Maarten Lankhorst ]
-  * Prevent crash when using SNA with fglrx.
-    - disable-outputs-when-slaved.patch
   * Backport support for rotation with SNA. (LP: #1386620)
 
   [ Timo Aaltonen ]
