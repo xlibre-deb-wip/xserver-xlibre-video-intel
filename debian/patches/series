@@ -21,3 +21,4 @@ fix-no-backlight.diff
 08-rewrite-rotation-universal-planes.diff
 09-reduce-reflections-onto-rotations.diff
 10-handle-rotated-slaves.diff
+sna-use-vmask-in-3dstate-ps.diff
