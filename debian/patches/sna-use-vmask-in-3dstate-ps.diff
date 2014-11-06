@@ -1,0 +1,65 @@
+From rodrigo.vivi@intel.com  Wed Nov  5 23:49:06 2014
+Return-Path: <rodrigo.vivi@intel.com>
+X-Original-To: tjaalton@mail.canonical.com
+Delivered-To: tjaalton@mail.canonical.com
+Received: from fiordland.canonical.com (fiordland.canonical.com [91.189.94.145])
+	by grenadilla.canonical.com (Postfix) with ESMTP id 91BB3147201C
+	for <tjaalton@mail.canonical.com>; Wed,  5 Nov 2014 23:49:06 +0000 (UTC)
+Received: from cluster-e.mailcontrol.com (cluster-e.mailcontrol.com [85.115.58.190])
+	by fiordland.canonical.com (Postfix) with ESMTPS id 3EBB9A186DD
+	for <timo.aaltonen@cleanmail.canonical.com>; Wed,  5 Nov 2014 23:49:06 +0000 (UTC)
+Received: from arctowski.canonical.com (arctowski.canonical.com [91.189.94.158])
+	by rly63e.srv.mailcontrol.com (MailControl) with ESMTP id sA5Nn4m8028317
+	for <timo.aaltonen@cleanmail.canonical.com>; Wed, 5 Nov 2014 23:49:04 GMT
+Received: from fiordland.canonical.com ([91.189.94.145])
+	by arctowski.canonical.com with esmtp (Exim 4.71)
+	(envelope-from <rodrigo.vivi@intel.com>)
+	id 1XmAJz-0004aX-Vs
+	for timo.aaltonen@cleanmail.canonical.com; Wed, 05 Nov 2014 23:49:04 +0000
+Received: from mga09.intel.com (mga09.intel.com [134.134.136.24])
+	by fiordland.canonical.com (Postfix) with ESMTP id 746D0A186D8
+	for <tjaalton@ubuntu.com>; Wed,  5 Nov 2014 23:49:02 +0000 (UTC)
+Received: from orsmga001.jf.intel.com ([10.7.209.18])
+  by orsmga102.jf.intel.com with ESMTP; 05 Nov 2014 15:46:35 -0800
+X-ExtLoop1: 1
+X-IronPort-AV: E=Sophos;i="5.07,322,1413270000"; 
+   d="scan'208";a="603103293"
+Received: from rdvivi-hillsboro.jf.intel.com ([10.7.196.162])
+  by orsmga001.jf.intel.com with ESMTP; 05 Nov 2014 15:48:14 -0800
+From: Rodrigo Vivi <rodrigo.vivi@intel.com>
+To: intel-gfx@lists.freedesktop.org
+Cc: Rodrigo Vivi <rodrigo.vivi@intel.com>, Timo Aaltonen <tjaalton@ubuntu.com>,
+        Gary Wang <gary.c.wang@intel.com>
+Subject: [PATCH] sna: Use VMask in 3DSTATE_PS
+Date: Wed,  5 Nov 2014 15:48:14 -0800
+Message-Id: <1415231294-12435-1-git-send-email-rodrigo.vivi@intel.com>
+X-Mailer: git-send-email 1.9.3
+X-Mailcontrol-Inbound: WBq!ucXEz80wFmxD6S7f3nyjenN!phNbIQWiyBG44+lo3FL0yiLKb3yjenN!phNbh+9WRKrdgbE=
+X-Spam-Score: 0.9
+X-Scanned-By: MailControl 35930.357 (www.mailcontrol.com) on 10.69.0.173
+
+Using dispatch mask cause hangs waiting PS Done on some cases like bug #83207,
+with larger screen or when scaling it.
+
+Also mesa uses VMask instead of Dmask for 3DSTATE_PS because in some cases
+they were getting incorrect derivatives for subspans.
+
+Reference: https://bugs.freedesktop.org/show_bug.cgi?id=83207
+Cc: Timo Aaltonen <tjaalton@ubuntu.com>
+Cc: Gary Wang <gary.c.wang@intel.com>
+Signed-off-by: Rodrigo Vivi <rodrigo.vivi@intel.com>
+---
+ src/sna/gen8_render.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/src/sna/gen8_render.c
++++ b/src/sna/gen8_render.c
+@@ -900,7 +900,7 @@ gen8_emit_wm(struct sna *sna, int kernel
+ 	OUT_BATCH(GEN8_3DSTATE_PS | (12 - 2));
+ 	OUT_BATCH64(kernels[0] ?: kernels[1] ?: kernels[2]);
+ 	OUT_BATCH(1 << PS_SAMPLER_COUNT_SHIFT |
+-		  //PS_VECTOR_MASK_ENABLE |
++		  PS_VECTOR_MASK_ENABLE |
+ 		  wm_kernels[kernel].num_surfaces << PS_BINDING_TABLE_ENTRY_COUNT_SHIFT);
+ 	OUT_BATCH64(0); /* scratch address */
+ 	OUT_BATCH(PS_MAX_THREADS |
