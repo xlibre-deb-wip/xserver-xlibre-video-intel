@@ -1,3 +1,10 @@
+xserver-xorg-video-intel (2:2.99.914-1~exp1ubuntu5) vivid; urgency=medium
+
+  * sna-use-vmask-in-3dstate-ps.diff: Fix GPU hang on BDW with xvideo.
+    (LP: #1390016)
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Thu, 06 Nov 2014 13:17:05 +0200
+
 xserver-xorg-video-intel (2:2.99.914-1~exp1ubuntu4) utopic; urgency=medium
 
   * Fix a crash when fglrx steals the screen in DGPU or IGPU mode.
