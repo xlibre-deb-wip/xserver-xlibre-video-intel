@@ -6,3 +6,5 @@ xmir.patch
 sna-freescreen.diff
 fix-uxa-fglrx-stealing.diff
 sna-use-vmask-in-3dstate-ps.diff
+disable-dri3.diff
+sna-fix-gen8-blt.diff
