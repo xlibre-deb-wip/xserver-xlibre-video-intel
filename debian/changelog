@@ -1,3 +1,23 @@
+xserver-xorg-video-intel (2:2.99.916+git20141119-1~exp1) experimental; urgency=medium
+
+  * New upstream snapshot.
+
+ -- maximilian attems <maks@debian.org>  Sun, 23 Nov 2014 00:04:02 +0100
+
+xserver-xorg-video-intel (2:2.99.916-1~exp1) experimental; urgency=medium
+
+  [ Vincent Cheng ]
+  * New upstream prerelease 2.99.916.
+    - sna: Add the current CRTC mode last (Closes: #750605)
+  * Update debian/copyright. (Closes: #730643)
+  * Revert to source format 1.0.
+
+  [ Laurent Bigonville ]
+  * debian/xserver-xorg-video-intel.maintscript: Explicitly remove
+    i915-kms.conf on upgrade. (Closes: #713340)
+
+ -- Vincent Cheng <vcheng@debian.org>  Sun, 14 Sep 2014 01:29:56 -0700
+
 xserver-xorg-video-intel (2:2.99.914-1~exp1ubuntu6) vivid; urgency=medium
 
   * Actually add the previous patch to series this time.

@@ -74,6 +74,16 @@
  * If only things were as simple as on OpenBSD! :)
  */
 
+void backlight_init(struct backlight *b)
+{
+	b->type = BL_NONE;
+	b->iface = NULL;
+	b->fd = -1;
+	b->pid = -1;
+	b->max = -1;
+	b->has_power = 0;
+}
+
 #ifdef __OpenBSD__
 
 #include <dev/wscons/wsconsio.h>
@@ -144,6 +154,15 @@ enum backlight_type backlight_exists(const char *iface)
 	return BL_PLATFORM;
 }
 
+int backlight_on(struct backlight *b)
+{
+	return 0;
+}
+
+int backlight_off(struct backlight *b)
+{
+	return 0;
+}
 #else
 
 static int
@@ -191,6 +210,21 @@ __backlight_read(const char *iface, const char *file)
 	close(fd);
 
 	return val;
+}
+
+static int
+__backlight_write(const char *iface, const char *file, const char *value)
+{
+	int fd, ret;
+
+	fd = __backlight_open(iface, file, O_WRONLY);
+	if (fd < 0)
+		return -1;
+
+	ret = write(fd, value, strlen(value)+1);
+	close(fd);
+
+	return ret;
 }
 
 /* List of available kernel interfaces in priority order */
@@ -262,7 +296,7 @@ enum backlight_type backlight_exists(const char *iface)
 
 static int __backlight_init(struct backlight *b, char *iface, int fd)
 {
-	b->fd = fd_set_cloexec(fd_set_nonblock(fd));
+	b->fd = fd_move_cloexec(fd_set_nonblock(fd));
 	b->iface = iface;
 	return 1;
 }
@@ -274,6 +308,9 @@ static int __backlight_direct_init(struct backlight *b, char *iface)
 	fd = __backlight_open(iface, "brightness", O_RDWR);
 	if (fd < 0)
 		return 0;
+
+	if (__backlight_read(iface, "bl_power") != -1)
+		b->has_power = 1;
 
 	return __backlight_init(b, iface, fd);
 }
@@ -384,23 +421,27 @@ int backlight_open(struct backlight *b, char *iface)
 	if (iface == NULL)
 		iface = __backlight_find();
 	if (iface == NULL)
-		return -1;
+		goto err;
 
 	b->type = __backlight_type(iface);
 
 	b->max = __backlight_read(iface, "max_brightness");
 	if (b->max <= 0)
-		return -1;
+		goto err;
 
 	level = __backlight_read(iface, "brightness");
 	if (level < 0)
-		return -1;
+		goto err;
 
 	if (!__backlight_direct_init(b, iface) &&
 	    !__backlight_helper_init(b, iface))
-		return -1;
+		goto err;
 
 	return level;
+
+err:
+	backlight_init(b);
+	return -1;
 }
 
 int backlight_set(struct backlight *b, int level)
@@ -434,6 +475,30 @@ int backlight_get(struct backlight *b)
 	else if (level < 0)
 		level = -1;
 	return level;
+}
+
+int backlight_off(struct backlight *b)
+{
+	if (b->iface == NULL)
+		return 0;
+
+	if (!b->has_power)
+		return 0;
+
+	/* 4 -> FB_BLANK_POWERDOWN */
+	return __backlight_write(b->iface, "bl_power", "4");
+}
+
+int backlight_on(struct backlight *b)
+{
+	if (b->iface == NULL)
+		return 0;
+
+	if (!b->has_power)
+		return 0;
+
+	/* 0 -> FB_BLANK_UNBLANK */
+	return __backlight_write(b->iface, "bl_power", "0");
 }
 #endif
 

@@ -1079,8 +1079,8 @@ static int clone_init_xfer(struct clone *clone)
 	int width, height;
 
 	if (clone->dst.mode.id == 0) {
-		clone->width = 0;
-		clone->height = 0;
+		width = 0;
+		height = 0;
 	} else if (clone->dri3.xid) {
 		width = clone->dst.display->width;
 		height = clone->dst.display->height;
@@ -2387,7 +2387,8 @@ static int bumblebee_open(struct context *ctx)
 	}
 
 	addr.sun_family = AF_UNIX;
-	strcpy(addr.sun_path, optarg && *optarg ? optarg : "/var/run/bumblebee.socket");
+	snprintf(addr.sun_path, sizeof(addr.sun_path), "%s",
+		 optarg && *optarg ? optarg : "/var/run/bumblebee.socket");
 	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
 		DBG(X11, ("%s unable to create a socket: %d\n", __func__, errno));
 		goto err;

@@ -55,9 +55,10 @@
 #endif
 #include "xf86DDC.h"
 #include "fb.h"
-#include "uxa.h"
 
-#include "intel_glamor.h"
+#if USE_UXA
+#include "intel_uxa.h"
+#endif
 
 #define KNOWN_MODE_FLAGS ((1<<14)-1)
 
@@ -71,16 +72,12 @@ struct intel_drm_queue {
         intel_drm_abort_proc abort;
 };
 
-static void
-intel_drm_abort_scrn(ScrnInfoPtr scrn);
-
 static uint32_t intel_drm_seq;
 static struct list intel_drm_queue;
 
 struct intel_mode {
 	int fd;
 	uint32_t fb_id;
-	drmModeResPtr mode_res;
 	int cpp;
 
 	drmEventContext event_context;
@@ -95,6 +92,8 @@ struct intel_mode {
 	void *pageflip_data;
 	intel_pageflip_handler_proc pageflip_handler;
 	intel_pageflip_abort_proc pageflip_abort;
+
+	Bool delete_dp_12_displays;
 };
 
 struct intel_pageflip {
@@ -131,7 +130,7 @@ struct intel_output {
 	struct intel_mode *mode;
 	int output_id;
 	drmModeConnectorPtr mode_output;
-	drmModeEncoderPtr mode_encoder;
+	drmModeEncoderPtr *mode_encoders;
 	drmModePropertyBlobPtr edid_blob;
 	int num_props;
 	struct intel_property *props;
@@ -146,6 +145,8 @@ struct intel_output {
 	int backlight_active_level;
 	xf86OutputPtr output;
 	struct list link;
+	int enc_mask;
+	int enc_clone_mask;
 };
 
 static void
@@ -184,7 +185,7 @@ intel_output_backlight_init(xf86OutputPtr output)
 {
 	struct intel_output *intel_output = output->driver_private;
 	intel_screen_private *intel = intel_get_screen_private(output->scrn);
-	char *str;
+	const char *str;
 
 #if !USE_BACKLIGHT
 	return;
@@ -332,6 +333,9 @@ intel_crtc_apply(xf86CrtcPtr crtc)
 			continue;
 
 		intel_output = output->driver_private;
+		if (!intel_output->mode_output)
+			return FALSE;
+
 		output_ids[output_count] =
 			intel_output->mode_output->connector_id;
 		output_count++;
@@ -392,7 +396,6 @@ intel_crtc_apply(xf86CrtcPtr crtc)
 
 	if (scrn->pScreen)
 		xf86_reload_cursors(scrn->pScreen);
-        intel_drm_abort_scrn(scrn);
 
 done:
 	free(output_ids);
@@ -437,8 +440,7 @@ intel_crtc_set_mode_major(xf86CrtcPtr crtc, DisplayModePtr mode,
 	crtc->y = y;
 	crtc->rotation = rotation;
 
-	intel_glamor_flush(intel);
-	intel_batch_submit(crtc->scrn);
+        intel_flush(intel);
 
 	mode_to_kmode(crtc->scrn, &intel_crtc->kmode, mode);
 	ret = intel_crtc_apply(crtc);
@@ -545,10 +547,28 @@ intel_crtc_shadow_allocate(xf86CrtcPtr crtc, int width, int height)
 		return NULL;
 	}
 
-	drm_intel_bo_disable_reuse(intel_crtc->rotate_bo);
-
 	intel_crtc->rotate_pitch = rotate_pitch;
 	return intel_crtc->rotate_bo;
+}
+
+static PixmapPtr
+intel_create_pixmap_header(ScreenPtr pScreen, int width, int height, int depth,
+                           int bitsPerPixel, int devKind, void *pPixData)
+{
+        PixmapPtr pixmap;
+
+        /* width and height of 0 means don't allocate any pixmap data */
+        pixmap = (*pScreen->CreatePixmap) (pScreen, 0, 0, depth, 0);
+
+        if (pixmap) {
+                if ((*pScreen->ModifyPixmapHeader) (pixmap, width, height, depth,
+                                                    bitsPerPixel, devKind, pPixData))
+                {
+                        return pixmap;
+                }
+                (*pScreen->DestroyPixmap) (pixmap);
+        }
+        return NullPixmap;
 }
 
 static PixmapPtr
@@ -573,12 +593,12 @@ intel_crtc_shadow_create(xf86CrtcPtr crtc, void *data, int width, int height)
 		return NULL;
 	}
 
-	rotate_pixmap = GetScratchPixmapHeader(scrn->pScreen,
-					       width, height,
-					       scrn->depth,
-					       scrn->bitsPerPixel,
-					       intel_crtc->rotate_pitch,
-					       NULL);
+	rotate_pixmap = intel_create_pixmap_header(scrn->pScreen,
+                                                   width, height,
+                                                   scrn->depth,
+                                                   scrn->bitsPerPixel,
+                                                   intel_crtc->rotate_pitch,
+                                                   NULL);
 
 	if (rotate_pixmap == NULL) {
 		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
@@ -602,8 +622,8 @@ intel_crtc_shadow_destroy(xf86CrtcPtr crtc, PixmapPtr rotate_pixmap, void *data)
 	struct intel_mode *mode = intel_crtc->mode;
 
 	if (rotate_pixmap) {
-		intel_set_pixmap_bo(rotate_pixmap, NULL);
-		FreeScratchPixmapHeader(rotate_pixmap);
+                intel_set_pixmap_bo(rotate_pixmap, NULL);
+                rotate_pixmap->drawable.pScreen->DestroyPixmap(rotate_pixmap);
 	}
 
 	if (data) {
@@ -706,7 +726,7 @@ static const xf86CrtcFuncsRec intel_crtc_funcs = {
 };
 
 static void
-intel_crtc_init(ScrnInfoPtr scrn, struct intel_mode *mode, int num)
+intel_crtc_init(ScrnInfoPtr scrn, struct intel_mode *mode, drmModeResPtr mode_res, int num)
 {
 	intel_screen_private *intel = intel_get_screen_private(scrn);
 	xf86CrtcPtr crtc;
@@ -723,7 +743,7 @@ intel_crtc_init(ScrnInfoPtr scrn, struct intel_mode *mode, int num)
 	}
 
 	intel_crtc->mode_crtc = drmModeGetCrtc(mode->fd,
-					       mode->mode_res->crtcs[num]);
+					       mode_res->crtcs[num]);
 	if (intel_crtc->mode_crtc == NULL) {
 		free(intel_crtc);
 		return;
@@ -808,6 +828,11 @@ intel_output_attach_edid(xf86OutputPtr output)
 	struct intel_mode *mode = intel_output->mode;
 	xf86MonPtr mon = NULL;
 	int i;
+
+	if (!koutput) {
+		xf86OutputSetEDID(output, mon);
+		return;
+	}
 
 	/* look for an EDID property */
 	for (i = 0; i < koutput->count_props; i++) {
@@ -898,6 +923,9 @@ intel_output_get_modes(xf86OutputPtr output)
 
 	intel_output_attach_edid(output);
 
+	if (!koutput)
+		return Modes;
+
 	/* modes should already be available */
 	for (i = 0; i < koutput->count_modes; i++) {
 		DisplayModePtr Mode;
@@ -950,7 +978,10 @@ intel_output_destroy(xf86OutputPtr output)
 		free(intel_output->props[i].atoms);
 	}
 	free(intel_output->props);
-
+	for (i = 0; i < intel_output->mode_output->count_encoders; i++) {
+		drmModeFreeEncoder(intel_output->mode_encoders[i]);
+	}
+	free(intel_output->mode_encoders);
 	drmModeFreeConnector(intel_output->mode_output);
 	intel_output->mode_output = NULL;
 
@@ -989,6 +1020,9 @@ intel_output_dpms(xf86OutputPtr output, int dpms)
 	drmModeConnectorPtr koutput = intel_output->mode_output;
 	struct intel_mode *mode = intel_output->mode;
 	int i;
+
+	if (!koutput)
+		return;
 
 	for (i = 0; i < koutput->count_props; i++) {
 		drmModePropertyPtr props;
@@ -1339,51 +1373,153 @@ static const char *output_names[] = {
 	"eDP",
 };
 
+static xf86OutputPtr find_output(ScrnInfoPtr pScrn, int id)
+{
+	xf86CrtcConfigPtr   xf86_config = XF86_CRTC_CONFIG_PTR(pScrn);
+	int i;
+	for (i = 0; i < xf86_config->num_output; i++) {
+		xf86OutputPtr output = xf86_config->output[i];
+		struct intel_output *intel_output;
+
+		intel_output = output->driver_private;
+		if (intel_output->output_id == id)
+			return output;
+	}
+	return NULL;
+}
+
+static int parse_path_blob(drmModePropertyBlobPtr path_blob, int *conn_base_id, char **path)
+{
+	char *conn;
+	char conn_id[5];
+	int id, len;
+	char *blob_data;
+
+	if (!path_blob)
+		return -1;
+
+	blob_data = path_blob->data;
+	/* we only handle MST paths for now */
+	if (strncmp(blob_data, "mst:", 4))
+		return -1;
+
+	conn = strchr(blob_data + 4, '-');
+	if (!conn)
+		return -1;
+	len = conn - (blob_data + 4);
+	if (len + 1 > 5)
+		return -1;
+	memcpy(conn_id, blob_data + 4, len);
+	conn_id[len] = '\0';
+	id = strtoul(conn_id, NULL, 10);
+
+	*conn_base_id = id;
+
+	*path = conn + 1;
+	return 0;
+}
+
 static void
-intel_output_init(ScrnInfoPtr scrn, struct intel_mode *mode, int num)
+drmmode_create_name(ScrnInfoPtr pScrn, drmModeConnectorPtr koutput, char *name,
+		    drmModePropertyBlobPtr path_blob)
 {
 	xf86OutputPtr output;
+	int conn_id;
+	char *extra_path;
+
+	output = NULL;
+	if (parse_path_blob(path_blob, &conn_id, &extra_path) == 0)
+		output = find_output(pScrn, conn_id);
+	if (output) {
+		snprintf(name, 32, "%s-%s", output->name, extra_path);
+	} else {
+		const char *output_name;
+
+		if (koutput->connector_type < ARRAY_SIZE(output_names))
+			output_name = output_names[koutput->connector_type];
+		else
+			output_name = "UNKNOWN";
+
+		snprintf(name, 32, "%s%d",
+			 output_name, koutput->connector_type_id);
+	}
+}
+
+static void
+intel_output_init(ScrnInfoPtr scrn, struct intel_mode *mode, drmModeResPtr mode_res, int num, int dynamic)
+{
+	xf86CrtcConfigPtr   xf86_config = XF86_CRTC_CONFIG_PTR(scrn);
+	xf86OutputPtr output;
 	drmModeConnectorPtr koutput;
-	drmModeEncoderPtr kencoder;
+	drmModeEncoderPtr *kencoders = NULL;
 	struct intel_output *intel_output;
-	const char *output_name;
 	char name[32];
+	drmModePropertyPtr props;
+	drmModePropertyBlobPtr path_blob = NULL;
+	int i;
 
 	koutput = drmModeGetConnector(mode->fd,
-				      mode->mode_res->connectors[num]);
+				      mode_res->connectors[num]);
 	if (!koutput)
 		return;
+	for (i = 0; i < koutput->count_props; i++) {
+		props = drmModeGetProperty(mode->fd, koutput->props[i]);
+		if (props && (props->flags & DRM_MODE_PROP_BLOB)) {
+			if (!strcmp(props->name, "PATH")) {
+				path_blob = drmModeGetPropertyBlob(mode->fd, koutput->prop_values[i]);
 
-	kencoder = drmModeGetEncoder(mode->fd, koutput->encoders[0]);
-	if (!kencoder) {
-		drmModeFreeConnector(koutput);
-		return;
+				drmModeFreeProperty(props);
+				break;
+			}
+			drmModeFreeProperty(props);
+		}
 	}
 
-	if (koutput->connector_type < ARRAY_SIZE(output_names))
-		output_name = output_names[koutput->connector_type];
-	else
-		output_name = "UNKNOWN";
-	snprintf(name, 32, "%s%d", output_name, koutput->connector_type_id);
+	drmmode_create_name(scrn, koutput, name, path_blob);
+	if (path_blob)
+		drmModeFreePropertyBlob(path_blob);
+
+	if (path_blob && dynamic) {
+		/* See if we have an output with this name already
+		 * and hook stuff up.
+		 */
+		for (i = 0; i < xf86_config->num_output; i++) {
+			output = xf86_config->output[i];
+
+			if (strncmp(output->name, name, 32))
+				continue;
+
+			intel_output = output->driver_private;
+			intel_output->output_id = mode_res->connectors[num];
+			intel_output->mode_output = koutput;
+			return;
+		}
+	}
+	kencoders = calloc(sizeof(drmModeEncoderPtr), koutput->count_encoders);
+	if (!kencoders) {
+		goto out_free_encoders;
+	}
+
+	for (i = 0; i < koutput->count_encoders; i++) {
+		kencoders[i] = drmModeGetEncoder(mode->fd, koutput->encoders[i]);
+		if (!kencoders[i])
+			goto out_free_encoders;
+	}
 
 	output = xf86OutputCreate (scrn, &intel_output_funcs, name);
 	if (!output) {
-		drmModeFreeEncoder(kencoder);
-		drmModeFreeConnector(koutput);
-		return;
+		goto out_free_encoders;
 	}
 
 	intel_output = calloc(sizeof(struct intel_output), 1);
 	if (!intel_output) {
 		xf86OutputDestroy(output);
-		drmModeFreeConnector(koutput);
-		drmModeFreeEncoder(kencoder);
-		return;
+		goto out_free_encoders;
 	}
 
-	intel_output->output_id = mode->mode_res->connectors[num];
+	intel_output->output_id = mode_res->connectors[num];
 	intel_output->mode_output = koutput;
-	intel_output->mode_encoder = kencoder;
+	intel_output->mode_encoders = kencoders;
 	intel_output->mode = mode;
 
 	output->mm_width = koutput->mmWidth;
@@ -1395,11 +1531,29 @@ intel_output_init(ScrnInfoPtr scrn, struct intel_mode *mode, int num)
 	if (is_panel(koutput->connector_type))
 		intel_output_backlight_init(output);
 
-	output->possible_crtcs = kencoder->possible_crtcs;
+	output->possible_crtcs = 0x7f;
+	for (i = 0; i < koutput->count_encoders; i++) {
+		output->possible_crtcs &= kencoders[i]->possible_crtcs;
+	}
 	output->interlaceAllowed = TRUE;
 
 	intel_output->output = output;
+
+	if (dynamic) {
+		output->randr_output = RROutputCreate(xf86ScrnToScreen(scrn), output->name, strlen(output->name), output);
+		intel_output_create_resources(output);
+	}
+
 	list_add(&intel_output->link, &mode->outputs);
+	return;
+
+out_free_encoders:
+	if (kencoders) {
+		for (i = 0; i < koutput->count_encoders; i++)
+			drmModeFreeEncoder(kencoders[i]);
+		free(kencoders);
+	}
+	drmModeFreeConnector(koutput);
 }
 
 static Bool
@@ -1415,13 +1569,11 @@ intel_xf86crtc_resize(ScrnInfoPtr scrn, int width, int height)
 	int	    i, old_width, old_height, old_pitch;
 	int pitch;
 	uint32_t tiling;
-	ScreenPtr screen;
 
 	if (scrn->virtualX == width && scrn->virtualY == height)
 		return TRUE;
 
-	intel_glamor_flush(intel);
-	intel_batch_submit(scrn);
+        intel_flush(intel);
 
 	old_width = scrn->virtualX;
 	old_height = scrn->virtualY;
@@ -1430,8 +1582,7 @@ intel_xf86crtc_resize(ScrnInfoPtr scrn, int width, int height)
 	old_front = intel->front_buffer;
 
 	if (intel->back_pixmap) {
-		screen = intel->back_pixmap->drawable.pScreen;
-		screen->DestroyPixmap(intel->back_pixmap);
+		scrn->pScreen->DestroyPixmap(intel->back_pixmap);
 		intel->back_pixmap = NULL;
 	}
 
@@ -1454,7 +1605,6 @@ intel_xf86crtc_resize(ScrnInfoPtr scrn, int width, int height)
 	if (ret)
 		goto fail;
 
-	drm_intel_bo_disable_reuse(intel->front_buffer);
 	intel->front_pitch = pitch;
 	intel->front_tiling = tiling;
 
@@ -1537,8 +1687,7 @@ intel_do_pageflip(intel_screen_private *intel,
 		goto error_out;
 
 	drm_intel_bo_disable_reuse(new_front);
-	intel_glamor_flush(intel);
-	intel_batch_submit(scrn);
+        intel_flush(intel);
 
 	mode->pageflip_data = pageflip_data;
 	mode->pageflip_handler = pageflip_handler;
@@ -1963,57 +2112,63 @@ intel_mode_read_drm_events(struct intel_screen_private *intel)
 	return drmHandleEvent(mode->fd, &mode->event_context);
 }
 
-static drmModeEncoderPtr
-intel_get_kencoder(struct intel_mode *mode, int num)
-{
-	struct intel_output *iterator;
-	int id = mode->mode_res->encoders[num];
-
-	list_for_each_entry(iterator, &mode->outputs, link)
-		if (iterator->mode_encoder->encoder_id == id)
-			return iterator->mode_encoder;
-
-	return NULL;
-}
-
 /*
  * Libdrm's possible_clones is a mask of encoders, Xorg's possible_clones is a
  * mask of outputs. This function sets Xorg's possible_clones based on the
  * values read from libdrm.
  */
-static void
-intel_compute_possible_clones(ScrnInfoPtr scrn, struct intel_mode *mode)
+static uint32_t find_clones(ScrnInfoPtr scrn, xf86OutputPtr output)
 {
-	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(scrn);
-	struct intel_output *intel_output, *clone;
-	drmModeEncoderPtr cloned_encoder;
-	uint32_t mask;
-	int i, j, k;
-	CARD32 possible_clones;
+	struct intel_output *intel_output = output->driver_private, *clone_drmout;
+	int i;
+	xf86OutputPtr clone_output;
+	xf86CrtcConfigPtr   xf86_config = XF86_CRTC_CONFIG_PTR(scrn);
+	int index_mask = 0;
 
-	for (i = 0; i < config->num_output; i++) {
-		possible_clones = 0;
-		intel_output = config->output[i]->driver_private;
+	if (intel_output->enc_clone_mask == 0)
+		return index_mask;
 
-		mask = intel_output->mode_encoder->possible_clones;
-		for (j = 0; mask != 0; j++, mask >>= 1) {
+	for (i = 0; i < xf86_config->num_output; i++) {
+		clone_output = xf86_config->output[i];
+		clone_drmout = clone_output->driver_private;
+		if (output == clone_output)
+			continue;
 
-			if ((mask & 1) == 0)
-				continue;
+		if (clone_drmout->enc_mask == 0)
+			continue;
+		if (intel_output->enc_clone_mask == clone_drmout->enc_mask)
+			index_mask |= (1 << i);
+	}
+	return index_mask;
+}
+static void
+intel_compute_possible_clones(ScrnInfoPtr scrn, struct intel_mode *mode, drmModeResPtr mode_res)
+{
+	int i, j;
+	xf86CrtcConfigPtr   xf86_config = XF86_CRTC_CONFIG_PTR(scrn);
 
-			cloned_encoder = intel_get_kencoder(mode, j);
-			if (!cloned_encoder)
-				continue;
+	for (i = 0; i < xf86_config->num_output; i++) {
+		xf86OutputPtr output = xf86_config->output[i];
+		struct intel_output *intel_output;
 
-			for (k = 0; k < config->num_output; k++) {
-				clone = config->output[k]->driver_private;
-				if (clone->mode_encoder->encoder_id ==
-				    cloned_encoder->encoder_id)
-					possible_clones |= (1 << k);
+		intel_output = output->driver_private;
+		intel_output->enc_clone_mask = 0xff;
+		/* and all the possible encoder clones for this output together */
+		for (j = 0; j < intel_output->mode_output->count_encoders; j++)
+		{
+			int k;
+			for (k = 0; k < mode_res->count_encoders; k++) {
+				if (mode_res->encoders[k] == intel_output->mode_encoders[j]->encoder_id)
+					intel_output->enc_mask |= (1 << k);
 			}
-		}
 
-		config->output[i]->possible_clones = possible_clones;
+			intel_output->enc_clone_mask &= intel_output->mode_encoders[j]->possible_clones;
+		}
+	}
+
+	for (i = 0; i < xf86_config->num_output; i++) {
+		xf86OutputPtr output = xf86_config->output[i];
+		output->possible_clones = find_clones(scrn, output);
 	}
 }
 
@@ -2024,6 +2179,7 @@ Bool intel_mode_pre_init(ScrnInfoPtr scrn, int fd, int cpp)
 	struct intel_mode *mode;
 	unsigned int i;
 	int has_flipping;
+	drmModeResPtr mode_res;
 
 	mode = calloc(1, sizeof *mode);
 	if (!mode)
@@ -2037,23 +2193,23 @@ Bool intel_mode_pre_init(ScrnInfoPtr scrn, int fd, int cpp)
 	xf86CrtcConfigInit(scrn, &intel_xf86crtc_config_funcs);
 
 	mode->cpp = cpp;
-	mode->mode_res = drmModeGetResources(mode->fd);
-	if (!mode->mode_res) {
+	mode_res = drmModeGetResources(mode->fd);
+	if (!mode_res) {
 		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
 			   "failed to get resources: %s\n", strerror(errno));
 		free(mode);
 		return FALSE;
 	}
 
-	xf86CrtcSetSizeRange(scrn, 320, 200, mode->mode_res->max_width,
-			     mode->mode_res->max_height);
-	for (i = 0; i < mode->mode_res->count_crtcs; i++)
-		intel_crtc_init(scrn, mode, i);
+	xf86CrtcSetSizeRange(scrn, 320, 200, mode_res->max_width,
+			     mode_res->max_height);
+	for (i = 0; i < mode_res->count_crtcs; i++)
+		intel_crtc_init(scrn, mode, mode_res, i);
 
-	for (i = 0; i < mode->mode_res->count_connectors; i++)
-		intel_output_init(scrn, mode, i);
+	for (i = 0; i < mode_res->count_connectors; i++)
+		intel_output_init(scrn, mode, mode_res, i, 0);
 
-	intel_compute_possible_clones(scrn, mode);
+	intel_compute_possible_clones(scrn, mode, mode_res);
 
 #ifdef INTEL_PIXMAP_SHARING
 	xf86ProviderSetup(scrn, NULL, "Intel");
@@ -2080,7 +2236,12 @@ Bool intel_mode_pre_init(ScrnInfoPtr scrn, int fd, int cpp)
 		intel->use_pageflipping = TRUE;
 	}
 
+	if (xf86ReturnOptValBool(intel->Options, OPTION_DELETE_DP12, FALSE)) {
+		mode->delete_dp_12_displays = TRUE;
+	}
+
 	intel->modes = mode;
+	drmModeFreeResources(mode_res);
 	return TRUE;
 }
 
@@ -2203,6 +2364,7 @@ Bool intel_crtc_on(xf86CrtcPtr crtc)
 
 	return ret;
 }
+
 
 static PixmapPtr
 intel_create_pixmap_for_bo(ScreenPtr pScreen, dri_bo *bo,
@@ -2330,4 +2492,155 @@ cleanup_dst:
 	(*pScreen->DestroyPixmap)(dst);
 cleanup_src:
 	(*pScreen->DestroyPixmap)(src);
+}
+
+void
+intel_mode_hotplug(struct intel_screen_private *intel)
+{
+	ScrnInfoPtr scrn = intel->scrn;
+	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(scrn);
+	drmModeResPtr mode_res;
+	int i, j;
+	Bool found;
+	Bool changed = FALSE;
+	struct intel_mode *mode = intel->modes;
+	mode_res = drmModeGetResources(intel->drmSubFD);
+	if (!mode_res)
+		goto out;
+
+restart_destroy:
+	for (i = 0; i < config->num_output; i++) {
+		xf86OutputPtr output = config->output[i];
+		struct intel_output *intel_output;
+
+		intel_output = output->driver_private;
+		found = FALSE;
+		for (j = 0; j < mode_res->count_connectors; j++) {
+			if (mode_res->connectors[j] == intel_output->output_id) {
+				found = TRUE;
+				break;
+			}
+		}
+		if (found)
+			continue;
+
+		drmModeFreeConnector(intel_output->mode_output);
+		intel_output->mode_output = NULL;
+		intel_output->output_id = -1;
+
+		changed = TRUE;
+		if (mode->delete_dp_12_displays) {
+			RROutputDestroy(output->randr_output);
+			xf86OutputDestroy(output);
+			goto restart_destroy;
+		}
+	}
+
+	/* find new output ids we don't have outputs for */
+	for (i = 0; i < mode_res->count_connectors; i++) {
+		found = FALSE;
+
+		for (j = 0; j < config->num_output; j++) {
+			xf86OutputPtr output = config->output[j];
+			struct intel_output *intel_output;
+
+			intel_output = output->driver_private;
+			if (mode_res->connectors[i] == intel_output->output_id) {
+				found = TRUE;
+				break;
+			}
+		}
+		if (found)
+			continue;
+
+		changed = TRUE;
+		intel_output_init(scrn, intel->modes, mode_res, i, 1);
+	}
+
+	if (changed) {
+		RRSetChanged(xf86ScrnToScreen(scrn));
+		RRTellChanged(xf86ScrnToScreen(scrn));
+	}
+
+	drmModeFreeResources(mode_res);
+out:
+	RRGetInfo(xf86ScrnToScreen(scrn), TRUE);
+}
+
+void intel_box_intersect(BoxPtr dest, BoxPtr a, BoxPtr b)
+{
+	dest->x1 = a->x1 > b->x1 ? a->x1 : b->x1;
+	dest->x2 = a->x2 < b->x2 ? a->x2 : b->x2;
+	if (dest->x1 >= dest->x2) {
+		dest->x1 = dest->x2 = dest->y1 = dest->y2 = 0;
+		return;
+	}
+
+	dest->y1 = a->y1 > b->y1 ? a->y1 : b->y1;
+	dest->y2 = a->y2 < b->y2 ? a->y2 : b->y2;
+	if (dest->y1 >= dest->y2)
+		dest->x1 = dest->x2 = dest->y1 = dest->y2 = 0;
+}
+
+void intel_crtc_box(xf86CrtcPtr crtc, BoxPtr crtc_box)
+{
+	if (crtc->enabled) {
+		crtc_box->x1 = crtc->x;
+		crtc_box->x2 =
+		    crtc->x + xf86ModeWidth(&crtc->mode, crtc->rotation);
+		crtc_box->y1 = crtc->y;
+		crtc_box->y2 =
+		    crtc->y + xf86ModeHeight(&crtc->mode, crtc->rotation);
+	} else
+		crtc_box->x1 = crtc_box->x2 = crtc_box->y1 = crtc_box->y2 = 0;
+}
+
+static int intel_box_area(BoxPtr box)
+{
+	return (int)(box->x2 - box->x1) * (int)(box->y2 - box->y1);
+}
+
+/*
+ * Return the crtc covering 'box'. If two crtcs cover a portion of
+ * 'box', then prefer 'desired'. If 'desired' is NULL, then prefer the crtc
+ * with greater coverage
+ */
+
+xf86CrtcPtr
+intel_covering_crtc(ScrnInfoPtr scrn,
+		    BoxPtr box, xf86CrtcPtr desired, BoxPtr crtc_box_ret)
+{
+	xf86CrtcConfigPtr xf86_config = XF86_CRTC_CONFIG_PTR(scrn);
+	xf86CrtcPtr crtc, best_crtc;
+	int coverage, best_coverage;
+	int c;
+	BoxRec crtc_box, cover_box;
+
+	best_crtc = NULL;
+	best_coverage = 0;
+	crtc_box_ret->x1 = 0;
+	crtc_box_ret->x2 = 0;
+	crtc_box_ret->y1 = 0;
+	crtc_box_ret->y2 = 0;
+	for (c = 0; c < xf86_config->num_crtc; c++) {
+		crtc = xf86_config->crtc[c];
+
+		/* If the CRTC is off, treat it as not covering */
+		if (!intel_crtc_on(crtc))
+			continue;
+
+		intel_crtc_box(crtc, &crtc_box);
+		intel_box_intersect(&cover_box, &crtc_box, box);
+		coverage = intel_box_area(&cover_box);
+		if (coverage && crtc == desired) {
+			*crtc_box_ret = crtc_box;
+			return crtc;
+		}
+		if (coverage > best_coverage) {
+			*crtc_box_ret = crtc_box;
+			best_crtc = crtc;
+			best_coverage = coverage;
+		}
+	}
+	return best_crtc;
 }

@@ -122,11 +122,21 @@ clip_to_dst(pixman_region16_t *region,
 }
 
 static inline bool
-clip_to_src(RegionPtr region, PicturePtr p, int dx, int	 dy)
+picture_has_clip(PicturePtr p)
+{
+#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,16,99,1,0)
+	return p->clientClip;
+#else
+	return p->clientClipType != CT_NONE;
+#endif
+}
+
+static inline bool
+clip_to_src(RegionPtr region, PicturePtr p, int dx, int dy)
 {
 	bool result;
 
-	if (p->clientClipType == CT_NONE)
+	if (!picture_has_clip(p))
 		return true;
 
 	pixman_region_translate(p->clientClip,
@@ -220,7 +230,7 @@ sna_compute_composite_region(RegionPtr region,
 		       __FUNCTION__,
 		       src->pDrawable ? src->pDrawable->width : 0,
 		       src->pDrawable ? src->pDrawable->height : 0,
-		       src->clientClipType,
+		       picture_has_clip(src),
 		       region->extents.x1, region->extents.y1,
 		       region->extents.x2, region->extents.y2));
 
@@ -287,7 +297,7 @@ trim_extents(BoxPtr extents, const PicturePtr p, int dx, int dy)
 static void
 _trim_source_extents(BoxPtr extents, const PicturePtr p, int dx, int dy)
 {
-	if (p->clientClipType != CT_NONE)
+	if (picture_has_clip(p))
 		trim_extents(extents, p, dx, dy);
 }
 
@@ -643,11 +653,12 @@ sna_composite(CARD8 op,
 	RegionRec region;
 	int dx, dy;
 
-	DBG(("%s(%d src=(%d, %d), mask=(%d, %d), dst=(%d, %d)+(%d, %d), size=(%d, %d)\n",
+	DBG(("%s(%d src=%ld+(%d, %d), mask=%ld+(%d, %d), dst=%ld+(%d, %d)+(%d, %d), size=(%d, %d)\n",
 	     __FUNCTION__, op,
-	     src_x, src_y,
-	     mask_x, mask_y,
-	     dst_x, dst_y, dst->pDrawable->x, dst->pDrawable->y,
+	     get_picture_id(src), src_x, src_y,
+	     get_picture_id(mask), mask_x, mask_y,
+	     get_picture_id(dst), dst_x, dst_y,
+	     dst->pDrawable->x, dst->pDrawable->y,
 	     width, height));
 
 	if (region_is_empty(dst->pCompositeClip)) {
@@ -685,8 +696,8 @@ sna_composite(CARD8 op,
 		goto fallback;
 	}
 
-	if (dst->alphaMap) {
-		DBG(("%s: fallback due to unhandled alpha-map\n", __FUNCTION__));
+	if (!can_render_to_picture(dst)) {
+		DBG(("%s: fallback due to unhandled picture\n", __FUNCTION__));
 		goto fallback;
 	}
 
@@ -945,8 +956,8 @@ sna_composite_rectangles(CARD8		 op,
 	if (wedged(sna))
 		goto fallback;
 
-	if (dst->alphaMap) {
-		DBG(("%s: fallback, dst has an alpha-map\n", __FUNCTION__));
+	if (!can_render_to_picture(dst)) {
+		DBG(("%s: fallback, dst has an incompatible picture\n", __FUNCTION__));
 		goto fallback;
 	}
 
