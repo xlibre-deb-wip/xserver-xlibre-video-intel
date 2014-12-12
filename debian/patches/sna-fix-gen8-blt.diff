@@ -1,0 +1,51 @@
+commit 3a22b6f6d55a5b1e0a1c0a3d597996268ed439ad
+Author: Mika Kuoppala <mika.kuoppala@linux.intel.com>
+Date:   Wed Nov 19 15:10:05 2014 +0200
+
+    sna: gen8 BLT broken when address has bit 4 set
+    
+    With bit 4 set in address, the gen8 blitter fails and blits errorneously
+    into the cacheline preceeding the destination and similarly when reading from
+    the source, corrupting memory.
+    
+    v2: Update the destination base offset pattern as revealed
+        by igt/tests/gem_userptr_blits/destination-bo-align
+    
+    v3: Check base address as well
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=79053
+    Cc: Chris Wilson <chris@chris-wilson.co.uk>
+    Tested-by: xunx.fang@intel.com [v2]
+    Signed-off-by: Mika Kuoppala <mika.kuoppala@intel.com>
+
+diff --git a/src/sna/kgem.h b/src/sna/kgem.h
+index 6adae3b..3275b4f 100644
+--- a/src/sna/kgem.h
++++ b/src/sna/kgem.h
+@@ -551,6 +551,13 @@ static inline bool kgem_bo_blt_pitch_is_ok(struct kgem *kgem,
+ 					   struct kgem_bo *bo)
+ {
+ 	int pitch = bo->pitch;
++
++	if (kgem->gen >= 0100 && pitch & (1 << 4)) { /* bdw is broken */
++		DBG(("%s: can not blt to handle=%d, pitch=%d\n",
++		     __FUNCTION__, bo->handle, pitch));
++		return false;
++	}
++
+ 	if (kgem->gen >= 040 && bo->tiling)
+ 		pitch /= 4;
+ 	if (pitch > MAXSHORT) {
+@@ -573,6 +580,12 @@ static inline bool kgem_bo_can_blt(struct kgem *kgem,
+ 		return false;
+ 	}
+ 
++	if (kgem->gen >= 0100 && bo->proxy && bo->delta & (1 << 4)) {
++		DBG(("%s: can not blt to handle=%d, delta=%d\n",
++		     __FUNCTION__, bo->handle, bo->delta));
++		return false;
++	}
++
+ 	return kgem_bo_blt_pitch_is_ok(kgem, bo);
+ }
+ 

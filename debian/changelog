@@ -1,3 +1,9 @@
+xserver-xorg-video-intel (2:2.99.910-0ubuntu1.4) UNRELEASED; urgency=medium
+
+  * sna-fix-gen8-blt.diff: Fix GEN8 BLT with 4bit address. (LP: #1401788)
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Fri, 12 Dec 2014 11:06:26 +0200
+
 xserver-xorg-video-intel (2:2.99.910-0ubuntu1.3) trusty-proposed; urgency=medium
 
   [ Maarten Lankhorst ]
