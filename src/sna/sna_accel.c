@@ -1416,6 +1416,9 @@ static void __sna_free_pixmap(struct sna *sna,
 
 	__sna_pixmap_free_cpu(sna, priv);
 
+	if (priv->flush)
+		sna_accel_watch_flush(sna, -1);
+
 	if (priv->header) {
 		assert(pixmap->drawable.pScreen == sna->scrn->pScreen);
 		assert(!priv->shm);
@@ -2701,6 +2704,13 @@ sna_drawable_move_region_to_cpu(DrawablePtr drawable,
 		return _sna_pixmap_move_to_cpu(pixmap, flags);
 	}
 
+	assert(priv->gpu_bo == NULL || priv->gpu_bo->proxy == NULL || (flags & MOVE_WRITE) == 0);
+
+	if (get_drawable_deltas(drawable, pixmap, &dx, &dy)) {
+		DBG(("%s: delta=(%d, %d)\n", __FUNCTION__, dx, dy));
+		RegionTranslate(region, dx, dy);
+	}
+
 	if (priv->move_to_gpu) {
 		DBG(("%s: applying move-to-gpu override\n", __FUNCTION__));
 		if ((flags & MOVE_READ) == 0)
@@ -2709,13 +2719,6 @@ sna_drawable_move_region_to_cpu(DrawablePtr drawable,
 			DBG(("%s: move-to-gpu override failed\n", __FUNCTION__));
 			return NULL;
 		}
-	}
-
-	assert(priv->gpu_bo == NULL || priv->gpu_bo->proxy == NULL || (flags & MOVE_WRITE) == 0);
-
-	if (get_drawable_deltas(drawable, pixmap, &dx, &dy)) {
-		DBG(("%s: delta=(%d, %d)\n", __FUNCTION__, dx, dy));
-		RegionTranslate(region, dx, dy);
 	}
 
 	if (operate_inplace(priv, flags) &&
@@ -17590,6 +17593,13 @@ sna_get_window_pixmap(WindowPtr window)
 static void
 sna_set_window_pixmap(WindowPtr window, PixmapPtr pixmap)
 {
+	DBG(("%s: window=%ld, old pixmap=%ld new pixmap=%ld\n",
+	     __FUNCTION__, window->drawable.id,
+	     get_window_pixmap(window) ? get_window_pixmap(window)->drawable.serialNumber : 0,
+	     pixmap->drawable.serialNumber));
+
+	sna_dri2_decouple_window(window);
+
 	*(PixmapPtr *)__get_private(window, sna_window_key) = pixmap;
 }
 
@@ -18010,6 +18020,9 @@ void sna_accel_block_handler(struct sna *sna, struct timeval **tv)
 		DBG(("%s: GPU idle, flushing\n", __FUNCTION__));
 		_kgem_submit(&sna->kgem);
 	}
+
+	if (sna->mode.dirty)
+		sna_crtc_config_notify(xf86ScrnToScreen(sna->scrn));
 
 restart:
 	if (sna_scanout_do_flush(sna))

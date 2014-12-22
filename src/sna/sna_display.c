@@ -127,6 +127,7 @@ struct sna_crtc {
 	bool shadow;
 	bool fallback_shadow;
 	bool transform;
+	bool flip_pending;
 	uint8_t id;
 	uint8_t pipe;
 
@@ -252,15 +253,6 @@ static inline bool event_pending(int fd)
 	pfd.fd = fd;
 	pfd.events = POLLIN;
 	return poll(&pfd, 1, 0) == 1;
-}
-
-static bool sna_mode_has_pending_events(struct sna *sna)
-{
-	/* In order to workaround a kernel bug in not honouring O_NONBLOCK,
-	 * check that the fd is readable before attempting to read the next
-	 * event from drm.
-	 */
-	return event_pending(sna->kgem.fd);
 }
 
 static bool sna_mode_wait_for_event(struct sna *sna)
@@ -989,6 +981,11 @@ sna_crtc_apply(xf86CrtcPtr crtc)
 	int i;
 
 	DBG(("%s CRTC:%d [pipe=%d], handle=%d\n", __FUNCTION__, sna_crtc->id, sna_crtc->pipe, sna_crtc->bo->handle));
+	if (!sna_crtc->kmode.clock) {
+		ERR(("%s(CRTC:%d [pipe=%d]): attempted to set an invalid mode\n",
+		     __FUNCTION__, sna_crtc->id, sna_crtc->pipe));
+		return false;
+	}
 
 	assert(sna->mode.num_real_output < ARRAY_SIZE(output_ids));
 	sna_crtc_disable_cursor(sna, sna_crtc);
@@ -1034,9 +1031,16 @@ sna_crtc_apply(xf86CrtcPtr crtc)
 
 		output_ids[output_count] = to_connector_id(output);
 		if (++output_count == ARRAY_SIZE(output_ids)) {
+			DBG(("%s: too many outputs (%d) for me!\n",
+			     __FUNCTION__, output_count));
 			errno = EINVAL;
 			return false;
 		}
+	}
+	if (output_count == 0) {
+		DBG(("%s: no outputs\n", __FUNCTION__));
+		errno = EINVAL;
+		return false;
 	}
 
 	VG_CLEAR(arg);
@@ -1097,6 +1101,7 @@ static bool wait_for_shadow(struct sna *sna,
 	PixmapPtr pixmap = priv->pixmap;
 	DamagePtr damage;
 	struct kgem_bo *bo, *tmp;
+	int flip_active;
 	bool ret = true;
 
 	DBG(("%s: flags=%x, flips=%d, handle=%d, shadow=%d\n",
@@ -1111,14 +1116,13 @@ static bool wait_for_shadow(struct sna *sna,
 
 	if ((flags & MOVE_WRITE) == 0) {
 		if ((flags & __MOVE_SCANOUT) == 0) {
-			while (!list_is_empty(&sna->mode.shadow_crtc)) {
-				struct sna_crtc *crtc =
-					list_first_entry(&sna->mode.shadow_crtc,
-							 struct sna_crtc,
-							 shadow_link);
+			struct sna_crtc *crtc;
+
+			list_for_each_entry(crtc, &sna->mode.shadow_crtc, shadow_link) {
 				if (overlap(&sna->mode.shadow_region.extents,
 					    &crtc->base->bounds)) {
 					DrawableRec draw;
+					RegionRec region;
 
 					draw.width = crtc->base->mode.HDisplay;
 					draw.height = crtc->base->mode.VDisplay;
@@ -1138,11 +1142,11 @@ static bool wait_for_shadow(struct sna *sna,
 								      &pixmap->drawable, priv->gpu_bo, 0, 0,
 								      &crtc->base->bounds, 1,
 								      0);
-				}
 
-				kgem_bo_destroy(&sna->kgem, crtc->client_bo);
-				crtc->client_bo = NULL;
-				list_del(&crtc->shadow_link);
+					region.extents = crtc->base->bounds;
+					region.data = NULL;
+					RegionSubtract(&sna->mode.shadow_region, &sna->mode.shadow_region, &region);
+				}
 			}
 		}
 
@@ -1154,17 +1158,32 @@ static bool wait_for_shadow(struct sna *sna,
 	damage = sna->mode.shadow_damage;
 	sna->mode.shadow_damage = NULL;
 
-	if (sna->mode.flip_active) {
+	flip_active = sna->mode.flip_active;
+	if (flip_active) {
+		struct sna_crtc *crtc;
+		list_for_each_entry(crtc, &sna->mode.shadow_crtc, shadow_link)
+			flip_active -= crtc->flip_pending;
+		DBG(("%s: %d flips still pending, shadow flip_active=%d\n",
+		     __FUNCTION__, sna->mode.flip_active, flip_active));
+	}
+	if (flip_active) {
 		/* raw cmd to avoid setting wedged in the middle of an op */
 		drmIoctl(sna->kgem.fd, DRM_IOCTL_I915_GEM_THROTTLE, 0);
 		sna->kgem.need_throttle = false;
 
-		while (sna->mode.flip_active && sna_mode_has_pending_events(sna))
-			sna_mode_wakeup(sna);
+		while (flip_active && sna_mode_wakeup(sna)) {
+			struct sna_crtc *crtc;
+
+			flip_active = sna->mode.flip_active;
+			list_for_each_entry(crtc, &sna->mode.shadow_crtc, shadow_link)
+				flip_active -= crtc->flip_pending;
+		}
+		DBG(("%s: after waiting %d flips outstanding, flip_active=%d\n",
+		     __FUNCTION__, sna->mode.flip_active, flip_active));
 	}
 
 	bo = sna->mode.shadow;
-	if (sna->mode.flip_active) {
+	if (flip_active) {
 		bo = kgem_create_2d(&sna->kgem,
 				    pixmap->drawable.width,
 				    pixmap->drawable.height,
@@ -1546,6 +1565,8 @@ static void update_flush_interval(struct sna *sna)
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(sna->scrn);
 	int i, max_vrefresh = 0;
 
+	DBG(("%s: front_active=%d\n", __FUNCTION__, sna->mode.front_active));
+
 	for (i = 0; i < sna->mode.num_real_crtc; i++) {
 		xf86CrtcPtr crtc = config->crtc[i];
 
@@ -1714,7 +1735,7 @@ static bool use_shadow(struct sna *sna, xf86CrtcPtr crtc)
 	RRTransformPtr transform;
 	PictTransform crtc_to_fb;
 	struct pict_f_transform f_crtc_to_fb, f_fb_to_crtc;
-	unsigned long pitch_limit;
+	unsigned pitch_limit;
 	struct sna_pixmap *priv;
 	BoxRec b;
 
@@ -1731,7 +1752,7 @@ static bool use_shadow(struct sna *sna, xf86CrtcPtr crtc)
 	}
 
 	if (sna->flags & SNA_TEAR_FREE && to_sna_crtc(crtc)->slave_pixmap) {
-		DBG(("%s: tear-free shadow required\n", __FUNCTION__));
+		DBG(("%s: TearFree shadow required\n", __FUNCTION__));
 		return true;
 	}
 
@@ -1907,7 +1928,7 @@ static struct kgem_bo *sna_crtc_attach(xf86CrtcPtr crtc)
 
 force_shadow:
 		if (!sna_crtc_enable_shadow(sna, sna_crtc)) {
-			DBG(("%s: failed to enable crtc shadow\n"));
+			DBG(("%s: failed to enable crtc shadow\n", __FUNCTION__));
 			return NULL;
 		}
 
@@ -2296,6 +2317,7 @@ retry: /* Attach per-crtc pixmap or direct */
 		sna_crtc_damage(crtc);
 	sna->mode.front_active += saved_bo == NULL;
 	sna->mode.dirty = true;
+	DBG(("%s: front_active=%d\n", __FUNCTION__, sna->mode.front_active));
 
 	return TRUE;
 
@@ -2517,8 +2539,8 @@ static int plane_details(struct sna *sna, struct plane *p)
 			continue;
 		}
 
-		DBG(("%s: prop[%d] .id=%d, .name=%s, .flags=%x, .value=%ld\n", __FUNCTION__, i,
-		     (long)props[i], prop.name, prop.flags, (long)values[i]));
+		DBG(("%s: prop[%d] .id=%ld, .name=%s, .flags=%x, .value=%ld\n", __FUNCTION__, i,
+		     (long)props[i], prop.name, (unsigned)prop.flags, (long)values[i]));
 
 		if (strcmp(prop.name, "type") == 0) {
 			type = values[i];
@@ -2592,7 +2614,7 @@ sna_crtc_find_planes(struct sna *sna, struct sna_crtc *crtc)
 		return;
 	}
 
-	DBG(("%s: %d planes\n", __FUNCTION__, r.count_planes));
+	DBG(("%s: %d planes\n", __FUNCTION__, (int)r.count_planes));
 
 	if (r.count_planes > ARRAY_SIZE(stack_planes)) {
 		planes = malloc(sizeof(uint32_t)*r.count_planes);
@@ -4052,7 +4074,7 @@ static void sort_randr_outputs(struct sna *sna, ScreenPtr screen)
 	}
 }
 
-static void disable_unused_crtc(struct sna *sna)
+static bool disable_unused_crtc(struct sna *sna)
 {
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(sna->scrn);
 	bool update = false;
@@ -4064,7 +4086,6 @@ static void disable_unused_crtc(struct sna *sna)
 		if (!crtc->enabled)
 			continue;
 
-
 		for (o = 0; o < sna->mode.num_real_output; o++) {
 			xf86OutputPtr output = config->output[o];
 			if (output->crtc == crtc)
@@ -4072,13 +4093,19 @@ static void disable_unused_crtc(struct sna *sna)
 		}
 
 		if (o == sna->mode.num_real_output) {
+			DBG(("%s: CRTC:%d was enabled with no outputs\n",
+			     __FUNCTION__, to_sna_crtc(crtc)->id));
 			crtc->enabled = false;
 			update = true;
 		}
 	}
 
-	if (update)
+	if (update) {
+		DBG(("%s: disabling unused functions\n", __FUNCTION__));
 		xf86DisableUnusedFunctions(sna->scrn);
+	}
+
+	return update;
 }
 
 void sna_mode_discover(struct sna *sna)
@@ -4347,9 +4374,7 @@ sna_mode_resize(ScrnInfoPtr scrn, int width, int height)
 			sna_crtc_disable(crtc);
 	}
 
-	while (sna_mode_has_pending_events(sna))
-		sna_mode_wakeup(sna);
-
+	sna_mode_wakeup(sna);
 	kgem_clean_scanout_cache(&sna->kgem);
 
 	return TRUE;
@@ -5171,6 +5196,8 @@ sna_crtc_flip(struct sna *sna, struct sna_crtc *crtc, struct kgem_bo *bo, int x,
 	DBG(("%s CRTC:%d [pipe=%d], handle=%d\n", __FUNCTION__, crtc->id, crtc->pipe, bo->handle));
 
 	assert(sna->mode.num_real_output < ARRAY_SIZE(output_ids));
+	assert(crtc->bo);
+	assert(crtc->kmode.clock);
 
 	for (i = 0; i < sna->mode.num_real_output; i++) {
 		xf86OutputPtr output = config->output[i];
@@ -5191,6 +5218,7 @@ sna_crtc_flip(struct sna *sna, struct sna_crtc *crtc, struct kgem_bo *bo, int x,
 		if (++output_count == ARRAY_SIZE(output_ids))
 			return false;
 	}
+	assert(output_count);
 
 	VG_CLEAR(arg);
 	arg.crtc_id = crtc->id;
@@ -5361,6 +5389,7 @@ retry_flip:
 			crtc->flip_bo = kgem_bo_reference(bo);
 			crtc->flip_bo->active_scanout++;
 			crtc->flip_serial = crtc->mode_serial;
+			crtc->flip_pending = true;
 			sna->mode.flip_active++;
 		}
 
@@ -5775,11 +5804,19 @@ sna_crtc_config_notify(ScreenPtr screen)
 	if (!sna->mode.dirty)
 		return;
 
-	probe_capabilities(sna);
-	update_flush_interval(sna);
+	if (disable_unused_crtc(sna)) {
+		/* This will have recursed, so simply bail at this point */
+		assert(sna->mode.dirty == false);
+#ifdef RANDR_12_INTERFACE
+		xf86RandR12TellChanged(screen);
+#endif
+		return;
+	}
 
+	update_flush_interval(sna);
 	sna_cursors_reload(sna);
 
+	probe_capabilities(sna);
 	sna_present_update(sna);
 
 	sna->mode.dirty = false;
@@ -5907,7 +5944,7 @@ sna_mode_set_primary(struct sna *sna)
 	rrScrPrivPtr rr = rrGetScrPriv(xf86ScrnToScreen(sna->scrn));
 	int i;
 
-	if (rr->primaryOutput)
+	if (rr == NULL || rr->primaryOutput)
 		return;
 
 	for (i = 0; i < sna->mode.num_real_output; i++) {
@@ -5943,10 +5980,9 @@ sna_mode_disable(struct sna *sna)
 	sna_hide_cursors(sna->scrn);
 	for (i = 0; i < sna->mode.num_real_crtc; i++)
 		sna_crtc_disable(config->crtc[i]);
+	assert(sna->mode.front_active == 0);
 
-	while (sna_mode_has_pending_events(sna))
-		sna_mode_wakeup(sna);
-
+	sna_mode_wakeup(sna);
 	kgem_clean_scanout_cache(&sna->kgem);
 	return true;
 }
@@ -5957,6 +5993,8 @@ sna_mode_enable(struct sna *sna)
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(sna->scrn);
 	int i;
 
+	DBG(("%s\n", __FUNCTION__));
+
 	if (sna->flags & SNA_IS_HOSTED)
 		return;
 
@@ -5966,8 +6004,12 @@ sna_mode_enable(struct sna *sna)
 	for (i = 0; i < sna->mode.num_real_crtc; i++) {
 		xf86CrtcPtr crtc = config->crtc[i];
 
+		DBG(("%s: crtc[%d].enabled?=%d\n", __FUNCTION__, i, crtc->enabled));
 		assert(to_sna_crtc(crtc) != NULL);
 		if (!crtc->enabled)
+			continue;
+
+		if (crtc->mode.Clock == 0)
 			continue;
 
 		__sna_crtc_set_mode(crtc);
@@ -5975,13 +6017,13 @@ sna_mode_enable(struct sna *sna)
 
 	update_flush_interval(sna);
 	sna_show_cursors(sna->scrn);
+	sna->mode.dirty = false;
 }
 
 void
 sna_mode_close(struct sna *sna)
 {
-	while (sna_mode_has_pending_events(sna))
-		sna_mode_wakeup(sna);
+	sna_mode_wakeup(sna);
 
 	if (sna->flags & SNA_IS_HOSTED)
 		return;
@@ -5992,6 +6034,7 @@ sna_mode_close(struct sna *sna)
 	sna_cursors_fini(sna);
 
 	sna_backlight_close(sna);
+	sna->mode.dirty = false;
 }
 
 void
@@ -6268,7 +6311,7 @@ static bool sna_emit_wait_for_scanline_gen6(struct sna *sna,
 	event = 1 << (3*full_height + pipe*8);
 
 	b = kgem_get_batch(&sna->kgem);
-	sna->kgem.nbatch += 10;
+	sna->kgem.nbatch += 16;
 
 	b[0] = MI_LOAD_REGISTER_IMM | 1;
 	b[1] = 0x44050; /* DERRMR */
@@ -6276,10 +6319,16 @@ static bool sna_emit_wait_for_scanline_gen6(struct sna *sna,
 	b[3] = MI_LOAD_REGISTER_IMM | 1;
 	b[4] = 0x4f100; /* magic */
 	b[5] = (1 << 31) | (1 << 30) | pipe << 29 | (y1 << 16) | y2;
-	b[6] = MI_WAIT_FOR_EVENT | event;
-	b[7] = MI_LOAD_REGISTER_IMM | 1;
-	b[8] = 0x44050; /* DERRMR */
-	b[9] = ~0;
+	b[6] = MI_LOAD_REGISTER_IMM | 1;
+	b[7] = 0x2050; /* PSMI_CTL(rcs) */
+	b[8] = 1 << 16 | 1;
+	b[9] = MI_WAIT_FOR_EVENT | event;
+	b[10] = MI_LOAD_REGISTER_IMM | 1;
+	b[11] = 0x2050; /* PSMI_CTL(rcs) */
+	b[12] = 1 << 16;
+	b[13] = MI_LOAD_REGISTER_IMM | 1;
+	b[14] = 0x44050; /* DERRMR */
+	b[15] = ~0;
 
 	sna->kgem.batch_flags |= I915_EXEC_SECURE;
 	return true;
@@ -6545,8 +6594,7 @@ void sna_mode_reset(struct sna *sna)
 	}
 
 	/* drain the event queue */
-	while (sna_mode_has_pending_events(sna))
-		sna_mode_wakeup(sna);
+	sna_mode_wakeup(sna);
 }
 
 static void transformed_box(BoxRec *box, xf86CrtcPtr crtc)
@@ -6601,7 +6649,7 @@ sna_crtc_redisplay__fallback(xf86CrtcPtr crtc, RegionPtr region, struct kgem_bo 
 	int depth, error;
 	void *ptr;
 
-	DBG(("%s: compositing transformed damage boxes\n", __FUNCTION__));
+	DBG(("%s: compositing transformed damage boxes, target handle=%d\n", __FUNCTION__, bo->handle));
 
 	error = sna_render_format_for_depth(draw->depth);
 	depth = PIXMAN_FORMAT_DEPTH(error);
@@ -6884,6 +6932,37 @@ void sna_shadow_set_crtc(struct sna *sna,
 	priv->move_to_gpu_data = sna;
 }
 
+void sna_shadow_steal_crtcs(struct sna *sna, struct list *list)
+{
+	list_init(list);
+	while (!list_is_empty(&sna->mode.shadow_crtc)) {
+		RegionRec sub, *damage;
+		struct sna_crtc *crtc =
+			list_first_entry(&sna->mode.shadow_crtc,
+					 struct sna_crtc,
+					 shadow_link);
+
+		damage = DamageRegion(sna->mode.shadow_damage);
+		sub.extents = crtc->base->bounds;
+		sub.data = NULL;
+		RegionSubtract(damage, damage, &sub);
+
+		list_move(&crtc->shadow_link, list);
+	}
+}
+
+void sna_shadow_unsteal_crtcs(struct sna *sna, struct list *list)
+{
+	while (!list_is_empty(list)) {
+		struct sna_crtc *crtc =
+			list_first_entry(list,
+					 struct sna_crtc,
+					 shadow_link);
+		assert(crtc->client_bo);
+		sna_shadow_set_crtc(sna, crtc->base, crtc->client_bo);
+	}
+}
+
 void sna_shadow_unset_crtc(struct sna *sna,
 			   xf86CrtcPtr crtc)
 {
@@ -6912,12 +6991,16 @@ void sna_mode_redisplay(struct sna *sna)
 	if (!sna->mode.shadow_damage)
 		return;
 
-	DBG(("%s: posting shadow damage? %d (flips pending? %d)\n",
+	DBG(("%s: posting shadow damage? %d (flips pending? %d, mode reconfiguration pending? %d)\n",
 	     __FUNCTION__,
 	     !RegionNil(DamageRegion(sna->mode.shadow_damage)),
-	     sna->mode.flip_active));
+	     sna->mode.flip_active,
+	     sna->mode.dirty));
 	assert((sna->flags & SNA_IS_HOSTED) == 0);
 	assert(sna->mode.shadow_active);
+
+	if (sna->mode.dirty)
+		return;
 
 	region = DamageRegion(sna->mode.shadow_damage);
 	if (RegionNil(region))
@@ -6934,8 +7017,8 @@ void sna_mode_redisplay(struct sna *sna)
 		damage = sna->mode.shadow_damage;
 		sna->mode.shadow_damage = NULL;
 
-		while (sna->mode.flip_active && sna_mode_has_pending_events(sna))
-			sna_mode_wakeup(sna);
+		while (sna->mode.flip_active && sna_mode_wakeup(sna))
+			;
 
 		sna->mode.shadow_damage = damage;
 	}
@@ -6963,8 +7046,13 @@ void sna_mode_redisplay(struct sna *sna)
 			damage.extents = crtc->bounds;
 			damage.data = NULL;
 			RegionIntersect(&damage, &damage, region);
-			if (RegionNotEmpty(&damage)) {
+			if (!box_empty(&damage.extents)) {
 				struct kgem_bo *bo = NULL;
+
+				DBG(("%s: fallback intersects pipe=%d [(%d, %d), (%d, %d)]\n",
+				     __FUNCTION__, sna_crtc->pipe,
+				     damage.extents.x1, damage.extents.y1,
+				     damage.extents.x2, damage.extents.y2));
 
 				if (sna->flags & SNA_TEAR_FREE) {
 					RegionRec new_damage;
@@ -6984,6 +7072,9 @@ void sna_mode_redisplay(struct sna *sna)
 								CREATE_SCANOUT);
 					} else
 						RegionUnion(&damage, &damage, &sna_crtc->client_damage);
+
+					DBG(("%s: TearFree fallback, shadow handle=%d, crtc handle=%d\n", __FUNCTION__, bo->handle, sna_crtc->bo->handle));
+
 					sna_crtc->client_damage = new_damage;
 				}
 
@@ -7010,12 +7101,14 @@ void sna_mode_redisplay(struct sna *sna)
 							sna_crtc->bo->active_scanout--;
 							kgem_bo_destroy(&sna->kgem, sna_crtc->bo);
 
-							sna_crtc->bo = kgem_bo_reference(bo);
+							sna_crtc->bo = bo;
 							sna_crtc->bo->active_scanout++;
-							sna_crtc->client_bo = kgem_bo_reference(bo);
+							sna_crtc->client_bo = NULL;
 						} else {
 							DBG(("%s: flip [fb=%d] on crtc %d [%d, pipe=%d] failed - %d\n",
 							     __FUNCTION__, arg.fb_id, i, sna_crtc->id, sna_crtc->pipe, errno));
+							xf86DrvMsg(sna->scrn->scrnIndex, X_ERROR,
+								   "Page flipping failed, disabling TearFree\n");
 							sna->flags &= ~SNA_TEAR_FREE;
 
 							damage.extents = crtc->bounds;
@@ -7093,7 +7186,13 @@ void sna_mode_redisplay(struct sna *sna)
 		damage.data = NULL;
 
 		RegionIntersect(&damage, &damage, region);
-		if (RegionNotEmpty(&damage)) {
+		DBG(("%s: crtc[%d] damage? %d[%d]: %dx[(%d, %d), (%d, %d)]\n",
+		     __FUNCTION__, i,
+		     !box_empty(&damage.extents), RegionNotEmpty(&damage),
+		     region_num_rects(&damage),
+		     damage.extents.x1, damage.extents.y1,
+		     damage.extents.x2, damage.extents.y2));
+		if (!box_empty(&damage.extents)) {
 			if (sna->flags & SNA_TEAR_FREE) {
 				struct drm_mode_crtc_page_flip arg;
 				struct kgem_bo *bo;
@@ -7143,6 +7242,8 @@ void sna_mode_redisplay(struct sna *sna)
 
 						DBG(("%s: flip [fb=%d] on crtc %d [%d, pipe=%d] failed - %d\n",
 						     __FUNCTION__, arg.fb_id, i, sna_crtc->id, sna_crtc->pipe, errno));
+						xf86DrvMsg(sna->scrn->scrnIndex, X_ERROR,
+							   "Page flipping failed, disabling TearFree\n");
 						sna->flags &= ~SNA_TEAR_FREE;
 
 disable1:
@@ -7176,6 +7277,7 @@ disable1:
 				sna_crtc->flip_bo = bo;
 				sna_crtc->flip_bo->active_scanout++;
 				sna_crtc->flip_serial = sna_crtc->mode_serial;
+				sna_crtc->flip_pending = true;
 
 				sna_crtc->client_bo = kgem_bo_reference(sna_crtc->bo);
 			} else {
@@ -7195,7 +7297,7 @@ disable1:
 		struct drm_mode_crtc_page_flip arg;
 		uint32_t fb = 0;
 
-		DBG(("%s: flipping tear-free outputs, current scanout handle=%d [active?=%d], new handle=%d [active=%d]\n",
+		DBG(("%s: flipping TearFree outputs, current scanout handle=%d [active?=%d], new handle=%d [active=%d]\n",
 		     __FUNCTION__, old->handle, old->active_scanout, new->handle, new->active_scanout));
 
 		assert(new != old);
@@ -7267,7 +7369,7 @@ fixup_shadow:
 				continue;
 
 			if (flip_bo->pitch != crtc->bo->pitch || (y << 16 | x)  != crtc->offset) {
-				DBG(("%s: changing pitch (%d == %d) or offset (%x == %x)\n",
+				DBG(("%s: changing pitch (new %d =?= old %d) or offset (new %x =?= old %x)\n",
 				     __FUNCTION__,
 				     flip_bo->pitch, crtc->bo->pitch,
 				     y << 16 | x, crtc->offset));
@@ -7287,7 +7389,10 @@ fixup_flip:
 					crtc->bo = kgem_bo_reference(flip_bo);
 					crtc->bo->active_scanout++;
 				} else {
+					xf86DrvMsg(sna->scrn->scrnIndex, X_ERROR,
+						   "Failed to prepare CRTC for page flipping, disabling TearFree\n");
 					sna->flags &= ~SNA_TEAR_FREE;
+
 					if (sna->mode.flip_active == 0) {
 						DBG(("%s: abandoning flip attempt\n", __FUNCTION__));
 						goto fixup_shadow;
@@ -7314,6 +7419,7 @@ fixup_flip:
 			crtc->flip_bo = kgem_bo_reference(flip_bo);
 			crtc->flip_bo->active_scanout++;
 			crtc->flip_serial = crtc->mode_serial;
+			crtc->flip_pending = true;
 
 			{
 				struct drm_i915_gem_busy busy = { flip_bo->handle };
@@ -7346,17 +7452,26 @@ fixup_flip:
 	RegionEmpty(region);
 }
 
-void sna_mode_wakeup(struct sna *sna)
+int sna_mode_wakeup(struct sna *sna)
 {
 	char buffer[1024];
 	int len, i;
+	int ret = 0;
+
+again:
+	/* In order to workaround a kernel bug in not honouring O_NONBLOCK,
+	 * check that the fd is readable before attempting to read the next
+	 * event from drm.
+	 */
+	if (!event_pending(sna->kgem.fd))
+		return ret;
 
 	/* The DRM read semantics guarantees that we always get only
 	 * complete events.
 	 */
 	len = read(sna->kgem.fd, buffer, sizeof (buffer));
 	if (len < (int)sizeof(struct drm_event))
-		return;
+		return ret;
 
 	/* Note that we cannot rely on the passed in struct sna matching
 	 * the struct sna used for the vblank event (in case it was submitted
@@ -7387,6 +7502,7 @@ void sna_mode_wakeup(struct sna *sna)
 				crtc->swap.tv_sec = vbl->tv_sec;
 				crtc->swap.tv_usec = vbl->tv_usec;
 				crtc->swap.msc = msc64(crtc, vbl->sequence);
+				crtc->flip_pending = false;
 
 				assert(crtc->flip_bo);
 				assert(crtc->flip_bo->active_scanout);
@@ -7423,5 +7539,8 @@ void sna_mode_wakeup(struct sna *sna)
 			break;
 		}
 		i += e->length;
+		ret++;
 	}
+
+	goto again;
 }

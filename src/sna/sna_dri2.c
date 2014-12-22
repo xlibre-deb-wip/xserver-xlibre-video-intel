@@ -234,7 +234,11 @@ dri2_chain(DrawablePtr d)
 	assert(priv != NULL);
 	return priv->chain;
 }
-inline static DRI2BufferPtr dri2_window_get_front(WindowPtr win) { return dri2_window(win)->front; }
+inline static DRI2BufferPtr dri2_window_get_front(WindowPtr win)
+{
+	struct dri2_window *priv = dri2_window(win);
+	return priv ? priv->front : NULL;
+}
 #else
 inline static void *dri2_window_get_front(WindowPtr win) { return NULL; }
 #endif
@@ -423,10 +427,13 @@ sna_dri2_pixmap_update_bo(struct sna *sna, PixmapPtr pixmap, struct kgem_bo *bo)
 	kgem_bo_destroy(&sna->kgem, private->bo);
 
 	buffer->name = kgem_bo_flink(&sna->kgem, bo);
+	buffer->pitch = bo->pitch;
 	private->bo = ref(bo);
 
 	DBG(("%s: adding flush hint to handle=%d\n", __FUNCTION__, bo->handle));
 	bo->flush = true;
+	if (bo->exec)
+		sna->kgem.flush = 1;
 	assert(sna_pixmap(pixmap)->flush);
 
 	/* XXX DRI2InvalidateDrawable(&pixmap->drawable); */
@@ -446,10 +453,11 @@ sna_dri2_create_buffer(DrawablePtr draw,
 	uint32_t size;
 	int bpp;
 
-	DBG(("%s pixmap=%ld, (attachment=%d, format=%d, drawable=%dx%d)\n",
+	DBG(("%s pixmap=%ld, (attachment=%d, format=%d, drawable=%dx%d), window?=%d\n",
 	     __FUNCTION__,
 	     get_drawable_pixmap(draw)->drawable.serialNumber,
-	     attachment, format, draw->width, draw->height));
+	     attachment, format, draw->width, draw->height,
+	     draw->type != DRAWABLE_PIXMAP));
 
 	pixmap = NULL;
 	size = (uint32_t)draw->height << 16 | draw->width;
@@ -464,11 +472,12 @@ sna_dri2_create_buffer(DrawablePtr draw,
 		if (buffer) {
 			private = get_private(buffer);
 
-			DBG(("%s: reusing front buffer attachment, win=%lu %dx%d, pixmap=%ld %dx%d, handle=%d, name=%d\n",
+			DBG(("%s: reusing front buffer attachment, win=%lu %dx%d, pixmap=%ld [%ld] %dx%d, handle=%d, name=%d\n",
 			     __FUNCTION__,
 			     draw->type != DRAWABLE_PIXMAP ? (long)draw->id : (long)0,
 			     draw->width, draw->height,
 			     pixmap->drawable.serialNumber,
+			     private->pixmap->drawable.serialNumber,
 			     pixmap->drawable.width,
 			     pixmap->drawable.height,
 			     private->bo->handle, buffer->name));
@@ -999,6 +1008,10 @@ __sna_dri2_copy_region(struct sna *sna, DrawablePtr draw, RegionPtr region,
 	assert(dst_bo->refcnt);
 	if (is_front(dst->attachment)) {
 		struct sna_pixmap *priv;
+		struct list shadow;
+
+		/* Preserve the CRTC shadow overrides */
+		sna_shadow_steal_crtcs(sna, &shadow);
 
 		flags = MOVE_WRITE | __MOVE_FORCE;
 		if (clip.data)
@@ -1013,6 +1026,8 @@ __sna_dri2_copy_region(struct sna *sna, DrawablePtr draw, RegionPtr region,
 		DBG(("%s: updated FrontLeft dst_bo from handle=%d to handle=%d\n",
 		     __FUNCTION__, dst_priv->bo->handle, dst_bo->handle));
 		assert(dst_bo->refcnt);
+
+		sna_shadow_unsteal_crtcs(sna, &shadow);
 	} else {
 		RegionRec target;
 
@@ -1224,19 +1239,13 @@ draw_target_seq(DrawablePtr draw, uint64_t msc)
 static xf86CrtcPtr
 sna_dri2_get_crtc(DrawablePtr draw)
 {
-	struct sna *sna = to_sna_from_drawable(draw);
-	BoxRec box;
-
 	if (draw->type == DRAWABLE_PIXMAP)
 		return NULL;
 
-	box.x1 = draw->x;
-	box.y1 = draw->y;
-	box.x2 = box.x1 + draw->width;
-	box.y2 = box.y1 + draw->height;
-
 	/* Make sure the CRTC is valid and this is the real front buffer */
-	return sna_covering_crtc(sna, &box, NULL);
+	return sna_covering_crtc(to_sna_from_drawable(draw),
+				 &((WindowPtr)draw)->clipList.extents,
+				 NULL);
 }
 
 static void
@@ -1400,19 +1409,37 @@ sna_dri2_add_event(struct sna *sna, DrawablePtr draw, ClientPtr client)
 	return info;
 }
 
-void sna_dri2_destroy_window(WindowPtr win)
+void sna_dri2_decouple_window(WindowPtr win)
 {
-	struct sna *sna;
 	struct dri2_window *priv;
 
 	priv = dri2_window(win);
 	if (priv == NULL)
 		return;
 
-	DBG(("%s: window=%ld\n", __FUNCTION__, win->drawable.serialNumber));
-	sna = to_sna_from_drawable(&win->drawable);
+	DBG(("%s: window=%ld\n", __FUNCTION__, win->drawable.id));
 
 	if (priv->front) {
+		struct sna *sna = to_sna_from_drawable(&win->drawable);
+		assert(priv->crtc);
+		sna_shadow_unset_crtc(sna, priv->crtc);
+		_sna_dri2_destroy_buffer(sna, priv->front);
+		priv->front = NULL;
+	}
+}
+
+void sna_dri2_destroy_window(WindowPtr win)
+{
+	struct dri2_window *priv;
+
+	priv = dri2_window(win);
+	if (priv == NULL)
+		return;
+
+	DBG(("%s: window=%ld\n", __FUNCTION__, win->drawable.id));
+
+	if (priv->front) {
+		struct sna *sna = to_sna_from_drawable(&win->drawable);
 		assert(priv->crtc);
 		sna_shadow_unset_crtc(sna, priv->crtc);
 		_sna_dri2_destroy_buffer(sna, priv->front);
@@ -1453,6 +1480,7 @@ sna_dri2_flip(struct sna_dri2_event *info)
 	struct kgem_bo *bo = get_private(info->back)->bo;
 	struct kgem_bo *tmp_bo;
 	uint32_t tmp_name;
+	int tmp_pitch;
 
 	DBG(("%s(type=%d)\n", __FUNCTION__, info->type));
 
@@ -1476,13 +1504,16 @@ sna_dri2_flip(struct sna_dri2_event *info)
 
 	tmp_bo = get_private(info->front)->bo;
 	tmp_name = info->front->name;
+	tmp_pitch = info->front->pitch;
 
 	set_bo(info->sna->front, bo);
 
 	info->front->name = info->back->name;
+	info->front->pitch = info->back->pitch;
 	get_private(info->front)->bo = bo;
 
 	info->back->name = tmp_name;
+	info->back->pitch = tmp_pitch;
 	get_private(info->back)->bo = tmp_bo;
 	mark_stale(info->back);
 
@@ -3120,6 +3151,7 @@ out_complete:
 }
 #else
 void sna_dri2_destroy_window(WindowPtr win) { }
+void sna_dri2_decouple_window(WindowPtr win) { }
 #endif
 
 static bool has_i830_dri(void)
