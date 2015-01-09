@@ -49,7 +49,7 @@ Build-Depends:
  libxtst-dev,
  libxrender-dev,
  libpixman-1-dev,
-Standards-Version: 3.9.5
+Standards-Version: 3.9.6
 Vcs-Git: git://anonscm.debian.org/pkg-xorg/driver/xserver-xorg-video-intel
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-xorg/driver/xserver-xorg-video-intel.git
 Homepage: http://www.x.org/

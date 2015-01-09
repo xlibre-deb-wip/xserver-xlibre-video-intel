@@ -1,3 +1,11 @@
+xserver-xorg-video-intel (2:2.99.917-1~exp1) experimental; urgency=medium
+
+  * New upstream prerelease 2.99.917.
+  * Update upstream changelog.
+  * Update to Standards version 3.9.6.
+
+ -- Vincent Cheng <vcheng@debian.org>  Sun, 21 Dec 2014 21:37:27 -0800
+
 xserver-xorg-video-intel (2:2.99.916+git20141119-1~exp1ubuntu1) vivid; urgency=medium
 
   * Merge from debian experimental (LP: #1401784, #1401788)

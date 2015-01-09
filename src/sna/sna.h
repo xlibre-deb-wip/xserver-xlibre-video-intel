@@ -78,15 +78,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "xassert.h"
 #include "compiler.h"
-
-#if HAS_DEBUG_FULL
-void LogF(const char *f, ...);
-#define DBG(x) LogF x
-#define ERR(x) ErrorF x
-#else
-#define DBG(x)
-#define ERR(x)
-#endif
+#include "debug.h"
 
 #define DEBUG_NO_BLT 0
 
@@ -433,9 +425,11 @@ extern void sna_mode_check(struct sna *sna);
 extern bool sna_mode_disable(struct sna *sna);
 extern void sna_mode_enable(struct sna *sna);
 extern void sna_mode_reset(struct sna *sna);
-extern void sna_mode_wakeup(struct sna *sna);
+extern int sna_mode_wakeup(struct sna *sna);
 extern void sna_mode_redisplay(struct sna *sna);
 extern void sna_shadow_set_crtc(struct sna *sna, xf86CrtcPtr crtc, struct kgem_bo *bo);
+extern void sna_shadow_steal_crtcs(struct sna *sna, struct list *list);
+extern void sna_shadow_unsteal_crtcs(struct sna *sna, struct list *list);
 extern void sna_shadow_unset_crtc(struct sna *sna, xf86CrtcPtr crtc);
 extern bool sna_pixmap_discard_shadow_damage(struct sna_pixmap *priv,
 					     const RegionRec *region);
@@ -547,6 +541,7 @@ bool sna_dri2_open(struct sna *sna, ScreenPtr pScreen);
 void sna_dri2_page_flip_handler(struct sna *sna, struct drm_event_vblank *event);
 void sna_dri2_vblank_handler(struct drm_event_vblank *event);
 void sna_dri2_pixmap_update_bo(struct sna *sna, PixmapPtr pixmap, struct kgem_bo *bo);
+void sna_dri2_decouple_window(WindowPtr win);
 void sna_dri2_destroy_window(WindowPtr win);
 void sna_dri2_close(struct sna *sna, ScreenPtr pScreen);
 #else
@@ -554,6 +549,7 @@ static inline bool sna_dri2_open(struct sna *sna, ScreenPtr pScreen) { return fa
 static inline void sna_dri2_page_flip_handler(struct sna *sna, struct drm_event_vblank *event) { }
 static inline void sna_dri2_vblank_handler(struct drm_event_vblank *event) { }
 static inline void sna_dri2_pixmap_update_bo(struct sna *sna, PixmapPtr pixmap, struct kgem_bo *bo) { }
+static inline void sna_dri2_decouple_window(WindowPtr win) { }
 static inline void sna_dri2_destroy_window(WindowPtr win) { }
 static inline void sna_dri2_close(struct sna *sna, ScreenPtr pScreen) { }
 #endif

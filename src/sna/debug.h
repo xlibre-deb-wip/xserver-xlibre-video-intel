@@ -19,30 +19,26 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
+ *
+ * Authors:
+ *    Chris Wilson <chris@chris-wilson.co.uk>
+ *
  */
 
-#ifndef __XASSERT_H__
-#define __XASSERT_H__
+#ifndef _SNA_DEBUG_H_
+#define _SNA_DEBUG_H_
 
-/* Rewrap the traditional assert so that we can capture the error message
- * via Xorg.0.log
- */
-
-#include <assert.h>
-
-#ifndef NDEBUG
-#include <os.h>
-#include "compiler.h"
-
-#if XORG_VERSION_CURRENT < XORG_VERSION_NUMERIC(1,6,0,0,0)
-#define xorg_backtrace()
+#if HAS_DEBUG_FULL
+void LogF(const char *f, ...);
+#define DBG(x) LogF x
+#else
+#define DBG(x)
 #endif
 
-#undef assert
-#define assert(E) do if (unlikely(!(E))) { \
-	xorg_backtrace(); \
-	FatalError("%s:%d assertion '%s' failed\n", __func__, __LINE__, #E); \
-} while (0)
+#if HAS_DEBUG_FULL || !defined(NDEBUG)
+#define ERR(x) ErrorF x
+#else
+#define ERR(x)
 #endif
 
-#endif /* __XASSERT_H__ */
+#endif /* _SNA_DEBUG_H_ */
