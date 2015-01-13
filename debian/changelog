@@ -8,6 +8,8 @@ xserver-xorg-video-intel (2:2.99.910-0ubuntu1.4) UNRELEASED; urgency=medium
 
   [ Maarten Lankhorst ]
   * Fix regression with external displays on sna. (LP: #1405325)
+  * Fix rotating external display with optimus results in corruption.
+    - fix-sna-external-slave-rotation.patch (LP: #1410238)
 
  -- Timo Aaltonen <tjaalton@debian.org>  Fri, 12 Dec 2014 11:06:26 +0200
 
