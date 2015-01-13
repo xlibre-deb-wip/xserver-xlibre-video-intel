@@ -1,0 +1,34 @@
+commit a90cc3b3889fafbd91c11c42d068a9d6474e218b
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Nov 18 08:37:25 2014 +0000
+
+    sna: Tweak alignment constraints on gen8 to allow BLT
+    
+    The previous commits prevent us from using the BLT if the destination
+    address is misaligned. Honour that restriction when creating buffers as
+    well, so that they are always usuable by the BLT.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+diff --git a/src/sna/kgem.c b/src/sna/kgem.c
+index fe225d2..72ffb04 100644
+--- a/src/sna/kgem.c
++++ b/src/sna/kgem.c
+@@ -1797,6 +1797,8 @@ inline static uint32_t kgem_pitch_alignment(struct kgem *kgem, unsigned flags)
+ 		return 256;
+ 	if (flags & CREATE_SCANOUT)
+ 		return 64;
++	if (kgem->gen >= 0100)
++		return 32;
+ 	return 8;
+ }
+ 
+@@ -7234,7 +7236,7 @@ struct kgem_bo *kgem_create_buffer_2d(struct kgem *kgem,
+ 	assert(width > 0 && height > 0);
+ 	assert(ret != NULL);
+ 	stride = ALIGN(width, 2) * bpp >> 3;
+-	stride = ALIGN(stride, 4);
++	stride = ALIGN(stride, kgem->gen >= 0100 ? 32 : 4);
+ 
+ 	DBG(("%s: %dx%d, %d bpp, stride=%d\n",
+ 	     __FUNCTION__, width, height, bpp, stride));
