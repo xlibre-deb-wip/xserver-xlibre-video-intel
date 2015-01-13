@@ -372,7 +372,7 @@ Date:   Thu Jul 17 14:40:51 2014 +0100
  
  		if (sna->render.copy_boxes(sna, GXcopy,
 -					   sna->front, priv->gpu_bo, 0, 0,
-+					   container_of(draw, PixmapRec, drawable), priv->gpu_bo, 0, 0,
++					   container_of(draw, PixmapRec, drawable), priv->gpu_bo, sx, sy,
  					   &tmp, sna_crtc->bo, -tx, -ty,
  					   REGION_RECTS(region), REGION_NUM_RECTS(region), 0))
  			return;
