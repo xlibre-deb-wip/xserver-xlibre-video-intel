@@ -1,15 +1,13 @@
-xserver-xorg-video-intel (2:2.99.910-0ubuntu1.5) trusty-proposed; urgency=medium
-
-  * Fix regression with external displays on sna. (LP: #1405325)
-
- -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Tue, 13 Jan 2015 11:20:44 +0100
-
 xserver-xorg-video-intel (2:2.99.910-0ubuntu1.4) UNRELEASED; urgency=medium
 
+  [ Timo Aaltonen ]
   * sna-fix-gen8-blt.diff
     sna-tweak-alignment-constraints-on-gen8.diff
     sna-add-more-checks-and-asserts-for-blt.diff:
     - Fix GEN8 BLT with 4bit address. (LP: #1401788)
+
+  [ Maarten Lankhorst ]
+  * Fix regression with external displays on sna. (LP: #1405325)
 
  -- Timo Aaltonen <tjaalton@debian.org>  Fri, 12 Dec 2014 11:06:26 +0200
 
@@ -32,6 +30,9 @@ xserver-xorg-video-intel (2:2.99.910-0ubuntu1.2) trusty-proposed; urgency=medium
   [ Timo Aaltonen ]
   * fix-no-backlight.diff: Don't let backlight switch off when cycling
     through display modes. (LP: #1373776)
+
+ -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Mon, 20 Oct 2014 09:54:57 +0200
+
 xserver-xorg-video-intel (2:2.99.910-0ubuntu1.1) trusty; urgency=medium
 
   * Backport fixes from upstream driver for fglrx and broadwell. (LP: #1359105)
