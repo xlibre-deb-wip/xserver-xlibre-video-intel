@@ -23,3 +23,5 @@ fix-no-backlight.diff
 10-handle-rotated-slaves.diff
 sna-use-vmask-in-3dstate-ps.diff
 sna-fix-gen8-blt.diff
+sna-tweak-alignment-constraints-on-gen8.diff
+sna-add-more-checks-and-asserts-for-blt.diff
