@@ -10,3 +10,4 @@ disable-dri3.diff
 sna-fix-gen8-blt.diff
 sna-tweak-alignment-constraints-on-gen8.diff
 sna-add-more-checks-and-asserts-for-blt.diff
+fix-sna-external-slave-rotation.patch
