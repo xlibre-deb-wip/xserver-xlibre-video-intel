@@ -15,7 +15,7 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
 
 --- a/src/Makefile.am
 +++ b/src/Makefile.am
-@@ -67,6 +67,7 @@
+@@ -67,6 +67,7 @@ intel_drv_la_SOURCES = \
  	intel_driver.h \
  	intel_options.c \
  	intel_module.c \
@@ -25,8 +25,8 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
  
 --- a/src/intel_device.c
 +++ b/src/intel_device.c
-@@ -162,10 +162,23 @@
- 	return ret;
+@@ -410,10 +410,23 @@ static int __intel_open_device__legacy(c
+ 	return fd_set_nonblock(drmOpen(NULL, id));
  }
  
 +static int __intel_open_xmir(const struct pci_device *pci)
@@ -47,8 +47,8 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
 +		return __intel_open_xmir(pci);
 +
  	if (path == NULL) {
- 		char id[20];
- 		int ret;
+ 		if (pci == NULL)
+ 			return -1;
 --- a/src/intel_driver.h
 +++ b/src/intel_driver.h
 @@ -1,6 +1,8 @@
@@ -60,9 +60,9 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
  struct xf86_platform_device;
  
  #define INTEL_VERSION 4000
-@@ -134,6 +136,6 @@
- int intel_put_master(ScrnInfoPtr scrn);
- void intel_put_device(ScrnInfoPtr scrn);
+@@ -141,6 +143,6 @@ void intel_detect_chipset(ScrnInfoPtr sc
+ 	default_accel_method__ == x; \
+ })
  
 -#define hosted() (0)
 +#define hosted() (xorgMir)
@@ -88,7 +88,7 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
 +#endif /* INTEL_XMIR_H */
 --- a/src/sna/Makefile.am
 +++ b/src/sna/Makefile.am
-@@ -80,6 +80,7 @@
+@@ -81,6 +81,7 @@ libsna_la_SOURCES = \
  	sna_video_overlay.c \
  	sna_video_sprite.c \
  	sna_video_textured.c \
@@ -98,7 +98,7 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
  	gen3_render.c \
 --- a/src/sna/sna.h
 +++ b/src/sna/sna.h
-@@ -365,6 +365,7 @@
+@@ -363,6 +363,7 @@ struct sna {
  
  	EntityInfoPtr pEnt;
  	const struct intel_device_info *info;
@@ -106,9 +106,9 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
  
  	ScreenBlockHandlerProcPtr BlockHandler;
  	ScreenWakeupHandlerProcPtr WakeupHandler;
-@@ -1215,4 +1216,18 @@
- #define RR_Rotate_All (RR_Rotate_0 | RR_Rotate_90 | RR_Rotate_180 | RR_Rotate_270)
- #define RR_Reflect_All (RR_Reflect_X | RR_Reflect_Y)
+@@ -1237,4 +1238,18 @@ static inline void sigtrap_put(void)
+ extern int getline(char **line, size_t *len, FILE *file);
+ #endif
  
 +/* sna_xmir.c */
 +
@@ -127,8 +127,8 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
  #endif /* _SNA_H */
 --- a/src/sna/sna_dri2.c
 +++ b/src/sna/sna_dri2.c
-@@ -2873,6 +2873,13 @@
- void sna_dri2_destroy_window(WindowPtr win) { }
+@@ -3154,6 +3154,13 @@ void sna_dri2_destroy_window(WindowPtr w
+ void sna_dri2_decouple_window(WindowPtr win) { }
  #endif
  
 +#if DRI2INFOREC_VERSION >= 8 && XMIR
@@ -141,8 +141,8 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
  static bool has_i830_dri(void)
  {
  	return access(DRI_DRIVER_PATH "/i830_dri.so", R_OK) == 0;
-@@ -3027,6 +3034,13 @@
- 	info.ReuseBufferNotify = sna_dri2_reuse_buffer;
+@@ -3310,6 +3317,13 @@ bool sna_dri2_open(struct sna *sna, Scre
+ 	}
  #endif
  
 +#if DRI2INFOREC_VERSION >= 8 && XMIR
@@ -157,7 +157,7 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
  	info.scheduleSwap0 = 1;
 --- a/src/sna/sna_driver.c
 +++ b/src/sna/sna_driver.c
-@@ -548,6 +548,9 @@
+@@ -604,6 +604,9 @@ static Bool sna_pre_init(ScrnInfoPtr scr
  		goto cleanup;
  	}
  
@@ -167,7 +167,7 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
  	/* Sanity check */
  	if (hosted() && (sna->flags & SNA_IS_HOSTED) == 0) {
  		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
-@@ -559,6 +562,7 @@
+@@ -615,6 +618,7 @@ static Bool sna_pre_init(ScrnInfoPtr scr
  	xf86DrvMsg(scrn->scrnIndex, X_PROBED, "CPU: %s\n",
  		   sna_cpu_features_to_string(sna->cpu_features, buf));
  
@@ -175,7 +175,7 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
  	if (!xf86SetDepthBpp(scrn, 24, 0, 0,
  			     Support32bppFb |
  			     SupportConvert24to32 | PreferConvert24to32))
-@@ -592,6 +596,9 @@
+@@ -648,6 +652,9 @@ static Bool sna_pre_init(ScrnInfoPtr scr
  
  	sna_setup_capabilities(scrn, fd);
  
@@ -185,7 +185,7 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
  	kgem_init(&sna->kgem, fd,
  		  xf86GetPciInfoForEntity(pEnt->index),
  		  sna->info->gen);
-@@ -710,6 +717,8 @@
+@@ -749,6 +756,8 @@ sna_block_handler(BLOCKHANDLER_ARGS_DECL
  
  	if (*tv == NULL || ((*tv)->tv_usec | (*tv)->tv_sec) || has_shadow(sna))
  		sna_accel_block_handler(sna, tv);
@@ -194,7 +194,7 @@ Date:   Wed Jul 24 01:44:30 2013 +0100
  }
  
  static void
-@@ -1090,6 +1099,8 @@
+@@ -1159,6 +1168,8 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
  	if (!miDCInitialize(screen, xf86GetPointerScreenFuncs()))
  		return FALSE;
  
