@@ -96,11 +96,6 @@ search_snoop_cache(struct kgem *kgem, unsigned int num_pages, unsigned flags);
 #define SHOW_BATCH_BEFORE 0
 #define SHOW_BATCH_AFTER 0
 
-#if !USE_WC_MMAP
-#undef DBG_NO_WC_MMAP
-#define DBG_NO_WC_MMAP 1
-#endif
-
 #if 0
 #define ASSERT_IDLE(kgem__, handle__) assert(!__kgem_busy(kgem__, handle__))
 #define ASSERT_MAYBE_IDLE(kgem__, handle__, expect__) assert(!(expect__) || !__kgem_busy(kgem__, handle__))
@@ -186,6 +181,15 @@ struct local_i915_gem_caching {
 #define LOCAL_I915_GEM_GET_CACHING	0x30
 #define LOCAL_IOCTL_I915_GEM_SET_CACHING DRM_IOW(DRM_COMMAND_BASE + LOCAL_I915_GEM_SET_CACHING, struct local_i915_gem_caching)
 #define LOCAL_IOCTL_I915_GEM_GET_CACHING DRM_IOW(DRM_COMMAND_BASE + LOCAL_I915_GEM_GET_CACHING, struct local_i915_gem_caching)
+
+struct local_i915_gem_mmap {
+	uint32_t handle;
+	uint32_t pad;
+	uint64_t offset;
+	uint64_t size;
+	uint64_t addr_ptr;
+};
+#define LOCAL_IOCTL_I915_GEM_MMAP DRM_IOWR(DRM_COMMAND_BASE + DRM_I915_GEM_MMAP, struct local_i915_gem_mmap)
 
 struct local_i915_gem_mmap2 {
 	uint32_t handle;
@@ -519,15 +523,15 @@ retry_wc:
 
 static void *__kgem_bo_map__cpu(struct kgem *kgem, struct kgem_bo *bo)
 {
-	struct drm_i915_gem_mmap mmap_arg;
+	struct local_i915_gem_mmap arg;
 	int err;
 
 retry:
-	VG_CLEAR(mmap_arg);
-	mmap_arg.handle = bo->handle;
-	mmap_arg.offset = 0;
-	mmap_arg.size = bytes(bo);
-	if ((err = do_ioctl(kgem->fd, DRM_IOCTL_I915_GEM_MMAP, &mmap_arg))) {
+	VG_CLEAR(arg);
+	arg.handle = bo->handle;
+	arg.offset = 0;
+	arg.size = bytes(bo);
+	if ((err = do_ioctl(kgem->fd, LOCAL_IOCTL_I915_GEM_MMAP, &arg))) {
 		assert(err != EINVAL);
 
 		if (__kgem_throttle_retire(kgem, 0))
@@ -541,10 +545,10 @@ retry:
 		return NULL;
 	}
 
-	VG(VALGRIND_MAKE_MEM_DEFINED(mmap_arg.addr_ptr, bytes(bo)));
+	VG(VALGRIND_MAKE_MEM_DEFINED(arg.addr_ptr, bytes(bo)));
 
 	DBG(("%s: caching CPU vma for %d\n", __FUNCTION__, bo->handle));
-	return bo->map__cpu = (void *)(uintptr_t)mmap_arg.addr_ptr;
+	return bo->map__cpu = (void *)(uintptr_t)arg.addr_ptr;
 }
 
 static int gem_write(int fd, uint32_t handle,
@@ -925,11 +929,11 @@ total_ram_size(void)
 #ifdef HAVE_STRUCT_SYSINFO_TOTALRAM
 	struct sysinfo info;
 	if (sysinfo(&info) == 0)
-		return info.totalram * info.mem_unit;
+		return (size_t)info.totalram * info.mem_unit;
 #endif
 
 #ifdef _SC_PHYS_PAGES
-	 return sysconf(_SC_PHYS_PAGES) * sysconf(_SC_PAGE_SIZE);
+	 return (size_t)sysconf(_SC_PHYS_PAGES) * sysconf(_SC_PAGE_SIZE);
 #endif
 
 	return 0;
@@ -1285,6 +1289,7 @@ static bool kgem_init_pinned_batches(struct kgem *kgem)
 {
 	int count[2] = { 16, 4 };
 	int size[2] = { 1, 4 };
+	int ret = 0;
 	int n, i;
 
 	if (kgem->wedged)
@@ -1311,7 +1316,8 @@ static bool kgem_init_pinned_batches(struct kgem *kgem)
 			}
 
 			pin.alignment = 0;
-			if (do_ioctl(kgem->fd, DRM_IOCTL_I915_GEM_PIN, &pin)) {
+			ret = do_ioctl(kgem->fd, DRM_IOCTL_I915_GEM_PIN, &pin);
+			if (ret) {
 				gem_close(kgem->fd, pin.handle);
 				free(bo);
 				goto err;
@@ -1333,6 +1339,14 @@ err:
 		}
 	}
 
+	/* If we fail to pin some memory for 830gm/845g, we need to disable
+	 * acceleration as otherwise the machine will eventually fail. However,
+	 * the kernel started arbitrarily rejecting PIN, so hope for the best
+	 * if the ioctl no longer works.
+	 */
+	if (ret != -ENODEV && kgem->gen == 020)
+		return false;
+
 	/* For simplicity populate the lists with a single unpinned bo */
 	for (n = 0; n < ARRAY_SIZE(count); n++) {
 		struct kgem_bo *bo;
@@ -1340,18 +1354,18 @@ err:
 
 		handle = gem_create(kgem->fd, size[n]);
 		if (handle == 0)
-			break;
+			return false;
 
 		bo = __kgem_bo_alloc(handle, size[n]);
 		if (bo == NULL) {
 			gem_close(kgem->fd, handle);
-			break;
+			return false;
 		}
 
 		debug_alloc__bo(kgem, bo);
 		list_add(&bo->list, &kgem->pinned_batches[n]);
 	}
-	return false;
+	return true;
 }
 
 static void kgem_init_swizzling(struct kgem *kgem)
@@ -1620,7 +1634,7 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 	if (!kgem->has_relaxed_delta && kgem->batch_size > 4*1024)
 		kgem->batch_size = 4*1024;
 
-	if (!kgem_init_pinned_batches(kgem) && gen == 020) {
+	if (!kgem_init_pinned_batches(kgem)) {
 		xf86DrvMsg(kgem_get_screen_index(kgem), X_WARNING,
 			   "Unable to reserve memory for GPU, disabling acceleration.\n");
 		__kgem_set_wedged(kgem);
@@ -1651,6 +1665,9 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 	     (long long)aperture.aper_size,
 	     (long long)aperture.aper_available_size));
 
+	/* clamp aperture to uint32_t for simplicity */
+	if (aperture.aper_size > 0xc0000000)
+		aperture.aper_size = 0xc0000000;
 	kgem->aperture_total = aperture.aper_size;
 	kgem->aperture_high = aperture.aper_size * 3/4;
 	kgem->aperture_low = aperture.aper_size * 1/3;
@@ -1659,7 +1676,7 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 		kgem->aperture_high /= 2;
 		kgem->aperture_low /= 2;
 	}
-	DBG(("%s: aperture low=%d [%d], high=%d [%d]\n", __FUNCTION__,
+	DBG(("%s: aperture low=%u [%u], high=%u [%u]\n", __FUNCTION__,
 	     kgem->aperture_low, kgem->aperture_low / (1024*1024),
 	     kgem->aperture_high, kgem->aperture_high / (1024*1024)));
 
@@ -1697,7 +1714,7 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 		     __FUNCTION__));
 		totalram = kgem->aperture_total;
 	}
-	DBG(("%s: total ram=%ld\n", __FUNCTION__, (long)totalram));
+	DBG(("%s: total ram=%lld\n", __FUNCTION__, (long long)totalram));
 	if (kgem->max_object_size > totalram / 2)
 		kgem->max_object_size = totalram / 2;
 	if (kgem->max_gpu_size > totalram / 4)
@@ -1749,11 +1766,11 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 	if (DBG_NO_CPU)
 		kgem->max_cpu_size = 0;
 
-	DBG(("%s: maximum object size=%d\n",
+	DBG(("%s: maximum object size=%u\n",
 	     __FUNCTION__, kgem->max_object_size));
-	DBG(("%s: large object thresold=%d\n",
+	DBG(("%s: large object thresold=%u\n",
 	     __FUNCTION__, kgem->large_object_size));
-	DBG(("%s: max object sizes (gpu=%d, cpu=%d, tile upload=%d, copy=%d)\n",
+	DBG(("%s: max object sizes (gpu=%u, cpu=%u, tile upload=%u, copy=%u)\n",
 	     __FUNCTION__,
 	     kgem->max_gpu_size, kgem->max_cpu_size,
 	     kgem->max_upload_tile_size, kgem->max_copy_tile_size));
@@ -2656,6 +2673,34 @@ static bool kgem_retire__flushing(struct kgem *kgem)
 	return retired;
 }
 
+static bool __kgem_bo_flush(struct kgem *kgem, struct kgem_bo *bo)
+{
+	struct drm_i915_gem_busy busy;
+
+	if (!bo->needs_flush)
+		return false;
+
+	bo->needs_flush = false;
+
+	VG_CLEAR(busy);
+	busy.handle = bo->handle;
+	busy.busy = !kgem->wedged;
+	(void)do_ioctl(kgem->fd, DRM_IOCTL_I915_GEM_BUSY, &busy);
+	DBG(("%s: handle=%d, busy=%d, wedged=%d\n",
+	     __FUNCTION__, bo->handle, busy.busy, kgem->wedged));
+
+	if (busy.busy == 0)
+		return false;
+
+	DBG(("%s: moving %d to flushing\n",
+	     __FUNCTION__, bo->handle));
+	list_add(&bo->request, &kgem->flushing);
+	bo->rq = MAKE_REQUEST(kgem, !!(busy.busy & ~0x1ffff));
+	bo->needs_flush = true;
+	kgem->need_retire = true;
+	return true;
+}
+
 static bool __kgem_retire_rq(struct kgem *kgem, struct kgem_request *rq)
 {
 	bool retired = false;
@@ -2680,14 +2725,10 @@ static bool __kgem_retire_rq(struct kgem *kgem, struct kgem_request *rq)
 
 		list_del(&bo->request);
 
-		if (bo->needs_flush)
-			bo->needs_flush = __kgem_busy(kgem, bo->handle);
-		if (bo->needs_flush) {
-			DBG(("%s: moving %d to flushing\n",
+		if (unlikely(__kgem_bo_flush(kgem, bo))) {
+			assert(bo != rq->bo);
+			DBG(("%s: movied %d to flushing\n",
 			     __FUNCTION__, bo->handle));
-			list_add(&bo->request, &kgem->flushing);
-			bo->rq = MAKE_REQUEST(kgem, RQ_RING(bo->rq));
-			kgem->need_retire = true;
 			continue;
 		}
 
@@ -2845,16 +2886,18 @@ bool __kgem_ring_is_idle(struct kgem *kgem, int ring)
 	return true;
 }
 
-void __kgem_retire_requests_upto(struct kgem *kgem, struct kgem_bo *bo)
+bool __kgem_retire_requests_upto(struct kgem *kgem, struct kgem_bo *bo)
 {
 	struct kgem_request *rq = bo->rq, *tmp;
-	struct list *requests = &kgem->requests[RQ_RING(rq) == I915_EXEC_BLT];
+	struct list *requests = &kgem->requests[RQ_RING(rq) == KGEM_BLT];
+
+	DBG(("%s(handle=%d)\n", __FUNCTION__, bo->handle));
 
 	rq = RQ(rq);
 	assert(rq != &kgem->static_request);
 	if (rq == (struct kgem_request *)kgem) {
 		__kgem_bo_clear_busy(bo);
-		return;
+		return false;
 	}
 
 	do {
@@ -2862,6 +2905,11 @@ void __kgem_retire_requests_upto(struct kgem *kgem, struct kgem_bo *bo)
 		assert(tmp->ring == rq->ring);
 		__kgem_retire_rq(kgem, tmp);
 	} while (tmp != rq);
+
+	assert(bo->needs_flush || bo->rq == NULL);
+	assert(bo->needs_flush || list_is_empty(&bo->request));
+	assert(bo->needs_flush || bo->domain == DOMAIN_NONE);
+	return bo->rq;
 }
 
 #if 0
@@ -3210,7 +3258,9 @@ kgem_batch_write(struct kgem *kgem,
 	char *ptr;
 	int ret;
 
-	ASSERT_IDLE(kgem, bo->handle);
+	assert(bo->exec == NULL);
+	assert(bo->rq == NULL);
+	assert(!__kgem_busy(kgem, bo->handle));
 
 #if DBG_NO_EXEC
 	{
@@ -3619,7 +3669,8 @@ void _kgem_submit(struct kgem *kgem)
 		kgem->exec[i].relocs_ptr = (uintptr_t)kgem->reloc;
 		kgem->exec[i].alignment = 0;
 		kgem->exec[i].offset = rq->bo->presumed_offset;
-		kgem->exec[i].flags = 0;
+		/* Make sure the kernel releases any fence, ignored if gen4+ */
+		kgem->exec[i].flags = EXEC_OBJECT_NEEDS_FENCE;
 		kgem->exec[i].rsvd1 = 0;
 		kgem->exec[i].rsvd2 = 0;
 
@@ -4950,6 +5001,9 @@ struct kgem_bo *kgem_create_2d(struct kgem *kgem,
 			}
 		}
 
+		if (flags & CREATE_CACHED)
+			return NULL;
+
 		bo = __kgem_bo_create_as_display(kgem, size, tiling, pitch);
 		if (bo)
 			return bo;
@@ -6216,8 +6270,8 @@ static void *__kgem_bo_map__gtt_or_wc(struct kgem *kgem, struct kgem_bo *bo)
 	kgem_trim_vma_cache(kgem, MAP_GTT, bucket(bo));
 
 	if (bo->tiling || !kgem->has_wc_mmap) {
-		assert(num_pages(bo) <= kgem->aperture_mappable / 2);
 		assert(kgem->gen != 021 || bo->tiling != I915_TILING_Y);
+		warn_unless(num_pages(bo) <= kgem->aperture_mappable / 2);
 
 		ptr = bo->map__gtt;
 		if (ptr == NULL)
@@ -6319,14 +6373,16 @@ void *kgem_bo_map__wc(struct kgem *kgem, struct kgem_bo *bo)
 	     bo->handle, (long)bo->presumed_offset, bo->tiling, bo->map__gtt, bo->map__cpu, bo->domain));
 
 	assert(bo->proxy == NULL);
-	assert(bo->exec == NULL);
 	assert(list_is_empty(&bo->list));
 	assert_tiling(kgem, bo);
 	assert(!bo->purged || bo->reusable);
 
 	if (bo->map__wc)
 		return bo->map__wc;
+	if (!kgem->has_wc_mmap)
+		return NULL;
 
+	kgem_trim_vma_cache(kgem, MAP_GTT, bucket(bo));
 	return __kgem_bo_map__wc(kgem, bo);
 }
 
@@ -6411,8 +6467,8 @@ struct kgem_bo *kgem_create_map(struct kgem *kgem,
 	first_page = (uintptr_t)ptr;
 	last_page = first_page + size + PAGE_SIZE - 1;
 
-	first_page &= ~(PAGE_SIZE-1);
-	last_page &= ~(PAGE_SIZE-1);
+	first_page &= ~(uintptr_t)(PAGE_SIZE-1);
+	last_page &= ~(uintptr_t)(PAGE_SIZE-1);
 	assert(last_page > first_page);
 
 	handle = gem_userptr(kgem->fd,

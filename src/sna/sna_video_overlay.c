@@ -130,7 +130,7 @@ static int sna_video_overlay_stop(ddStopVideo_ARGS)
 
 	DBG(("%s()\n", __FUNCTION__));
 
-	REGION_EMPTY(scrn->pScreen, &video->clip);
+	REGION_EMPTY(to_screen_from_sna(sna), &video->clip);
 
 	request.flags = 0;
 	(void)drmIoctl(sna->kgem.fd,
@@ -551,15 +551,7 @@ sna_video_overlay_put_image(ddPutImage_ARGS)
 	ret = Success;
 	if (sna_video_overlay_show
 	    (sna, video, &frame, crtc, &dstBox, src_w, src_h, drw_w, drw_h)) {
-		//xf86XVFillKeyHelperDrawable(draw, video->color_key, &clip);
-		if (!video->AlwaysOnTop && !RegionEqual(&video->clip, &clip) &&
-		    sna_blt_fill_boxes(sna, GXcopy,
-				       __sna_pixmap_get_bo(sna->front),
-				       sna->front->drawable.bitsPerPixel,
-				       video->color_key,
-				       region_rects(&clip),
-				       region_num_rects(&clip)))
-			RegionCopy(&video->clip, &clip);
+		sna_video_fill_colorkey(video, &clip);
 		sna_window_set_port((WindowPtr)draw, port);
 	} else {
 		DBG(("%s: failed to show video frame\n", __FUNCTION__));

@@ -1876,12 +1876,12 @@ gen8_composite_picture(struct sna *sna,
 		if (channel->repeat ||
 		    (x >= 0 &&
 		     y >= 0 &&
-		     x + w < pixmap->drawable.width &&
-		     y + h < pixmap->drawable.height)) {
+		     x + w <= pixmap->drawable.width &&
+		     y + h <= pixmap->drawable.height)) {
 			struct sna_pixmap *priv = sna_pixmap(pixmap);
 			if (priv && priv->clear) {
 				DBG(("%s: converting large pixmap source into solid [%08x]\n", __FUNCTION__, priv->clear_color));
-				return gen4_channel_init_solid(sna, channel, priv->clear_color);
+				return gen4_channel_init_solid(sna, channel, solid_color(picture->format, priv->clear_color));
 			}
 		}
 	} else
@@ -2021,6 +2021,10 @@ try_blt(struct sna *sna,
 	bo = __sna_drawable_peek_bo(dst->pDrawable);
 	if (bo == NULL)
 		return true;
+
+	if (untiled_tlb_miss(bo))
+		return true;
+
 	if (bo->rq)
 		return RQ_IS_BLT(bo->rq);
 
@@ -2028,12 +2032,12 @@ try_blt(struct sna *sna,
 		return true;
 
 	if (src->pDrawable) {
-		bo = __sna_drawable_peek_bo(src->pDrawable);
-		if (bo == NULL)
+		struct kgem_bo *s = __sna_drawable_peek_bo(src->pDrawable);
+		if (s == NULL)
 			return true;
 
-		if (prefer_blt_bo(sna, bo))
-			return RQ_IS_BLT(bo->rq);
+		if (prefer_blt_bo(sna, s, bo))
+			return true;
 	}
 
 	if (sna->kgem.ring == KGEM_BLT) {
@@ -2700,9 +2704,6 @@ prefer_blt_copy(struct sna *sna,
 
 	assert((flags & COPY_SYNC) == 0);
 
-	if (src_bo == dst_bo && can_switch_to_blt(sna, dst_bo, flags))
-		return true;
-
 	if (untiled_tlb_miss(src_bo) ||
 	    untiled_tlb_miss(dst_bo))
 		return true;
@@ -2710,9 +2711,18 @@ prefer_blt_copy(struct sna *sna,
 	if (force_blt_ring(sna))
 		return true;
 
+        if (sna->render_state.gt < 3 &&
+            src_bo == dst_bo &&
+            can_switch_to_blt(sna, dst_bo, flags))
+		return true;
+
 	if (kgem_bo_is_render(dst_bo) ||
 	    kgem_bo_is_render(src_bo))
 		return false;
+
+	if (flags & COPY_LAST &&
+            can_switch_to_blt(sna, dst_bo, flags))
+		return true;
 
 	if (prefer_render_ring(sna, dst_bo))
 		return false;
@@ -2720,7 +2730,7 @@ prefer_blt_copy(struct sna *sna,
 	if (!prefer_blt_ring(sna, dst_bo, flags))
 		return false;
 
-	return prefer_blt_bo(sna, src_bo) || prefer_blt_bo(sna, dst_bo);
+	return prefer_blt_bo(sna, src_bo, dst_bo);
 }
 
 static bool
@@ -2770,7 +2780,7 @@ fallback_blt:
 		     &extents)) {
 		bool big = too_large(extents.x2-extents.x1, extents.y2-extents.y1);
 
-		if ((big || can_switch_to_blt(sna, dst_bo, flags)) &&
+		if ((big || !prefer_render_ring(sna, dst_bo)) &&
 		    sna_blt_copy_boxes(sna, alu,
 				       src_bo, src_dx, src_dy,
 				       dst_bo, dst_dx, dst_dy,

@@ -42,6 +42,7 @@ struct kgem_bo {
 #define RQ(rq) ((struct kgem_request *)((uintptr_t)(rq) & ~3))
 #define RQ_RING(rq) ((uintptr_t)(rq) & 3)
 #define RQ_IS_BLT(rq) (RQ_RING(rq) == KGEM_BLT)
+#define RQ_IS_RENDER(rq) (RQ_RING(rq) == KGEM_RENDER)
 #define MAKE_REQUEST(rq, ring) ((struct kgem_request *)((uintptr_t)(rq) | (ring)))
 
 	struct drm_i915_gem_exec_object2 *exec;
@@ -626,7 +627,7 @@ static inline bool kgem_bo_is_busy(struct kgem_bo *bo)
 	return bo->rq;
 }
 
-void __kgem_retire_requests_upto(struct kgem *kgem, struct kgem_bo *bo);
+bool __kgem_retire_requests_upto(struct kgem *kgem, struct kgem_bo *bo);
 static inline bool __kgem_bo_is_busy(struct kgem *kgem, struct kgem_bo *bo)
 {
 	DBG(("%s: handle=%d, domain: %d exec? %d, rq? %d\n", __FUNCTION__,
@@ -636,14 +637,13 @@ static inline bool __kgem_bo_is_busy(struct kgem *kgem, struct kgem_bo *bo)
 	if (bo->exec)
 		return true;
 
-	if (bo->rq && !__kgem_busy(kgem, bo->handle)) {
-		__kgem_retire_requests_upto(kgem, bo);
-		assert(list_is_empty(&bo->request));
-		assert(bo->rq == NULL);
-		assert(bo->domain == DOMAIN_NONE);
-	}
+	if (bo->rq == NULL)
+		return false;
 
-	return kgem_bo_is_busy(bo);
+	if (__kgem_busy(kgem, bo->handle))
+		return true;
+
+	return __kgem_retire_requests_upto(kgem, bo);
 }
 
 static inline bool kgem_bo_is_render(struct kgem_bo *bo)
@@ -651,7 +651,15 @@ static inline bool kgem_bo_is_render(struct kgem_bo *bo)
 	DBG(("%s: handle=%d, rq? %d [%d]\n", __FUNCTION__,
 	     bo->handle, bo->rq != NULL, (int)RQ_RING(bo->rq)));
 	assert(bo->refcnt);
-	return bo->rq && RQ_RING(bo->rq) == I915_EXEC_RENDER;
+	return bo->rq && RQ_RING(bo->rq) != KGEM_BLT;
+}
+
+static inline bool kgem_bo_is_blt(struct kgem_bo *bo)
+{
+	DBG(("%s: handle=%d, rq? %d\n", __FUNCTION__,
+	     bo->handle, bo->rq != NULL, (int)RQ_RING(bo->rq)));
+	assert(bo->refcnt);
+	return RQ_RING(bo->rq) == KGEM_BLT;
 }
 
 static inline void kgem_bo_mark_unreusable(struct kgem_bo *bo)

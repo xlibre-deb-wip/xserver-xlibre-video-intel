@@ -237,17 +237,11 @@ static bool sna_blt_fill_init(struct sna *sna,
 	return true;
 }
 
-noinline static void sna_blt_fill_begin(struct sna *sna,
-					const struct sna_blt_state *blt)
+noinline static void __sna_blt_fill_begin(struct sna *sna,
+					  const struct sna_blt_state *blt)
 {
 	struct kgem *kgem = &sna->kgem;
 	uint32_t *b;
-
-	if (kgem->nreloc) {
-		_kgem_submit(kgem);
-		_kgem_set_mode(kgem, KGEM_BLT);
-		assert(kgem->nbatch == 0);
-	}
 
 	assert(kgem->mode == KGEM_BLT);
 	b = kgem->batch + kgem->nbatch;
@@ -291,6 +285,20 @@ noinline static void sna_blt_fill_begin(struct sna *sna,
 		b[8] = 0;
 		kgem->nbatch += 9;
 	}
+}
+
+inline static void sna_blt_fill_begin(struct sna *sna,
+				      const struct sna_blt_state *blt)
+{
+	struct kgem *kgem = &sna->kgem;
+
+	if (kgem->nreloc) {
+		_kgem_submit(kgem);
+		_kgem_set_mode(kgem, KGEM_BLT);
+		assert(kgem->nbatch == 0);
+	}
+
+	__sna_blt_fill_begin(sna, blt);
 }
 
 inline static void sna_blt_fill_one(struct sna *sna,
@@ -912,8 +920,27 @@ sna_composite_mask_is_opaque(PicturePtr mask)
 		return is_solid(mask) && is_white(mask);
 	else if (!PICT_FORMAT_A(mask->format))
 		return true;
-	else
-		return is_solid(mask) && is_opaque_solid(mask);
+	else if (mask->pSourcePict) {
+		PictSolidFill *fill = (PictSolidFill *) mask->pSourcePict;
+		return (fill->color >> 24) == 0xff;
+	} else {
+		struct sna_pixmap *priv;
+		assert(mask->pDrawable);
+
+		if (mask->pDrawable->width  == 1 &&
+		    mask->pDrawable->height == 1 &&
+		    mask->repeat)
+			return pixel_is_opaque(get_pixel(mask), mask->format);
+
+		if (mask->transform)
+			return false;
+
+		priv = sna_pixmap_from_drawable(mask->pDrawable);
+		if (priv == NULL || !priv->clear)
+			return false;
+
+		return pixel_is_opaque(priv->clear_color, mask->format);
+	}
 }
 
 fastcall
@@ -2597,24 +2624,20 @@ clear:
 				op = PictOpSrc;
 			if (op == PictOpOver) {
 				color = over(get_solid_color(src, PICT_a8r8g8b8),
-					     color_convert(sna_pixmap(tmp->dst.pixmap)->clear_color,
-							   dst->format, PICT_a8r8g8b8));
+					     solid_color(dst->format, sna_pixmap(tmp->dst.pixmap)->clear_color));
 				op = PictOpSrc;
 				DBG(("%s: precomputing solid OVER (%08x, %08x) -> %08x\n",
 				     __FUNCTION__, get_solid_color(src, PICT_a8r8g8b8),
-				     color_convert(sna_pixmap(tmp->dst.pixmap)->clear_color,
-						   dst->format, PICT_a8r8g8b8),
+				     solid_color(dst->format, sna_pixmap(tmp->dst.pixmap)->clear_color),
 				     color));
 			}
 			if (op == PictOpAdd) {
 				color = add(get_solid_color(src, PICT_a8r8g8b8),
-					    color_convert(sna_pixmap(tmp->dst.pixmap)->clear_color,
-							  dst->format, PICT_a8r8g8b8));
+					    solid_color(dst->format, sna_pixmap(tmp->dst.pixmap)->clear_color));
 				op = PictOpSrc;
 				DBG(("%s: precomputing solid ADD (%08x, %08x) -> %08x\n",
 				     __FUNCTION__, get_solid_color(src, PICT_a8r8g8b8),
-				     color_convert(sna_pixmap(tmp->dst.pixmap)->clear_color,
-						   dst->format, PICT_a8r8g8b8),
+				     solid_color(dst->format, sna_pixmap(tmp->dst.pixmap)->clear_color),
 				     color));
 			}
 		}
@@ -2720,8 +2743,8 @@ fill:
 	if (is_clear(src_pixmap)) {
 		if (src->repeat ||
 		    (x >= 0 && y >= 0 &&
-		     x + width  < src_pixmap->drawable.width &&
-		     y + height < src_pixmap->drawable.height)) {
+		     x + width  <= src_pixmap->drawable.width &&
+		     y + height <= src_pixmap->drawable.height)) {
 			color = color_convert(sna_pixmap(src_pixmap)->clear_color,
 					      src->format, tmp->dst.format);
 			goto fill;
@@ -3062,7 +3085,7 @@ static void sna_blt_fill_op_blt(struct sna *sna,
 	if (sna->blt_state.fill_bo != op->base.u.blt.bo[0]->unique_id) {
 		const struct sna_blt_state *blt = &op->base.u.blt;
 
-		sna_blt_fill_begin(sna, blt);
+		__sna_blt_fill_begin(sna, blt);
 
 		sna->blt_state.fill_bo = blt->bo[0]->unique_id;
 		sna->blt_state.fill_pixel = blt->pixel;
@@ -3079,7 +3102,7 @@ fastcall static void sna_blt_fill_op_box(struct sna *sna,
 	if (sna->blt_state.fill_bo != op->base.u.blt.bo[0]->unique_id) {
 		const struct sna_blt_state *blt = &op->base.u.blt;
 
-		sna_blt_fill_begin(sna, blt);
+		__sna_blt_fill_begin(sna, blt);
 
 		sna->blt_state.fill_bo = blt->bo[0]->unique_id;
 		sna->blt_state.fill_pixel = blt->pixel;
@@ -3097,7 +3120,7 @@ fastcall static void sna_blt_fill_op_boxes(struct sna *sna,
 	if (sna->blt_state.fill_bo != op->base.u.blt.bo[0]->unique_id) {
 		const struct sna_blt_state *blt = &op->base.u.blt;
 
-		sna_blt_fill_begin(sna, blt);
+		__sna_blt_fill_begin(sna, blt);
 
 		sna->blt_state.fill_bo = blt->bo[0]->unique_id;
 		sna->blt_state.fill_pixel = blt->pixel;
@@ -3132,7 +3155,7 @@ fastcall static void sna_blt_fill_op_points(struct sna *sna,
 	DBG(("%s: %08x x %d\n", __FUNCTION__, blt->pixel, n));
 
 	if (sna->blt_state.fill_bo != op->base.u.blt.bo[0]->unique_id) {
-		sna_blt_fill_begin(sna, blt);
+		__sna_blt_fill_begin(sna, blt);
 
 		sna->blt_state.fill_bo = blt->bo[0]->unique_id;
 		sna->blt_state.fill_pixel = blt->pixel;

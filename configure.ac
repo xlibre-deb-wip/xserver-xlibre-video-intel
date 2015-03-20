@@ -195,17 +195,22 @@ AC_ARG_ENABLE(udev,
               [UDEV="$enableval"],
               [UDEV=auto])
 
+udev_msg=" disabled"
 if test "x$UDEV" != "xno"; then
 	PKG_CHECK_MODULES(UDEV, [libudev], [udev="yes"], [udev="no"])
+	AC_CHECK_HEADERS([sys/stat.h], [], [udev="no"])
 	if test "x$UDEV" = "xyes" -a "x$udev" != "xyes"; then
 		AC_MSG_ERROR([udev support requested but not found (libudev)])
 	fi
 	if test "x$udev" = "xyes"; then
 		AC_DEFINE(HAVE_UDEV,1,[Enable udev-based monitor hotplug detection])
+		udev_msg=" yes"
+	else
+		udev_msg=" no"
 	fi
 fi
 
-PKG_CHECK_MODULES(X11, [x11 xrender xrandr xext xfixes cairo cairo-xlib-xrender pixman-1 libpng], [x11="yes"], [x11="no"])
+PKG_CHECK_MODULES(X11, [x11 x11-xcb xcb-dri2 xrender xrandr xext xfixes cairo cairo-xlib-xrender pixman-1 libpng], [x11="yes"], [x11="no"])
 AM_CONDITIONAL(HAVE_X11, test "x$x11" = "xyes")
 
 cpuid="yes"
@@ -270,7 +275,7 @@ if test "x$shm" = "xyes"; then
 	AC_DEFINE([HAVE_MIT_SHM], 1, [Define to 1 if MIT-SHM is available])
 fi
 
-PKG_CHECK_MODULES(X11_DRI3, [xcb-dri3 xcb-sync xcb-present x11-xcb xshmfence x11 xrender xext libdrm], [x11_dri3="yes"], [x11_dri3="no"])
+PKG_CHECK_MODULES(X11_DRI3, [xcb-dri3 xcb-sync xcb-xfixes xcb-present x11-xcb xshmfence x11 xrender xext libdrm], [x11_dri3="yes"], [x11_dri3="no"])
 AM_CONDITIONAL(X11_DRI3, test "x$x11_dri3" = "xyes" -a "x$shm" = "xyes")
 AM_CONDITIONAL(X11_SHM, test "x$shm" = "xyes")
 
@@ -307,6 +312,8 @@ if test "x$tools" != "xno"; then
 		tools="no"
 	fi
 
+	PKG_CHECK_MODULES(TOOL_CURSOR, [xfixes x11 libpng], [cursor="yes"], [ivo="no"])
+
 	IVO_CFLAGS="$IVO_CFLAGS $extra_cflags"
 fi
 if test "x$tools" != "xno"; then
@@ -315,6 +322,7 @@ fi
 AC_MSG_CHECKING([whether to build additional tools])
 AC_MSG_RESULT([$tools])
 AM_CONDITIONAL(BUILD_TOOLS, test "x$tools" != "xno")
+AM_CONDITIONAL(BUILD_TOOL_CURSOR, test "x$cursor" = "xyes")
 
 # Define a configure option for an alternate module directory
 AC_ARG_WITH(xorg-module-dir,
@@ -339,10 +347,20 @@ AC_ARG_ENABLE(dri2,
 	      [DRI2=$enableval],
 	      [DRI2=yes])
 AC_ARG_ENABLE(dri3,
-	      AS_HELP_STRING([--enable-dri3],
-			     [Enable DRI3 support [[default=no]]]),
+	      AS_HELP_STRING([--disable-dri3],
+			     [Disable DRI3 support [[default=yes]]]),
 	      [DRI3=$enableval],
-	      [DRI3=no])
+	      [DRI3=yes])
+AC_ARG_WITH(default-dri,
+	    AS_HELP_STRING([--with-default-dri],
+			   [Select the default maximum DRI level [default 2]]),
+	      [DRI_DEFAULT=$withval],
+	      [DRI_DEFAULT=2])
+if test "x$DRI_DEFAULT" = "x0"; then
+	AC_DEFINE(DEFAULT_DRI_LEVEL, 0,[Default DRI level])
+else
+	AC_DEFINE(DEFAULT_DRI_LEVEL, ~0, [Default DRI level])
+fi
 
 AC_ARG_ENABLE(xvmc, AS_HELP_STRING([--disable-xvmc],
                                   [Disable XvMC support [[default=yes]]]),
@@ -398,6 +416,8 @@ AC_ARG_ENABLE(sna,
 	      [SNA="$enableval"],
 	      [SNA=auto])
 
+AC_CHECK_HEADERS([dev/wscons/wsconsio.h])
+
 if test "x$SNA" != "xno"; then
 	AC_DEFINE(USE_SNA, 1, [Enable SNA support])
 	AC_CHECK_HEADERS([sys/sysinfo.h], AC_CHECK_MEMBERS([struct sysinfo.totalram], [], [], [[#include <sys/sysinfo.h>]]))
@@ -426,6 +446,8 @@ fi
 
 PKG_CHECK_MODULES(XORG, [xorg-server >= $required_xorg_server_version xproto fontsproto pixman-1 >= $required_pixman_version $REQUIRED_MODULES])
 ABI_VERSION=`$PKG_CONFIG --variable=abi_videodrv xorg-server`
+XSERVER_VERSION=`$PKG_CONFIG --modversion xorg-server`
+PIXMAN_VERSION=`$PKG_CONFIG --modversion pixman-1`
 
 if test "x$ONLY_UMS" = "xyes"; then
 	UMS="yes"
@@ -519,7 +541,12 @@ AC_MSG_RESULT([$have_dri1])
 AM_CONDITIONAL(DRI1, test "x$have_dri1" != "xno")
 if test "x$have_dri1" != "xno"; then
         AC_DEFINE(HAVE_DRI1,1,[Enable DRI1 driver support])
-	dri_msg="$dri_msg DRI1"
+	str="DRI1"
+	if test "x$DRI_DEFAULT" = "x1"; then
+		AC_DEFINE(DEFAULT_DRI_LEVEL,1,[Default DRI level])
+		str="*$str"
+	fi
+	dri_msg="$dri_msg $str"
 else
         DRI1_CFLAGS=""
         DRI1_LIBS=""
@@ -576,7 +603,12 @@ AM_CONDITIONAL(DRI2, test "x$have_dri2" != "xno")
 AC_MSG_RESULT([$have_dri2])
 if test "x$have_dri2" != "xno"; then
         AC_DEFINE(HAVE_DRI2,1,[Enable DRI2 driver support])
-	dri_msg="$dri_msg DRI2"
+	str="DRI2"
+	if test "x$DRI_DEFAULT" = "x2"; then
+		AC_DEFINE(DEFAULT_DRI_LEVEL,2,[Default DRI level])
+		str="*$str"
+	fi
+	dri_msg="$dri_msg $str"
 else
 	if test "x$DRI" = "xyes" -a "x$DRI2" != "xno" -a "x$KMS" = "xyes"; then
 		AC_MSG_ERROR([DRI2 requested but prerequisites not found])
@@ -591,12 +623,20 @@ AM_CONDITIONAL(DRI3, test "x$have_dri3" != "xno")
 AC_MSG_RESULT([$have_dri3])
 if test "x$have_dri3" != "xno"; then
         AC_DEFINE(HAVE_DRI3,1,[Enable DRI3 driver support])
-	dri_msg="$dri_msg DRI3"
+	str="DRI3"
+	if test "x$DRI_DEFAULT" = "x3"; then
+		AC_DEFINE(DEFAULT_DRI_LEVEL,3,[Default DRI level])
+		str="*$str"
+	fi
+	dri_msg="$dri_msg $str"
 else
 	if test "x$DRI" = "xyes" -a "x$DRI3" != "xno" -a "x$KMS" = "xyes"; then
 		AC_MSG_ERROR([DRI3 requested but prerequisites not found])
 	fi
 fi
+
+AC_MSG_CHECKING([default DRI support])
+AC_MSG_RESULT([$DEFAULT_DRI_DEFAULT])
 
 AC_CHECK_HEADERS([X11/extensions/dpmsconst.h])
 
@@ -709,27 +749,6 @@ AC_ARG_ENABLE(tear-free,
 if test "x$TEARFREE" = "xyes"; then
 	AC_DEFINE(TEARFREE,1,[Enable "TearFree" by default])
 	xp_msg="$xp_msg TearFree"
-fi
-
-AC_ARG_ENABLE(rendernode,
-	      AS_HELP_STRING([--enable-rendernode],
-			     [Enable use of render nodes (experimental) [default=no]]),
-	      [RENDERNODE="$enableval"],
-	      [RENDERNODE="no"])
-AM_CONDITIONAL(USE_RENDERNODE, test "x$RENDERNODE" = "xyes")
-if test "x$RENDERNODE" = "xyes"; then
-	AC_DEFINE(USE_RENDERNODE,1,[Assume "rendernode" support])
-	xp_msg="$xp_msg rendernode"
-fi
-
-AC_ARG_ENABLE(wc-mmap,
-	      AS_HELP_STRING([--enable-wc-mmap],
-			     [Enable use of WriteCombining mmaps [default=no]]),
-	      [WC_MMAP="$enableval"],
-	      [WC_MMAP="no"])
-if test "x$WC_MMAP" = "xyes"; then
-	AC_DEFINE(USE_WC_MMAP,1,[Enable use of WriteCombining mmaps])
-	xp_msg="$xp_msg mmap(wc)"
 fi
 
 AC_ARG_ENABLE(create2,
@@ -855,7 +874,7 @@ AC_OUTPUT
 
 echo ""
 echo ""
-test -e `pwd $0`/README && cat `pwd $0`/README
+cat $srcdir/README
 
 accel_msg=""
 if test "x$SNA" != "xno"; then
@@ -895,13 +914,15 @@ fi
 
 echo ""
 echo "AC_PACKAGE_STRING will be compiled with:"
-echo "  Xorg Video ABI version: $ABI_VERSION"
+echo "  Xorg Video ABI version: $ABI_VERSION (xorg-server-$XSERVER_VERSION)"
+echo "  pixman version: pixman-1-$PIXMAN_VERSION"
 echo "  Acceleration backends:$accel_msg"
 echo "  Additional debugging support?$debug_msg"
 echo "  Support for Kernel Mode Setting? $KMS"
 echo "  Support for legacy User Mode Setting (for i810)? $UMS"
 echo "  Support for Direct Rendering Infrastructure:$dri_msg"
 echo "  Support for Xv motion compensation (XvMC and libXvMC):$xvmc_msg"
+echo "  Support for display hotplug notifications (udev):$udev_msg"
 echo "  Build additional tools and utilities?$tools_msg"
 if test -n "$xp_msg"; then
 echo "  Experimental support:$xp_msg"

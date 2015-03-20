@@ -284,7 +284,10 @@ struct sna {
 		struct kgem_bo *shadow;
 		unsigned front_active;
 		unsigned shadow_active;
+		unsigned rr_active;
 		unsigned flip_active;
+		unsigned hidden;
+		bool shadow_enabled;
 		bool dirty;
 
 		int max_crtc_width, max_crtc_height;
@@ -353,6 +356,8 @@ struct sna {
 		bool available;
 		bool open;
 #if HAVE_PRESENT
+		struct list vblank_queue;
+		uint64_t unflip;
 #endif
 	} present;
 
@@ -461,6 +466,11 @@ to_sna_from_screen(ScreenPtr screen)
 	return to_sna(xf86ScreenToScrn(screen));
 }
 
+pure static inline ScreenPtr to_screen_from_sna(struct sna *sna)
+{
+	return xf86ScrnToScreen(sna->scrn);
+}
+
 pure static inline struct sna *
 to_sna_from_pixmap(PixmapPtr pixmap)
 {
@@ -498,11 +508,10 @@ to_sna_from_kgem(struct kgem *kgem)
 extern xf86CrtcPtr sna_covering_crtc(struct sna *sna,
 				     const BoxRec *box,
 				     xf86CrtcPtr desired);
+extern xf86CrtcPtr sna_primary_crtc(struct sna *sna);
 
 extern bool sna_wait_for_scanline(struct sna *sna, PixmapPtr pixmap,
 				  xf86CrtcPtr crtc, const BoxRec *clip);
-
-xf86CrtcPtr sna_mode_first_crtc(struct sna *sna);
 
 const struct ust_msc {
 	uint64_t msc;
@@ -534,6 +543,11 @@ static inline uint64_t sna_crtc_record_event(xf86CrtcPtr crtc,
 static inline uint64_t ust64(int tv_sec, int tv_usec)
 {
 	return (uint64_t)tv_sec * 1000000 + tv_usec;
+}
+
+static inline uint64_t swap_ust(const struct ust_msc *swap)
+{
+	return ust64(swap->tv_sec, swap->tv_usec);
 }
 
 #if HAVE_DRI2
@@ -576,6 +590,7 @@ static inline void sna_present_vblank_handler(struct drm_event_vblank *event) { 
 
 extern bool sna_crtc_set_sprite_rotation(xf86CrtcPtr crtc, uint32_t rotation);
 extern int sna_crtc_to_pipe(xf86CrtcPtr crtc);
+extern int sna_crtc_to_pipe__safe(xf86CrtcPtr crtc);
 extern uint32_t sna_crtc_to_sprite(xf86CrtcPtr crtc);
 extern uint32_t sna_crtc_id(xf86CrtcPtr crtc);
 extern bool sna_crtc_is_on(xf86CrtcPtr crtc);
@@ -998,8 +1013,7 @@ static inline uint32_t pixmap_size(PixmapPtr pixmap)
 
 bool sna_accel_init(ScreenPtr sreen, struct sna *sna);
 void sna_accel_create(struct sna *sna);
-void sna_accel_block_handler(struct sna *sna, struct timeval **tv);
-void sna_accel_wakeup_handler(struct sna *sna);
+void sna_accel_block(struct sna *sna, struct timeval **tv);
 void sna_accel_watch_flush(struct sna *sna, int enable);
 void sna_accel_flush(struct sna *sna);
 void sna_accel_enter(struct sna *sna);
@@ -1127,6 +1141,16 @@ memcpy_blt(const void *src, void *dst, int bpp,
 	   uint16_t width, uint16_t height);
 
 void
+affine_blt(const void *src, void *dst, int bpp,
+	   int16_t src_x, int16_t src_y,
+	   int16_t src_width, int16_t src_height,
+	   int32_t src_stride,
+	   int16_t dst_x, int16_t dst_y,
+	   uint16_t dst_width, uint16_t dst_height,
+	   int32_t dst_stride,
+	   const struct pixman_f_transform *t);
+
+void
 memmove_box(const void *src, void *dst,
 	    int bpp, int32_t stride,
 	    const BoxRec *box,
@@ -1180,6 +1204,31 @@ box_intersect(BoxPtr a, const BoxRec *b)
 		return false;
 
 	return true;
+}
+
+const BoxRec *
+__find_clip_box_for_y(const BoxRec *begin, const BoxRec *end, int16_t y);
+inline static const BoxRec *
+find_clip_box_for_y(const BoxRec *begin, const BoxRec *end, int16_t y)
+{
+	/* Special case for incremental trapezoid clipping */
+	if (begin == end)
+		return end;
+
+	/* Quick test if scanline is within range of clip boxes */
+	if (begin->y2 > y) {
+		assert(end == begin + 1 ||
+		       __find_clip_box_for_y(begin, end, y) == begin);
+		return begin;
+	}
+	if (y >= end[-1].y2) {
+		assert(end == begin + 1 ||
+		       __find_clip_box_for_y(begin, end, y) == end);
+		return end;
+	}
+
+	/* Otherwise bisect to find the first box crossing y */
+	return __find_clip_box_for_y(begin, end, y);
 }
 
 unsigned sna_cpu_detect(void);

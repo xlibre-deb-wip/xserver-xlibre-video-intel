@@ -2336,6 +2336,9 @@ memcpy_copy_boxes(struct sna *sna, uint8_t op,
 	if (op != GXcopy)
 		return false;
 
+	if (src_draw->depth != dst_draw->depth)
+		return false;
+
 	clipped = (n > 1 ||
 		   box->x1 + dx > 0 ||
 		   box->y1 + dy > 0 ||
@@ -2380,4 +2383,5 @@ void
 sna_render_mark_wedged(struct sna *sna)
 {
 	sna->render.copy_boxes = memcpy_copy_boxes;
+	sna->render.prefer_gpu = 0;
 }
