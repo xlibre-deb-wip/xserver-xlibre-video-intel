@@ -1,0 +1,41 @@
+commit 7a9bdadd71730adc5266bc6758982abec5917b93
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Oct 22 19:31:10 2014 +0100
+
+    sna/gen8: Clamp URB allocations for GT3
+    
+    GT3 requires some reserved space in the URB allocation and so we must
+    reduce the amount we allocate to our vertices.
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=81583
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+--- a/src/sna/gen8_render.c
++++ b/src/sna/gen8_render.c
+@@ -466,21 +466,21 @@ gen8_emit_urb(struct sna *sna)
+ {
+ 	/* num of VS entries must be divisible by 8 if size < 9 */
+ 	OUT_BATCH(GEN8_3DSTATE_URB_VS | (2 - 2));
+-	OUT_BATCH(1024 << URB_ENTRY_NUMBER_SHIFT |
++	OUT_BATCH(960 << URB_ENTRY_NUMBER_SHIFT |
+ 		  (2 - 1) << URB_ENTRY_SIZE_SHIFT |
+-		  0 << URB_STARTING_ADDRESS_SHIFT);
++		  4 << URB_STARTING_ADDRESS_SHIFT);
+ 
+ 	OUT_BATCH(GEN8_3DSTATE_URB_HS | (2 - 2));
+ 	OUT_BATCH(0 << URB_ENTRY_SIZE_SHIFT |
+-		  0 << URB_STARTING_ADDRESS_SHIFT);
++		  4 << URB_STARTING_ADDRESS_SHIFT);
+ 
+ 	OUT_BATCH(GEN8_3DSTATE_URB_DS | (2 - 2));
+ 	OUT_BATCH(0 << URB_ENTRY_SIZE_SHIFT |
+-		  0 << URB_STARTING_ADDRESS_SHIFT);
++		  4 << URB_STARTING_ADDRESS_SHIFT);
+ 
+ 	OUT_BATCH(GEN8_3DSTATE_URB_GS | (2 - 2));
+ 	OUT_BATCH(0 << URB_ENTRY_SIZE_SHIFT |
+-		  0 << URB_STARTING_ADDRESS_SHIFT);
++		  4 << URB_STARTING_ADDRESS_SHIFT);
+ }
+ 
+ static void

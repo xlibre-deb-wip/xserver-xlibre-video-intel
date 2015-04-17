@@ -1,3 +1,11 @@
+xserver-xorg-video-intel (2:2.99.914-1~exp1ubuntu4.3) utopic; urgency=medium
+
+  * bdw-annotate-more-64bit-pointer-locations.diff
+    bdw-clamp-urb-allocations-for-gt3.diff:
+    Fix BDW GT3. (#1444436)
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Wed, 22 Apr 2015 19:57:12 +0300
+
 xserver-xorg-video-intel (2:2.99.914-1~exp1ubuntu4.2) utopic-proposed; urgency=medium
 
   [ Timo Aaltonen ]
