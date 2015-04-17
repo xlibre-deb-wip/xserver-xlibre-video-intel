@@ -1,3 +1,10 @@
+xserver-xorg-video-intel (2:2.99.910-0ubuntu1.6) trusty-proposed; urgency=medium
+
+  * sna-mark-the-chv-vsync-method-as-unknown.diff: Fix video playback
+    on CHV. (LP: #1445221)
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Fri, 17 Apr 2015 08:00:47 +0300
+
 xserver-xorg-video-intel (2:2.99.910-0ubuntu1.5) trusty-proposed; urgency=medium
 
   * bdw-annotate-more-64bit-pointer-locations.diff

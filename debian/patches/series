@@ -28,3 +28,4 @@ sna-add-more-checks-and-asserts-for-blt.diff
 fix-sna-external-slave-rotation.patch
 bdw-annotate-more-64bit-pointer-locations.diff
 bdw-clamp-urb-allocations-for-gt3.diff
+sna-mark-the-chv-vsync-method-as-unknown.diff
