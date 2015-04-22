@@ -777,6 +777,15 @@ sna_handle_uevents(int fd, void *closure)
 	udev_device_unref(dev);
 }
 
+static bool has_randr(void)
+{
+#if HAS_DIXREGISTERPRIVATEKEY
+	return dixPrivateKeyRegistered(rrPrivKey);
+#else
+	return *rrPrivKey;
+#endif
+}
+
 static void
 sna_uevent_init(struct sna *sna)
 {
@@ -792,7 +801,7 @@ sna_uevent_init(struct sna *sna)
 	/* RandR will be disabled if Xinerama is active, and so generating
 	 * RR hotplug events is then verboten.
 	 */
-	if (!dixPrivateKeyRegistered(rrPrivKey))
+	if (!has_randr())
 		goto out;
 
 	u = NULL;
@@ -1204,6 +1213,8 @@ static Bool sna_enter_vt(VT_FUNC_ARGS_DECL)
 	if (intel_get_master(sna->dev))
 		return FALSE;
 
+	sna_accel_enter(sna);
+
 	if (sna->flags & SNA_REPROBE) {
 		DBG(("%s: reporting deferred hotplug event\n", __FUNCTION__));
 		sna_mode_discover(sna);
@@ -1212,11 +1223,11 @@ static Bool sna_enter_vt(VT_FUNC_ARGS_DECL)
 	sna_mode_check(sna);
 
 	if (!sna_set_desired_mode(sna)) {
+		sna_accel_leave(sna);
 		intel_put_master(sna->dev);
 		return FALSE;
 	}
 
-	sna_accel_enter(sna);
 	return TRUE;
 }
 

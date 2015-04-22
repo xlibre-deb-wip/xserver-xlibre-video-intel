@@ -286,6 +286,8 @@ struct sna_render {
 #define COPY_LAST 0x1
 #define COPY_SYNC 0x2
 #define COPY_NO_OVERLAP 0x4
+#define COPY_SMALL 0x8
+#define COPY_DRI 0x10
 
 	bool (*copy)(struct sna *sna, uint8_t alu,
 		     PixmapPtr src, struct kgem_bo *src_bo,
@@ -538,7 +540,7 @@ enum {
 
 struct gen8_render_state {
 	unsigned gt;
-
+	const struct gt_info *info;
 	struct kgem_bo *general_bo;
 
 	uint32_t vs_state;

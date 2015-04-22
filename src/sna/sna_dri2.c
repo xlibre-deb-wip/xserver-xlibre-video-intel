@@ -246,7 +246,7 @@ sna_dri2_get_back(struct sna *sna,
 			if (sna->render.copy_boxes(sna, GXcopy,
 						   draw, get_private(back)->bo, 0, 0,
 						   draw, bo, 0, 0,
-						   &box, 1, 0))
+						   &box, 1, COPY_LAST | COPY_DRI))
 				flags = back->flags;
 		}
 	}
@@ -454,7 +454,7 @@ static struct kgem_bo *sna_pixmap_set_dri(struct sna *sna,
 	tiling = color_tiling(sna, &pixmap->drawable);
 	if (tiling < 0)
 		tiling = -tiling;
-	if (priv->gpu_bo->tiling != tiling && !priv->gpu_bo->scanout)
+	if (priv->gpu_bo->tiling < tiling && !priv->gpu_bo->scanout)
 		sna_pixmap_change_tiling(pixmap, tiling);
 
 	return priv->gpu_bo;
@@ -807,8 +807,8 @@ static void set_bo(PixmapPtr pixmap, struct kgem_bo *bo)
 	struct sna *sna = to_sna_from_pixmap(pixmap);
 	struct sna_pixmap *priv = sna_pixmap(pixmap);
 
-	DBG(("%s: pixmap=%ld, handle=%d\n",
-	     __FUNCTION__, pixmap->drawable.serialNumber, bo->handle));
+	DBG(("%s: pixmap=%ld, handle=%d (old handle=%d)\n",
+	     __FUNCTION__, pixmap->drawable.serialNumber, bo->handle, priv->gpu_bo->handle));
 
 	assert(pixmap->drawable.width * pixmap->drawable.bitsPerPixel <= 8*bo->pitch);
 	assert(pixmap->drawable.height * bo->pitch <= kgem_bo_size(bo));
@@ -819,6 +819,7 @@ static void set_bo(PixmapPtr pixmap, struct kgem_bo *bo)
 
 	if (APPLY_DAMAGE) {
 		RegionRec region;
+
 		/* Post damage on the new front buffer so that listeners, such
 		 * as DisplayLink know take a copy and shove it over the USB,
 		 * also for software cursors and the like.
@@ -827,14 +828,23 @@ static void set_bo(PixmapPtr pixmap, struct kgem_bo *bo)
 		region.extents.x2 = pixmap->drawable.width;
 		region.extents.y2 = pixmap->drawable.height;
 		region.data = NULL;
+
+		/*
+		 * Eeek, beware the sw cursor copying to the old bo
+		 * causing recursion and mayhem.
+		 */
+		DBG(("%s: marking whole pixmap as damaged\n", __FUNCTION__));
+		sna->ignore_copy_area = true;
 		DamageRegionAppend(&pixmap->drawable, &region);
 	}
 
 	damage(pixmap, priv, NULL);
 
 	assert(bo->refcnt);
-	if (priv->move_to_gpu)
+	if (priv->move_to_gpu) {
+		DBG(("%s: applying final/discard move-to-gpu\n", __FUNCTION__));
 		priv->move_to_gpu(sna, priv, 0);
+	}
 	if (priv->gpu_bo != bo) {
 		DBG(("%s: dropping flush hint from handle=%d\n", __FUNCTION__, priv->gpu_bo->handle));
 		priv->gpu_bo->flush = false;
@@ -854,8 +864,10 @@ static void set_bo(PixmapPtr pixmap, struct kgem_bo *bo)
 		bo->domain = DOMAIN_NONE;
 	assert(bo->flush);
 
-	if (APPLY_DAMAGE)
+	if (APPLY_DAMAGE) {
 		DamageRegionProcessPending(&pixmap->drawable);
+		sna->ignore_copy_area = false;
+	}
 }
 
 static void sna_dri2_select_mode(struct sna *sna, struct kgem_bo *dst, struct kgem_bo *src, bool sync)
@@ -1146,8 +1158,11 @@ __sna_dri2_copy_region(struct sna *sna, DrawablePtr draw, RegionPtr region,
 		boxes = &clip.extents;
 		n = 1;
 	}
-	if (APPLY_DAMAGE || flags & DRI2_DAMAGE)
+	if (APPLY_DAMAGE || flags & DRI2_DAMAGE) {
+		DBG(("%s: marking region as damaged\n", __FUNCTION__));
+		sna->ignore_copy_area = true;
 		DamageRegionAppend(&pixmap->drawable, region);
+	}
 
 	DBG(("%s: copying [(%d, %d), (%d, %d)]x%d src=(%d, %d), dst=(%d, %d)\n",
 	     __FUNCTION__,
@@ -1155,7 +1170,7 @@ __sna_dri2_copy_region(struct sna *sna, DrawablePtr draw, RegionPtr region,
 	     boxes[0].x2, boxes[0].y2,
 	     n, sx, sy, dx, dy));
 
-	hint = COPY_LAST;
+	hint = COPY_LAST | COPY_DRI;
 	if (flags & DRI2_SYNC)
 		hint |= COPY_SYNC;
 	if (!sna->render.copy_boxes(sna, GXcopy,
@@ -1177,8 +1192,10 @@ __sna_dri2_copy_region(struct sna *sna, DrawablePtr draw, RegionPtr region,
 		}
 	}
 
-	if (APPLY_DAMAGE || flags & DRI2_DAMAGE)
+	if (APPLY_DAMAGE || flags & DRI2_DAMAGE) {
 		DamageRegionProcessPending(&pixmap->drawable);
+		sna->ignore_copy_area = false;
+	}
 
 	if (clip.data)
 		pixman_region_fini(&clip);
@@ -1295,8 +1312,8 @@ draw_current_msc(DrawablePtr draw, xf86CrtcPtr crtc, uint64_t msc)
 			const struct ust_msc *this = sna_crtc_last_swap(crtc);
 			DBG(("%s: Window transferring from pipe=%d [msc=%llu] to pipe=%d [msc=%llu], delta now %lld\n",
 			     __FUNCTION__,
-			     sna_crtc_to_pipe(priv->crtc), (long long)last->msc,
-			     sna_crtc_to_pipe(crtc), (long long)this->msc,
+			     sna_crtc_pipe(priv->crtc), (long long)last->msc,
+			     sna_crtc_pipe(crtc), (long long)this->msc,
 			     (long long)(priv->msc_delta + this->msc - last->msc)));
 			priv->msc_delta += this->msc - last->msc;
 			priv->crtc = crtc;
@@ -1450,7 +1467,10 @@ static bool add_event_to_client(struct sna_dri2_event *info, struct sna *sna, Cl
 }
 
 static struct sna_dri2_event *
-sna_dri2_add_event(struct sna *sna, DrawablePtr draw, ClientPtr client)
+sna_dri2_add_event(struct sna *sna,
+		   DrawablePtr draw,
+		   ClientPtr client,
+		   xf86CrtcPtr crtc)
 {
 	struct dri2_window *priv;
 	struct sna_dri2_event *info, *chain;
@@ -1470,8 +1490,8 @@ sna_dri2_add_event(struct sna *sna, DrawablePtr draw, ClientPtr client)
 	list_init(&info->cache);
 	info->sna = sna;
 	info->draw = draw;
-	info->crtc = priv->crtc;
-	info->pipe = sna_crtc_to_pipe(priv->crtc);
+	info->crtc = crtc;
+	info->pipe = sna_crtc_pipe(crtc);
 
 	if (!add_event_to_client(info, sna, client)) {
 		free(info);
@@ -1665,7 +1685,7 @@ can_flip(struct sna * sna,
 	}
 
 	if (!sna_crtc_is_on(crtc)) {
-		DBG(("%s: ref-pipe=%d is disabled\n", __FUNCTION__, sna_crtc_to_pipe(crtc)));
+		DBG(("%s: ref-pipe=%d is disabled\n", __FUNCTION__, sna_crtc_pipe(crtc)));
 		return false;
 	}
 
@@ -2025,11 +2045,16 @@ static void sna_dri2_xchg_crtc(struct sna *sna, DrawablePtr draw, xf86CrtcPtr cr
 	     get_window_pixmap(win)->drawable.width,
 	     get_window_pixmap(win)->drawable.height));
 
-	if (APPLY_DAMAGE)
+	if (APPLY_DAMAGE) {
+		DBG(("%s: marking drawable as damaged\n", __FUNCTION__));
+		sna->ignore_copy_area = true;
 		DamageRegionAppend(&win->drawable, &win->clipList);
+	}
 	sna_shadow_set_crtc(sna, crtc, get_private(back)->bo);
-	if (APPLY_DAMAGE)
+	if (APPLY_DAMAGE) {
 		DamageRegionProcessPending(&win->drawable);
+		sna->ignore_copy_area = false;
+	}
 
 	assert(dri2_window(win)->front == NULL);
 
@@ -2112,7 +2137,7 @@ static void fake_swap_complete(struct sna *sna, ClientPtr client,
 
 	swap = sna_crtc_last_swap(crtc);
 	DBG(("%s(type=%d): draw=%ld, pipe=%d, frame=%lld [msc %lld], tv=%d.%06d\n",
-	     __FUNCTION__, type, (long)draw->id, crtc ? sna_crtc_to_pipe(crtc) : -1,
+	     __FUNCTION__, type, (long)draw->id, crtc ? sna_crtc_pipe(crtc) : -1,
 	     (long long)swap->msc,
 	     (long long)draw_current_msc(draw, crtc, swap->msc),
 	     swap->tv_sec, swap->tv_usec));
@@ -2349,8 +2374,8 @@ sna_dri2_immediate_blit(struct sna *sna,
 	if (sna->flags & SNA_NO_WAIT)
 		sync = false;
 
-	DBG(("%s: emitting immediate blit, throttling client, synced? %d, chained? %d\n",
-	     __FUNCTION__, sync, chain != info));
+	DBG(("%s: emitting immediate blit, throttling client, synced? %d, chained? %d, pipe %d\n",
+	     __FUNCTION__, sync, chain != info, info->pipe));
 
 	info->type = SWAP_THROTTLE;
 	info->sync = sync;
@@ -2557,13 +2582,15 @@ static uint64_t
 get_current_msc(struct sna *sna, DrawablePtr draw, xf86CrtcPtr crtc)
 {
 	union drm_wait_vblank vbl;
-	uint64_t ret = -1;
+	uint64_t ret;
 
 	VG_CLEAR(vbl);
 	vbl.request.type = _DRM_VBLANK_RELATIVE;
 	vbl.request.sequence = 0;
-	if (sna_wait_vblank(sna, &vbl, sna_crtc_to_pipe(crtc)) == 0)
+	if (sna_wait_vblank(sna, &vbl, sna_crtc_pipe(crtc)) == 0)
 		ret = sna_crtc_record_vblank(crtc, &vbl);
+	else
+		ret = sna_crtc_last_swap(crtc)->msc;
 
 	return draw_current_msc(draw, crtc, ret);
 }
@@ -2677,7 +2704,7 @@ sna_dri2_schedule_flip(ClientPtr client, DrawablePtr draw, xf86CrtcPtr crtc,
 	if (immediate) {
 		info = sna->dri2.flip_pending;
 		DBG(("%s: performing immediate swap on pipe %d, pending? %d, mode: %d, continuation? %d\n",
-		     __FUNCTION__, sna_crtc_to_pipe(crtc),
+		     __FUNCTION__, sna_crtc_pipe(crtc),
 		     info != NULL, info ? info->flip_continue : 0,
 		     info && info->draw == draw));
 
@@ -2703,7 +2730,7 @@ sna_dri2_schedule_flip(ClientPtr client, DrawablePtr draw, xf86CrtcPtr crtc,
 				goto new_back;
 		}
 
-		info = sna_dri2_add_event(sna, draw, client);
+		info = sna_dri2_add_event(sna, draw, client, crtc);
 		if (info == NULL)
 			return false;
 
@@ -2761,7 +2788,7 @@ queue:
 		info->keepalive = 1;
 	}
 
-	info = sna_dri2_add_event(sna, draw, client);
+	info = sna_dri2_add_event(sna, draw, client, crtc);
 	if (info == NULL)
 		return false;
 
@@ -2817,13 +2844,13 @@ sna_dri2_schedule_xchg(ClientPtr client, DrawablePtr draw, xf86CrtcPtr crtc,
 	DBG(("%s: synchronous?=%d, send-event?=%d\n", __FUNCTION__, sync, event));
 	if (!sync || event) {
 		DBG(("%s: performing immediate xchg on pipe %d\n",
-		     __FUNCTION__, sna_crtc_to_pipe(crtc)));
+		     __FUNCTION__, sna_crtc_pipe(crtc)));
 		sna_dri2_xchg(draw, front, back);
 	}
 	if (sync) {
 		struct sna_dri2_event *info;
 
-		info = sna_dri2_add_event(sna, draw, client);
+		info = sna_dri2_add_event(sna, draw, client, crtc);
 		if (!info)
 			goto complete;
 
@@ -2879,13 +2906,13 @@ sna_dri2_schedule_xchg_crtc(ClientPtr client, DrawablePtr draw, xf86CrtcPtr crtc
 	DBG(("%s: synchronous?=%d, send-event?=%d\n", __FUNCTION__, sync, event));
 	if (!sync || event) {
 		DBG(("%s: performing immediate xchg only on pipe %d\n",
-		     __FUNCTION__, sna_crtc_to_pipe(crtc)));
+		     __FUNCTION__, sna_crtc_pipe(crtc)));
 		sna_dri2_xchg_crtc(sna, draw, crtc, front, back);
 	}
 	if (sync) {
 		struct sna_dri2_event *info;
 
-		info = sna_dri2_add_event(sna, draw, client);
+		info = sna_dri2_add_event(sna, draw, client, crtc);
 		if (!info)
 			goto complete;
 
@@ -3067,7 +3094,7 @@ sna_dri2_schedule_swap(ClientPtr client, DrawablePtr draw, DRI2BufferPtr front,
 
 	VG_CLEAR(vbl);
 
-	info = sna_dri2_add_event(sna, draw, client);
+	info = sna_dri2_add_event(sna, draw, client, crtc);
 	if (!info)
 		goto blit;
 
@@ -3146,7 +3173,7 @@ sna_dri2_get_msc(DrawablePtr draw, CARD64 *ust, CARD64 *msc)
 	const struct ust_msc *swap;
 
 	DBG(("%s(draw=%ld, pipe=%d)\n", __FUNCTION__, draw->id,
-	     crtc ? sna_crtc_to_pipe(crtc) : -1));
+	     crtc ? sna_crtc_pipe(crtc) : -1));
 
 	if (crtc != NULL) {
 		union drm_wait_vblank vbl;
@@ -3154,7 +3181,7 @@ sna_dri2_get_msc(DrawablePtr draw, CARD64 *ust, CARD64 *msc)
 		VG_CLEAR(vbl);
 		vbl.request.type = _DRM_VBLANK_RELATIVE;
 		vbl.request.sequence = 0;
-		if (sna_wait_vblank(sna, &vbl, sna_crtc_to_pipe(crtc)) == 0)
+		if (sna_wait_vblank(sna, &vbl, sna_crtc_pipe(crtc)) == 0)
 			sna_crtc_record_vblank(crtc, &vbl);
 	} else
 		/* Drawable not displayed, make up a *monotonic* value */
@@ -3188,7 +3215,7 @@ sna_dri2_schedule_wait_msc(ClientPtr client, DrawablePtr draw, CARD64 target_msc
 
 	crtc = sna_dri2_get_crtc(draw);
 	DBG(("%s(pipe=%d, target_msc=%llu, divisor=%llu, rem=%llu)\n",
-	     __FUNCTION__, crtc ? sna_crtc_to_pipe(crtc) : -1,
+	     __FUNCTION__, crtc ? sna_crtc_pipe(crtc) : -1,
 	     (long long)target_msc,
 	     (long long)divisor,
 	     (long long)remainder));
@@ -3197,7 +3224,7 @@ sna_dri2_schedule_wait_msc(ClientPtr client, DrawablePtr draw, CARD64 target_msc
 	if (crtc == NULL)
 		goto out_complete;
 
-	pipe = sna_crtc_to_pipe(crtc);
+	pipe = sna_crtc_pipe(crtc);
 
 	VG_CLEAR(vbl);
 
@@ -3218,7 +3245,7 @@ sna_dri2_schedule_wait_msc(ClientPtr client, DrawablePtr draw, CARD64 target_msc
 	if (divisor == 0 && current_msc >= target_msc)
 		goto out_complete;
 
-	info = sna_dri2_add_event(sna, draw, client);
+	info = sna_dri2_add_event(sna, draw, client, crtc);
 	if (!info)
 		goto out_complete;
 

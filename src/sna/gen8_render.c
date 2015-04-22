@@ -205,6 +205,33 @@ static const struct blendinfo {
 #define OUT_VERTEX(x,y) vertex_emit_2s(sna, x,y)
 #define OUT_VERTEX_F(v) vertex_emit(sna, v)
 
+struct gt_info {
+	const char *name;
+	struct {
+		int max_vs_entries;
+	} urb;
+};
+
+static const struct gt_info bdw_gt_info = {
+	.name = "Broadwell (gen8)",
+	.urb = { .max_vs_entries = 960 },
+};
+
+static bool is_bdw(struct sna *sna)
+{
+	return sna->kgem.gen == 0100;
+}
+
+static const struct gt_info chv_gt_info = {
+	.name = "Cherryview (gen8)",
+	.urb = { .max_vs_entries = 640 },
+};
+
+static bool is_chv(struct sna *sna)
+{
+	return sna->kgem.gen == 0101;
+}
+
 static inline bool too_large(int width, int height)
 {
 	return width > GEN8_MAX_SIZE || height > GEN8_MAX_SIZE;
@@ -462,7 +489,7 @@ gen8_emit_urb(struct sna *sna)
 {
 	/* num of VS entries must be divisible by 8 if size < 9 */
 	OUT_BATCH(GEN8_3DSTATE_URB_VS | (2 - 2));
-	OUT_BATCH(960 << URB_ENTRY_NUMBER_SHIFT |
+	OUT_BATCH(sna->render_state.gen8.info->urb.max_vs_entries << URB_ENTRY_NUMBER_SHIFT |
 		  (2 - 1) << URB_ENTRY_SIZE_SHIFT |
 		  4 << URB_STARTING_ADDRESS_SHIFT);
 
@@ -2031,6 +2058,11 @@ try_blt(struct sna *sna,
 	if (sna_picture_is_solid(src, NULL) && can_switch_to_blt(sna, bo, 0))
 		return true;
 
+	if (src->pDrawable == dst->pDrawable &&
+	    (sna->render_state.gt < 3 || width*height < 1024) &&
+	    can_switch_to_blt(sna, bo, 0))
+		return true;
+
 	if (src->pDrawable) {
 		struct kgem_bo *s = __sna_drawable_peek_bo(src->pDrawable);
 		if (s == NULL)
@@ -2708,12 +2740,15 @@ prefer_blt_copy(struct sna *sna,
 	    untiled_tlb_miss(dst_bo))
 		return true;
 
+	if (flags & COPY_DRI && !sna->kgem.has_semaphores)
+		return false;
+
 	if (force_blt_ring(sna))
 		return true;
 
-        if (sna->render_state.gt < 3 &&
-            src_bo == dst_bo &&
-            can_switch_to_blt(sna, dst_bo, flags))
+	if ((flags & COPY_SMALL ||
+	     (sna->render_state.gt < 3 && src_bo == dst_bo)) &&
+	    can_switch_to_blt(sna, dst_bo, flags))
 		return true;
 
 	if (kgem_bo_is_render(dst_bo) ||
@@ -2721,6 +2756,7 @@ prefer_blt_copy(struct sna *sna,
 		return false;
 
 	if (flags & COPY_LAST &&
+	    sna->render_state.gt < 3 &&
             can_switch_to_blt(sna, dst_bo, flags))
 		return true;
 
@@ -3906,6 +3942,13 @@ static bool gen8_render_setup(struct sna *sna)
 		state->gt = ((devid >> 4) & 0xf) + 1;
 	DBG(("%s: gt=%d\n", __FUNCTION__, state->gt));
 
+	if (is_bdw(sna))
+		state->info = &bdw_gt_info;
+	else if (is_chv(sna))
+		state->info = &chv_gt_info;
+	else
+		return false;
+
 	sna_static_stream_init(&general);
 
 	/* Zero pad the start. If you see an offset of 0x0 in the batchbuffer
@@ -4017,5 +4060,5 @@ const char *gen8_render_init(struct sna *sna, const char *backend)
 
 	sna->render.max_3d_size = GEN8_MAX_SIZE;
 	sna->render.max_3d_pitch = 1 << 18;
-	return "Broadwell";
+	return sna->render_state.gen8.info->name;
 }

@@ -210,7 +210,7 @@ if test "x$UDEV" != "xno"; then
 	fi
 fi
 
-PKG_CHECK_MODULES(X11, [x11 x11-xcb xcb-dri2 xrender xrandr xext xfixes cairo cairo-xlib-xrender pixman-1 libpng], [x11="yes"], [x11="no"])
+PKG_CHECK_MODULES(X11, [x11 x11-xcb xcb-dri2 xcomposite xdamage xrender xrandr xext xfixes cairo cairo-xlib-xrender pixman-1 libpng], [x11="yes"], [x11="no"])
 AM_CONDITIONAL(HAVE_X11, test "x$x11" = "xyes")
 
 cpuid="yes"
@@ -275,7 +275,7 @@ if test "x$shm" = "xyes"; then
 	AC_DEFINE([HAVE_MIT_SHM], 1, [Define to 1 if MIT-SHM is available])
 fi
 
-PKG_CHECK_MODULES(X11_DRI3, [xcb-dri3 xcb-sync xcb-xfixes xcb-present x11-xcb xshmfence x11 xrender xext libdrm], [x11_dri3="yes"], [x11_dri3="no"])
+PKG_CHECK_MODULES(X11_DRI3, [xcb-dri3 xcb-sync xcb-xfixes xcb-present x11-xcb xshmfence x11 xcomposite xdamage xrender xrandr xxf86vm xext libdrm], [x11_dri3="yes"], [x11_dri3="no"])
 AM_CONDITIONAL(X11_DRI3, test "x$x11_dri3" = "xyes" -a "x$shm" = "xyes")
 AM_CONDITIONAL(X11_SHM, test "x$shm" = "xyes")
 
@@ -393,14 +393,12 @@ AC_ARG_ENABLE(ums-only,
 required_xorg_server_version=1.6
 required_pixman_version=0.16
 
-if pkg-config --exists 'pixman-1 >= 0.27.1'; then
-	AC_DEFINE([HAS_PIXMAN_GLYPHS], 1, [Enable pixman glyph cache])
-fi
-
-if pkg-config --exists 'pixman-1 >= 0.24.0'; then
-	AC_DEFINE([HAS_PIXMAN_TRIANGLES], 1, [Enable pixman triangle rasterisation])
-fi
-
+PKG_CHECK_EXISTS([pixman-1 >= 0.24.0],
+		 AC_DEFINE([HAS_PIXMAN_TRIANGLES], 1, [Enable pixman triangle rasterisation])
+		 [])
+PKG_CHECK_EXISTS([pixman-1 >= 0.27.1],
+		 [AC_DEFINE([HAS_PIXMAN_GLYPHS], 1, [Enable pixman glyph cache])],
+		 [])
 # Store the list of server defined optional extensions in REQUIRED_MODULES
 XORG_DRIVER_CHECK_EXT(RANDR, randrproto)
 XORG_DRIVER_CHECK_EXT(RENDER, renderproto)
@@ -417,6 +415,8 @@ AC_ARG_ENABLE(sna,
 	      [SNA=auto])
 
 AC_CHECK_HEADERS([dev/wscons/wsconsio.h])
+AC_FUNC_ALLOCA
+AC_HEADER_MAJOR
 
 if test "x$SNA" != "xno"; then
 	AC_DEFINE(USE_SNA, 1, [Enable SNA support])
@@ -424,18 +424,15 @@ if test "x$SNA" != "xno"; then
 fi
 
 uxa_requires_libdrm=2.4.52
+uxa_requires_pixman=0.24.0
+
 AC_ARG_ENABLE(uxa,
 	      AS_HELP_STRING([--enable-uxa],
 			     [Enable Unified Acceleration Architecture (UXA) [default=auto]]),
 	      [UXA="$enableval"],
 	      [UXA=auto])
 if test "x$UXA" = "xauto"; then
-	if ! pkg-config --exists "libdrm_intel >= $uxa_requires_libdrm"; then
-		UXA=no
-	fi
-	if ! pkg-config --exists 'pixman-1 >= 0.24.0'; then
-		UXA=no
-	fi
+	PKG_CHECK_EXISTS([libdrm_intel >= $uxa_requires_libdrm pixman-1 >= $uxa_requires_pixman], [], [UXA=no])
 fi
 if test "x$UXA" != "xno"; then
 	AC_DEFINE(USE_UXA, 1, [Enable UXA support])
