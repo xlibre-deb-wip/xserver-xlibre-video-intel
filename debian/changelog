@@ -2,6 +2,7 @@ xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu2.1) UNRELEASED; urgency=medium
 
   * sna-force-frontbuffer-to-cpu-for-randr-fallback.diff: Fix rotation
     on SKL. (LP: #1447143)
+  * source: Add extend-diff-ignore to not complain about symlinks.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Wed, 22 Apr 2015 15:20:45 +0300
 
