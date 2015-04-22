@@ -1,4 +1,4 @@
-xserver-xorg-video-intel (2:2.99.917+git20150320-1~exp1) UNRELEASED; urgency=medium
+xserver-xorg-video-intel (2:2.99.917+git20150421-1~exp1) UNRELEASED; urgency=medium
 
   * New snapshot.
   * rules: Fix valgrind-enabling check.
