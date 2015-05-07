@@ -1,12 +1,86 @@
-xserver-xorg-video-intel (2:2.21.15-2) unstable; urgency=medium
+xserver-xorg-video-intel (2:2.99.917-1~exp1) experimental; urgency=medium
 
-  [ Michael Stapelberg ]
-  * Revert back to 1.0 source format.
+  * New upstream prerelease 2.99.917.
+  * Update upstream changelog.
+  * Update to Standards version 3.9.6.
+
+ -- Vincent Cheng <vcheng@debian.org>  Sun, 21 Dec 2014 21:37:27 -0800
+
+xserver-xorg-video-intel (2:2.99.916+git20141119-1~exp1) experimental; urgency=medium
+
+  * New upstream snapshot.
+
+ -- maximilian attems <maks@debian.org>  Sun, 23 Nov 2014 00:04:02 +0100
+
+xserver-xorg-video-intel (2:2.99.916-1~exp1) experimental; urgency=medium
+
+  [ Vincent Cheng ]
+  * New upstream prerelease 2.99.916.
+    - sna: Add the current CRTC mode last (Closes: #750605)
+  * Update debian/copyright. (Closes: #730643)
+  * Revert to source format 1.0.
+
+  [ Laurent Bigonville ]
+  * debian/xserver-xorg-video-intel.maintscript: Explicitly remove
+    i915-kms.conf on upgrade. (Closes: #713340)
+
+ -- Vincent Cheng <vcheng@debian.org>  Sun, 14 Sep 2014 01:29:56 -0700
+
+xserver-xorg-video-intel (2:2.99.914-1~exp1) experimental; urgency=medium
+
+  * New upstream prerelease 2.99.914.
+  * Update upstream changelog.
+  * Fix FTBFS on kfreebsd by not installing non-existent files.
+
+ -- Vincent Cheng <vcheng@debian.org>  Wed, 23 Jul 2014 22:49:08 -0700
+
+xserver-xorg-video-intel (2:2.99.912+git20140719-1~exp1) experimental; urgency=medium
+
+  * New upstream snapshot.
+
+ -- maximilian attems <maks@debian.org>  Sat, 19 Jul 2014 14:18:15 +0200
+
+xserver-xorg-video-intel (2:2.99.912+git20140705-1~exp1) experimental; urgency=medium
+
+  * New upstream snapshot.
 
   [ Julien Cristau ]
-  * Cherry-pick upstream build fix for xserver 1.15 (closes: #736980).
+  * Remove Cyril from Uploaders.
 
- -- Julien Cristau <jcristau@debian.org>  Tue, 04 Feb 2014 15:24:32 +0100
+ -- maximilian attems <maks@debian.org>  Sat, 05 Jul 2014 20:47:01 +0200
+
+xserver-xorg-video-intel (2:2.99.912-1~exp1) experimental; urgency=medium
+
+  * New upstream prerelease 2.99.912.
+  * Update upstream changelog.
+
+ -- maximilian attems <maks@debian.org>  Tue, 10 Jun 2014 21:59:57 +0200
+
+xserver-xorg-video-intel (2:2.99.911+git20140607-1~exp1) experimental; urgency=medium
+
+  * New upstream prerelease.
+
+ -- maximilian attems <maks@debian.org>  Sat, 07 Jun 2014 10:33:52 +0200
+
+xserver-xorg-video-intel (2:2.99.911+git20140529-1~exp2) experimental; urgency=medium
+
+  * Add myself to Uploaders.
+  * Install intel-virtual-output. (Closes: #749925)
+    - New build-deps added: libxinerama-dev, libxrandr-dev, libxdamage-dev,
+      libxcursor-dev, libxtst-dev, libxrender-dev, libpixman-1-dev
+  * Stop overriding default upstream acceleration method (i.e. default to SNA
+    instead of UXA).
+
+ -- Vincent Cheng <vcheng@debian.org>  Mon, 02 Jun 2014 23:47:23 -0700
+
+xserver-xorg-video-intel (2:2.99.911+git20140529-1~exp1) experimental; urgency=low
+
+  * New upstream prerelease. (closes: #748753)
+  * Install new backlight helper.
+  * Add myself to Uploaders.
+  * Bump Standards-Version to 3.9.5 (no changes necessary)
+
+ -- maximilian attems <maks@debian.org>  Fri, 30 May 2014 11:15:58 +0200
 
 xserver-xorg-video-intel (2:2.21.15-1) unstable; urgency=low
 
