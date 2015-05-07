@@ -1,3 +1,9 @@
+xserver-xorg-video-intel (2:2.99.917-1) unstable; urgency=medium
+
+  * Upload to unstable. (Closes: #748753)
+
+ -- Vincent Cheng <vcheng@debian.org>  Thu, 07 May 2015 00:46:06 -0700
+
 xserver-xorg-video-intel (2:2.99.917-1~exp1) experimental; urgency=medium
 
   * New upstream prerelease 2.99.917.
