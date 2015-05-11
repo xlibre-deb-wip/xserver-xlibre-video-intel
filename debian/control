@@ -1,4 +1,4 @@
-Source: xserver-xorg-video-intel
+Source: xserver-xorg-video-intel-lts-vivid
 Section: x11
 Priority: optional
 Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
@@ -13,7 +13,7 @@ Build-Depends:
  dh-autoreconf,
  pkg-config,
 # Depend on latest server to ensure XMir support
- xserver-xorg-dev (>= 2:1.14.2.901-2ubuntu4~),
+ xserver-xorg-dev-lts-vivid (>= 2:1.14.2.901-2ubuntu4~~),
  x11proto-core-dev,
  x11proto-fonts-dev,
  x11proto-xinerama-dev,
@@ -25,7 +25,7 @@ Build-Depends:
  libdrm-dev (>= 2.4.23),
  x11proto-xf86dri-dev,
  x11proto-gl-dev,
- libgl1-mesa-dev | libgl-dev,
+ libgl1-mesa-dev-lts-vivid | libgl-dev,
  libpciaccess-dev (>= 0.8.0+git20071002),
 # following are only needed for xvmc:
  x11proto-dri2-dev,
@@ -53,13 +53,14 @@ Vcs-Git: git://anonscm.debian.org/pkg-xorg/driver/xserver-xorg-video-intel
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-xorg/driver/xserver-xorg-video-intel.git
 Homepage: http://www.x.org/
 
-Package: xserver-xorg-video-intel
+Package: xserver-xorg-video-intel-lts-vivid
 Architecture: amd64 i386 kfreebsd-amd64 kfreebsd-i386
 Depends:
  ${shlibs:Depends},
  ${misc:Depends},
  ${xviddriver:Depends},
 Provides:
+ xserver-xorg-video-intel, xorg-renamed-package, xorg-renamed-package-lts-vivid,
  ${xviddriver:Provides}
 Description: X.Org X server -- Intel i8xx, i9xx display driver
  This package provides the driver for the Intel i8xx and i9xx family
@@ -70,11 +71,13 @@ Description: X.Org X server -- Intel i8xx, i9xx display driver
  for i810/i815 and i9xx and newer chipsets.
  .
  This package is built from the X.org xf86-video-intel driver module.
+Replaces: xserver-xorg-video-intel
+Conflicts: xserver-xorg-video-intel, xorg-renamed-package-lts-utopic,
 
-Package: xserver-xorg-video-intel-dbg
+Package: xserver-xorg-video-intel-lts-vivid-dbg
 Architecture: amd64 i386 kfreebsd-amd64 kfreebsd-i386
 Depends:
- xserver-xorg-video-intel (= ${binary:Version}),
+ xserver-xorg-video-intel-lts-vivid (= ${binary:Version}),
  ${shlibs:Depends},
  ${misc:Depends}
 Recommends:
@@ -86,3 +89,6 @@ Description: X.Org X server -- Intel i8xx, i9xx display driver (debug symbols)
  including i810, i815, i830, i845, i855, i865, i915, and i945 series chips.
  .
  This package provides debugging symbols for this Xorg X driver.
+Replaces: xserver-xorg-video-intel-dbg
+Provides: xserver-xorg-video-intel-dbg, xorg-renamed-package, xorg-renamed-package-lts-vivid
+Conflicts: xserver-xorg-video-intel-dbg, xorg-renamed-package-lts-utopic,

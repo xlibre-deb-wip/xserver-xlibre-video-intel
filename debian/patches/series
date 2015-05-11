@@ -1,6 +1,5 @@
 fix-sna-external-slave-rotation.patch
 
 # XMir series
-xmir.patch
 
 sna-force-frontbuffer-to-cpu-for-randr-fallback.diff

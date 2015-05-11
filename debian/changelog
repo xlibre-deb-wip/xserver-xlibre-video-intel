@@ -1,3 +1,9 @@
+xserver-xorg-video-intel-lts-vivid (2:2.99.917-1~exp1ubuntu2.1~trusty1) trusty; urgency=medium
+
+  * Backport vivid package for lts-vivid stack.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Wed, 06 May 2015 16:00:21 +0300
+
 xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu2.1) vivid; urgency=medium
 
   * sna-force-frontbuffer-to-cpu-for-randr-fallback.diff: Fix rotation
