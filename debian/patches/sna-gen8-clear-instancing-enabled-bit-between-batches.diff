@@ -1,0 +1,55 @@
+commit 0532a3313ad9c76a6e1d28e8a1c2ea495583fead
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Wed Nov 5 20:11:54 2014 +0000
+
+    sna/gen8: Clear instancing enabled bit between batches
+    
+    gen8 sets the instancing bit relative to the vertex element, but we were
+    clearing it for the vertex buffer. As the maximum number of vertex
+    elements is fixed, just clear them all when emitting our header. Note
+    that VF_SGVS is not sufficient by itself to disable all side-effects of
+    instancing.
+    
+    Thanks to Kenneth Graunke for pointing out the change from vertex buffer
+    to vertex element of the instancing enable bit.
+    
+    Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=84958
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+diff --git a/src/sna/gen8_render.c b/src/sna/gen8_render.c
+index d375753..6deb6b5 100644
+--- a/src/sna/gen8_render.c
++++ b/src/sna/gen8_render.c
+@@ -788,6 +788,8 @@ gen8_emit_cc_invariant(struct sna *sna)
+ static void
+ gen8_emit_vf_invariant(struct sna *sna)
+ {
++	int n;
++
+ #if 1
+ 	OUT_BATCH(GEN8_3DSTATE_VF | (2 - 2));
+ 	OUT_BATCH(0);
+@@ -800,6 +802,12 @@ gen8_emit_vf_invariant(struct sna *sna)
+ 	OUT_BATCH(RECTLIST);
+ 
+ 	OUT_BATCH(GEN8_3DSTATE_VF_STATISTICS | 0);
++
++	for (n = 1; n <= 3; n++) {
++		OUT_BATCH(GEN8_3DSTATE_VF_INSTANCING | (3 - 2));
++		OUT_BATCH(n);
++		OUT_BATCH(0);
++	}
+ }
+ 
+ static void
+@@ -1417,10 +1425,6 @@ static void gen8_emit_vertex_buffer(struct sna *sna,
+ 	OUT_BATCH64(0);
+ 	OUT_BATCH(~0); /* buffer size: disabled */
+ 
+-	OUT_BATCH(GEN8_3DSTATE_VF_INSTANCING | (3 - 2));
+-	OUT_BATCH(id);
+-	OUT_BATCH(0);
+-
+ 	sna->render.vb_id |= 1 << id;
+ }
+ 
