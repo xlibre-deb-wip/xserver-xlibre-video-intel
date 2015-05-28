@@ -1,7 +1,13 @@
 xserver-xorg-video-intel (2:2.99.914-1~exp1ubuntu4.5) UNRELEASED; urgency=medium
 
+  [ Timo Aaltonen ]
   * sna-gen8-clear-instancing-enabled-bit-between-batches.diff: Fix
     corruptions and missing letters on 2nd head. (LP: #1432194)
+
+  [ Robert Hooker ]
+  * sna-clear-cursor-image-after-rotation.patch: Fix a double cursor problem after
+    rotating the screen (LP: #1376760) (LP: #1443345) backport from
+    a88795c641 upstream.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Mon, 11 May 2015 13:41:20 +0300
 

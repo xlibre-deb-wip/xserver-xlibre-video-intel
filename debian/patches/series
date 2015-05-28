@@ -15,3 +15,4 @@ bdw-annotate-more-64bit-pointer-locations.diff
 bdw-clamp-urb-allocations-for-gt3.diff
 fix-sna-trapezoids.patch
 sna-gen8-clear-instancing-enabled-bit-between-batches.diff
+sna-clear-cursor-image-after-rotation.patch
