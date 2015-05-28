@@ -1,9 +1,16 @@
-xserver-xorg-video-intel (2:2.99.914-1~exp1ubuntu4.4) UNRELEASED; urgency=medium
+xserver-xorg-video-intel (2:2.99.914-1~exp1ubuntu4.5) UNRELEASED; urgency=medium
 
   * sna-gen8-clear-instancing-enabled-bit-between-batches.diff: Fix
     corruptions and missing letters on 2nd head. (LP: #1432194)
 
  -- Timo Aaltonen <tjaalton@debian.org>  Mon, 11 May 2015 13:41:20 +0300
+
+xserver-xorg-video-intel (2:2.99.914-1~exp1ubuntu4.4) utopic; urgency=medium
+
+  * fix-sna-trapezoids.patch: Fix client-side shadows for GTK+ 3.14
+    (LP: #1378188).
+
+ -- Marius Gedminas <marius@gedmin.as>  Tue, 05 May 2015 11:25:15 +0100
 
 xserver-xorg-video-intel (2:2.99.914-1~exp1ubuntu4.3) utopic; urgency=medium
 
