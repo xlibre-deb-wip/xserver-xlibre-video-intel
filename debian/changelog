@@ -1,3 +1,10 @@
+xserver-xorg-video-intel (2:2.99.917+git20150618-1~exp1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge from debian-experimental git.
+  * Drop patches, all upstream.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Thu, 18 Jun 2015 15:49:36 +0300
+
 xserver-xorg-video-intel (2:2.99.917+git20150618-1~exp1) UNRELEASED; urgency=medium
 
   * New snapshot.
