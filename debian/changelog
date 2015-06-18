@@ -1,3 +1,13 @@
+xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu3) wily; urgency=medium
+
+  * debian/patches/xmir.patch:
+    - Drop XMir patch, we don't need it with new glamor based XMir (LP: #1462994)
+  * debian/patches/fix-sna-fstat-include.patch:
+  * debian/patches/fix-uxa-fstat-include.patch:
+    - Fix missing include for fstat
+
+ -- Robert Ancell <robert.ancell@canonical.com>  Tue, 09 Jun 2015 15:17:18 +1200
+
 xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu2.2) vivid-proposed; urgency=medium
 
   * fix-yuv-to-rgb-shared-on-intel-gen8.patch: Fix faulty yuv2rgb translation
