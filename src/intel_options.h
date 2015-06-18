@@ -28,7 +28,6 @@ enum intel_options {
 	OPTION_PREFER_OVERLAY,
 	OPTION_HOTPLUG,
 	OPTION_REPROBE,
-	OPTION_DELETE_DP12,
 #if defined(XvMCExtension) && defined(ENABLE_XVMC)
 	OPTION_XVMC,
 #define INTEL_XVMC 1
@@ -51,5 +50,7 @@ enum intel_options {
 
 extern const OptionInfoRec intel_options[];
 OptionInfoPtr intel_options_get(ScrnInfoPtr scrn);
+unsigned intel_option_cast_to_unsigned(OptionInfoPtr, int id, unsigned val);
+Bool intel_option_cast_to_bool(OptionInfoPtr, int id, Bool val);
 
 #endif /* INTEL_OPTIONS_H */

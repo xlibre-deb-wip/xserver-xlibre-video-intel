@@ -1815,12 +1815,12 @@ gen6_composite_picture(struct sna *sna,
 		if (channel->repeat &&
 		    (x >= 0 &&
 		     y >= 0 &&
-		     x + w < pixmap->drawable.width &&
-		     y + h < pixmap->drawable.height)) {
+		     x + w <= pixmap->drawable.width &&
+		     y + h <= pixmap->drawable.height)) {
 			struct sna_pixmap *priv = sna_pixmap(pixmap);
 			if (priv && priv->clear) {
 				DBG(("%s: converting large pixmap source into solid [%08x]\n", __FUNCTION__, priv->clear_color));
-				return gen4_channel_init_solid(sna, channel, priv->clear_color);
+				return gen4_channel_init_solid(sna, channel, solid_color(picture->format, priv->clear_color));
 			}
 		}
 	} else
@@ -1965,46 +1965,77 @@ gen6_composite_set_target(struct sna *sna,
 
 static bool
 try_blt(struct sna *sna,
-	PicturePtr dst, PicturePtr src,
-	int width, int height)
+	uint8_t op,
+	PicturePtr src,
+	PicturePtr mask,
+	PicturePtr dst,
+	int16_t src_x, int16_t src_y,
+	int16_t msk_x, int16_t msk_y,
+	int16_t dst_x, int16_t dst_y,
+	int16_t width, int16_t height,
+	unsigned flags,
+	struct sna_composite_op *tmp)
 {
 	struct kgem_bo *bo;
 
 	if (sna->kgem.mode == KGEM_BLT) {
 		DBG(("%s: already performing BLT\n", __FUNCTION__));
-		return true;
+		goto execute;
 	}
 
 	if (too_large(width, height)) {
 		DBG(("%s: operation too large for 3D pipe (%d, %d)\n",
 		     __FUNCTION__, width, height));
-		return true;
+		goto execute;
 	}
 
 	bo = __sna_drawable_peek_bo(dst->pDrawable);
 	if (bo == NULL)
-		return true;
-	if (bo->rq)
-		return RQ_IS_BLT(bo->rq);
+		goto execute;
+
+	if (untiled_tlb_miss(bo))
+		goto execute;
+
+	if (bo->rq) {
+		if (RQ_IS_BLT(bo->rq))
+			goto execute;
+
+		return false;
+	}
+
+	if (bo->tiling == I915_TILING_Y)
+		goto upload;
+
+	if (src->pDrawable == dst->pDrawable &&
+	    can_switch_to_blt(sna, bo, 0))
+		goto execute;
 
 	if (sna_picture_is_solid(src, NULL) && can_switch_to_blt(sna, bo, 0))
-		return true;
+		goto execute;
 
 	if (src->pDrawable) {
-		bo = __sna_drawable_peek_bo(src->pDrawable);
-		if (bo == NULL)
-			return true;
+		struct kgem_bo *s = __sna_drawable_peek_bo(src->pDrawable);
+		if (s == NULL)
+			goto execute;
 
-		if (prefer_blt_bo(sna, bo))
-			return true;
+		if (prefer_blt_bo(sna, s, bo))
+			goto execute;
 	}
 
 	if (sna->kgem.ring == KGEM_BLT) {
 		DBG(("%s: already performing BLT\n", __FUNCTION__));
-		return true;
+		goto execute;
 	}
 
-	return false;
+upload:
+	flags |= COMPOSITE_UPLOAD;
+execute:
+	return sna_blt_composite(sna, op,
+				 src, dst,
+				 src_x, src_y,
+				 dst_x, dst_y,
+				 width, height,
+				 flags, tmp);
 }
 
 static bool
@@ -2234,13 +2265,13 @@ gen6_render_composite(struct sna *sna,
 	     width, height, sna->kgem.ring));
 
 	if (mask == NULL &&
-	    try_blt(sna, dst, src, width, height) &&
-	    sna_blt_composite(sna, op,
-			      src, dst,
-			      src_x, src_y,
-			      dst_x, dst_y,
-			      width, height,
-			      flags, tmp))
+	    try_blt(sna, op,
+		    src, mask, dst,
+		    src_x, src_y,
+		    msk_x, msk_y,
+		    dst_x, dst_y,
+		    width, height,
+		    flags, tmp))
 		return true;
 
 	if (gen6_composite_fallback(sna, src, mask, dst))
@@ -2676,19 +2707,27 @@ static inline bool prefer_blt_copy(struct sna *sna,
 	if (sna->kgem.ring == KGEM_BLT)
 		return true;
 
-	if (src_bo == dst_bo && can_switch_to_blt(sna, dst_bo, flags))
+	if (flags & COPY_DRI && !sna->kgem.has_semaphores)
+		return false;
+
+	if ((flags & COPY_SMALL || src_bo == dst_bo) &&
+	    can_switch_to_blt(sna, dst_bo, flags))
 		return true;
 
 	if (untiled_tlb_miss(src_bo) ||
 	    untiled_tlb_miss(dst_bo))
 		return true;
 
-	if (force_blt_ring(sna))
+	if (force_blt_ring(sna, dst_bo))
 		return true;
 
 	if (kgem_bo_is_render(dst_bo) ||
 	    kgem_bo_is_render(src_bo))
 		return false;
+
+	if (flags & COPY_LAST &&
+            can_switch_to_blt(sna, dst_bo, flags))
+		return true;
 
 	if (prefer_render_ring(sna, dst_bo))
 		return false;
@@ -2696,7 +2735,7 @@ static inline bool prefer_blt_copy(struct sna *sna,
 	if (!prefer_blt_ring(sna, dst_bo, flags))
 		return false;
 
-	return prefer_blt_bo(sna, src_bo) || prefer_blt_bo(sna, dst_bo);
+	return prefer_blt_bo(sna, src_bo, dst_bo);
 }
 
 static bool

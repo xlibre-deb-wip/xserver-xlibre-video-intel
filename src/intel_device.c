@@ -38,6 +38,12 @@
 #include <dirent.h>
 #include <errno.h>
 
+#if MAJOR_IN_MKDEV
+#include <sys/mkdev.h>
+#elif MAJOR_IN_SYSMACROS
+#include <sys/sysmacros.h>
+#endif
+
 #include <pciaccess.h>
 
 #include <xorg-server.h>
@@ -461,9 +467,9 @@ static int is_render_node(int fd, struct stat *st)
 
 static char *find_render_node(int fd)
 {
-#if defined(USE_RENDERNODE)
 	struct stat master, render;
 	char buf[128];
+	int i;
 
 	/* Are we a render-node ourselves? */
 	if (is_render_node(fd, &master))
@@ -472,9 +478,17 @@ static char *find_render_node(int fd)
 	sprintf(buf, "/dev/dri/renderD%d", (int)((master.st_rdev | 0x80) & 0xbf));
 	if (stat(buf, &render) == 0 &&
 	    master.st_mode == render.st_mode &&
-	    render.st_rdev == ((master.st_rdev | 0x80) & 0xbf))
+	    render.st_rdev == (master.st_rdev | 0x80))
 		return strdup(buf);
-#endif
+
+	/* Misaligned card <-> renderD, do a full search */
+	for (i = 0; i < 16; i++) {
+		sprintf(buf, "/dev/dri/renderD%d", i + 128);
+		if (stat(buf, &render) == 0 &&
+		    master.st_mode == render.st_mode &&
+		    render.st_rdev == (master.st_rdev | 0x80))
+			return strdup(buf);
+	}
 
 	return NULL;
 }
@@ -670,6 +684,12 @@ struct intel_device *intel_get_device(ScrnInfoPtr scrn, int *fd)
 
 	*fd = dev->fd;
 	return dev;
+}
+
+const char *intel_get_master_name(struct intel_device *dev)
+{
+	assert(dev && dev->master_node);
+	return dev->master_node;
 }
 
 const char *intel_get_client_name(struct intel_device *dev)

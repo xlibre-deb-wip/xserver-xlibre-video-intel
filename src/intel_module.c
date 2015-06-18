@@ -126,6 +126,9 @@ static const struct intel_device_info intel_skylake_info = {
 	.gen = 0110,
 };
 
+static const struct intel_device_info intel_broxton_info = {
+	.gen = 0111,
+};
 
 static const SymTabRec intel_chipsets[] = {
 	{PCI_CHIP_I810,				"i810"},
@@ -234,30 +237,36 @@ static const SymTabRec intel_chipsets[] = {
 	{0x0157, "HD Graphics"},
 
 	/* Broadwell Marketing names */
-	{0x1602, "HD graphics"},
-	{0x1606, "HD graphics"},
-	{0x160B, "HD graphics"},
-	{0x160A, "HD graphics"},
-	{0x160D, "HD graphics"},
-	{0x160E, "HD graphics"},
-	{0x1612, "HD graphics 5600"},
-	{0x1616, "HD graphics 5500"},
-	{0x161B, "HD graphics"},
-	{0x161A, "HD graphics"},
-	{0x161D, "HD graphics"},
-	{0x161E, "HD graphics 5300"},
-	{0x1622, "Iris Pro graphics 6200"},
-	{0x1626, "HD graphics 6000"},
-	{0x162B, "Iris graphics 6100"},
-	{0x162A, "Iris Pro graphics P6300"},
-	{0x162D, "HD graphics"},
-	{0x162E, "HD graphics"},
-	{0x1632, "HD graphics"},
-	{0x1636, "HD graphics"},
-	{0x163B, "HD graphics"},
-	{0x163A, "HD graphics"},
-	{0x163D, "HD graphics"},
-	{0x163E, "HD graphics"},
+	{0x1602, "HD Graphics"},
+	{0x1606, "HD Graphics"},
+	{0x160B, "HD Graphics"},
+	{0x160A, "HD Graphics"},
+	{0x160D, "HD Graphics"},
+	{0x160E, "HD Graphics"},
+	{0x1612, "HD Graphics 5600"},
+	{0x1616, "HD Graphics 5500"},
+	{0x161B, "HD Graphics"},
+	{0x161A, "HD Graphics"},
+	{0x161D, "HD Graphics"},
+	{0x161E, "HD Graphics 5300"},
+	{0x1622, "Iris Pro Graphics 6200"},
+	{0x1626, "HD Graphics 6000"},
+	{0x162B, "Iris Graphics 6100"},
+	{0x162A, "Iris Pro Graphics P6300"},
+	{0x162D, "HD Graphics"},
+	{0x162E, "HD Graphics"},
+	{0x1632, "HD Graphics"},
+	{0x1636, "HD Graphics"},
+	{0x163B, "HD Graphics"},
+	{0x163A, "HD Graphics"},
+	{0x163D, "HD Graphics"},
+	{0x163E, "HD Graphics"},
+
+	/* Cherryview (Cherrytrail/Braswell) */
+	{0x22b0, "HD Graphics"},
+	{0x22b1, "HD Graphics"},
+	{0x22b2, "HD Graphics"},
+	{0x22b3, "HD Graphics"},
 
 	/* When adding new identifiers, also update:
 	 * 1. intel_identify()
@@ -317,6 +326,8 @@ static const struct pci_id_match intel_device_match[] = {
 	INTEL_CHV_IDS(&intel_cherryview_info),
 
 	INTEL_SKL_IDS(&intel_skylake_info),
+
+	INTEL_BXT_IDS(&intel_broxton_info),
 
 	INTEL_VGA_DEVICE(PCI_MATCH_ANY, &intel_generic_info),
 #endif
@@ -508,6 +519,9 @@ static enum accel_method { NOACCEL, SNA, UXA } get_accel_method(void)
 	if (hosted())
 		return SNA;
 
+	if (xf86configptr == NULL) /* X -configure */
+		return SNA;
+
 	dev = _xf86findDriver("intel", xf86configptr->conf_device_lst);
 	if (dev && dev->dev_option_lst) {
 		const char *s;
@@ -582,10 +596,17 @@ intel_scrn_create(DriverPtr		driver,
 	case NOACCEL:
 #endif
 	case UXA:
-		  return intel_init_scrn(scrn);
+		return intel_init_scrn(scrn);
 #endif
 
-	default: break;
+	default:
+#if USE_SNA
+		return sna_init_scrn(scrn, entity_num);
+#elif USE_UXA
+		return intel_init_scrn(scrn);
+#else
+		break;
+#endif
 	}
 #endif
 
