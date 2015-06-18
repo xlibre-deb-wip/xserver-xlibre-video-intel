@@ -154,6 +154,8 @@ struct sna_pixmap {
 #define MAPPED_GTT 1
 #define MAPPED_CPU 2
 	uint8_t flush :2;
+#define FLUSH_READ 1
+#define FLUSH_WRITE 2
 	uint8_t shm :1;
 	uint8_t clear :1;
 	uint8_t header :1;
@@ -248,7 +250,6 @@ struct sna {
 #define SNA_FLUSH_GTT		0x400
 #define SNA_PERFORMANCE		0x1000
 #define SNA_POWERSAVE		0x2000
-#define SNA_REMOVE_OUTPUTS	0x4000
 #define SNA_HAS_FLIP		0x10000
 #define SNA_HAS_ASYNC_FLIP	0x20000
 #define SNA_LINEAR_FB		0x40000
@@ -323,7 +324,8 @@ struct sna {
 		uint32_t fg, bg;
 		int size;
 
-		int active;
+		bool disable;
+		bool active;
 		int last_x;
 		int last_y;
 
@@ -621,7 +623,7 @@ static inline bool sna_crtc_is_on(xf86CrtcPtr crtc)
 
 static inline void sna_crtc_set_vblank(xf86CrtcPtr crtc)
 {
-	assert((*sna_crtc_flags(crtc) & CRTC_VBLANK) < 2);
+	assert((*sna_crtc_flags(crtc) & CRTC_VBLANK) < 3);
 	++*sna_crtc_flags(crtc);
 }
 

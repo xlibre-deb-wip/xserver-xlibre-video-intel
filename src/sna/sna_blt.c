@@ -86,6 +86,11 @@ static const uint8_t fill_ROP[] = {
 	ROP_1
 };
 
+static void sig_done(struct sna *sna, const struct sna_composite_op *op)
+{
+	sigtrap_put();
+}
+
 static void nop_done(struct sna *sna, const struct sna_composite_op *op)
 {
 	assert(sna->kgem.nbatch <= KGEM_BATCH_SIZE(&sna->kgem));
@@ -297,6 +302,7 @@ inline static void sna_blt_fill_begin(struct sna *sna,
 	if (kgem->nreloc) {
 		_kgem_submit(kgem);
 		_kgem_set_mode(kgem, KGEM_BLT);
+		kgem_bcs_set_tiling(kgem, NULL, blt->bo[0]);
 		assert(kgem->nbatch == 0);
 	}
 
@@ -466,8 +472,8 @@ static void sna_blt_alpha_fixup_one(struct sna *sna,
 	    !kgem_check_reloc(kgem, 2)) {
 		_kgem_submit(kgem);
 		_kgem_set_mode(kgem, KGEM_BLT);
+		kgem_bcs_set_tiling(&sna->kgem, blt->bo[0], blt->bo[1]);
 	}
-	kgem_bcs_set_tiling(&sna->kgem, blt->bo[1], blt->bo[0]);
 
 	assert(sna->kgem.mode == KGEM_BLT);
 	b = kgem->batch + kgem->nbatch;
@@ -595,8 +601,8 @@ static void sna_blt_copy_one(struct sna *sna,
 	    !kgem_check_reloc(kgem, 2)) {
 		_kgem_submit(kgem);
 		_kgem_set_mode(kgem, KGEM_BLT);
+		kgem_bcs_set_tiling(&sna->kgem, blt->bo[0], blt->bo[1]);
 	}
-	kgem_bcs_set_tiling(&sna->kgem, blt->bo[1], blt->bo[0]);
 
 	assert(sna->kgem.mode == KGEM_BLT);
 	b = kgem->batch + kgem->nbatch;
@@ -1004,6 +1010,7 @@ static void blt_composite_fill__cpu(struct sna *sna,
 
 	assert(op->dst.pixmap->devPrivate.ptr);
 	assert(op->dst.pixmap->devKind);
+	sigtrap_assert_active();
 	pixman_fill(op->dst.pixmap->devPrivate.ptr,
 		    op->dst.pixmap->devKind / sizeof(uint32_t),
 		    op->dst.pixmap->drawable.bitsPerPixel,
@@ -1023,6 +1030,7 @@ blt_composite_fill_box_no_offset__cpu(struct sna *sna,
 
 	assert(op->dst.pixmap->devPrivate.ptr);
 	assert(op->dst.pixmap->devKind);
+	sigtrap_assert_active();
 	pixman_fill(op->dst.pixmap->devPrivate.ptr,
 		    op->dst.pixmap->devKind / sizeof(uint32_t),
 		    op->dst.pixmap->drawable.bitsPerPixel,
@@ -1043,6 +1051,7 @@ blt_composite_fill_boxes_no_offset__cpu(struct sna *sna,
 
 		assert(op->dst.pixmap->devPrivate.ptr);
 		assert(op->dst.pixmap->devKind);
+		sigtrap_assert_active();
 		pixman_fill(op->dst.pixmap->devPrivate.ptr,
 			    op->dst.pixmap->devKind / sizeof(uint32_t),
 			    op->dst.pixmap->drawable.bitsPerPixel,
@@ -1064,6 +1073,7 @@ blt_composite_fill_box__cpu(struct sna *sna,
 
 	assert(op->dst.pixmap->devPrivate.ptr);
 	assert(op->dst.pixmap->devKind);
+	sigtrap_assert_active();
 	pixman_fill(op->dst.pixmap->devPrivate.ptr,
 		    op->dst.pixmap->devKind / sizeof(uint32_t),
 		    op->dst.pixmap->drawable.bitsPerPixel,
@@ -1085,6 +1095,7 @@ blt_composite_fill_boxes__cpu(struct sna *sna,
 
 		assert(op->dst.pixmap->devPrivate.ptr);
 		assert(op->dst.pixmap->devKind);
+		sigtrap_assert_active();
 		pixman_fill(op->dst.pixmap->devPrivate.ptr,
 			    op->dst.pixmap->devKind / sizeof(uint32_t),
 			    op->dst.pixmap->drawable.bitsPerPixel,
@@ -1192,6 +1203,7 @@ static inline void _sna_blt_maybe_clear(const struct sna_composite_op *op, const
 	    box->y2 - box->y1 >= op->dst.height) {
 		struct sna_pixmap *priv = sna_pixmap(op->dst.pixmap);
 		if (op->dst.bo == priv->gpu_bo) {
+			sna_damage_all(&priv->gpu_damage, op->dst.pixmap);
 			priv->clear = true;
 			priv->clear_color = op->u.blt.pixel;
 			DBG(("%s: pixmap=%ld marking clear [%08x]\n",
@@ -1437,8 +1449,8 @@ begin_blt(struct sna *sna,
 			return false;
 
 		_kgem_set_mode(&sna->kgem, KGEM_BLT);
+		kgem_bcs_set_tiling(&sna->kgem, NULL, op->dst.bo);
 	}
-	kgem_bcs_set_tiling(&sna->kgem, NULL, op->dst.bo);
 
 	return true;
 }
@@ -1463,6 +1475,7 @@ prepare_blt_clear(struct sna *sna,
 	DBG(("%s\n", __FUNCTION__));
 
 	if (op->dst.bo == NULL) {
+		op->u.blt.pixel = 0;
 		op->blt   = blt_composite_fill__cpu;
 		if (op->dst.x|op->dst.y) {
 			op->box   = blt_composite_fill_box__cpu;
@@ -1473,9 +1486,8 @@ prepare_blt_clear(struct sna *sna,
 			op->boxes = blt_composite_fill_boxes_no_offset__cpu;
 			op->thread_boxes = blt_composite_fill_boxes_no_offset__cpu;
 		}
-		op->done  = nop_done;
-		op->u.blt.pixel = 0;
-		return true;
+		op->done = sig_done;
+		return sigtrap_get() == 0;
 	}
 
 	op->blt = blt_composite_fill;
@@ -1518,8 +1530,8 @@ prepare_blt_fill(struct sna *sna,
 			op->boxes = blt_composite_fill_boxes_no_offset__cpu;
 			op->thread_boxes = blt_composite_fill_boxes_no_offset__cpu;
 		}
-		op->done = nop_done;
-		return true;
+		op->done = sig_done;
+		return sigtrap_get() == 0;
 	}
 
 	op->blt = blt_composite_fill;
@@ -2435,6 +2447,9 @@ prepare_blt_put(struct sna *sna,
 			op->box   = blt_put_composite_box;
 			op->boxes = blt_put_composite_boxes;
 		}
+
+		op->done = nop_done;
+		return true;
 	} else {
 		if (alpha_fixup) {
 			op->u.blt.pixel = alpha_fixup;
@@ -2446,10 +2461,10 @@ prepare_blt_put(struct sna *sna,
 			op->box   = blt_put_composite_box__cpu;
 			op->boxes = blt_put_composite_boxes__cpu;
 		}
-	}
-	op->done = nop_done;
 
-	return true;
+		op->done = sig_done;
+		return sigtrap_get() == 0;
+	}
 }
 
 static bool
@@ -2606,6 +2621,8 @@ clear:
 			}
 			if (hint & REPLACES)
 				kgem_bo_undo(&sna->kgem, tmp->dst.bo);
+			if (flags & COMPOSITE_UPLOAD)
+				return false;
 		} else {
 			RegionRec region;
 
@@ -2692,6 +2709,8 @@ fill:
 			}
 			if (hint & REPLACES)
 				kgem_bo_undo(&sna->kgem, tmp->dst.bo);
+			if (flags & COMPOSITE_UPLOAD)
+				return false;
 		} else {
 			RegionRec region;
 
@@ -2830,7 +2849,7 @@ fill:
 		if (src_pixmap->drawable.width  <= sna->render.max_3d_size &&
 		    src_pixmap->drawable.height <= sna->render.max_3d_size &&
 		    bo->pitch <= sna->render.max_3d_pitch &&
-		    (flags & COMPOSITE_FALLBACK) == 0)
+		    (flags & (COMPOSITE_UPLOAD | COMPOSITE_FALLBACK)) == 0)
 		{
 			return false;
 		}
@@ -2881,7 +2900,7 @@ fallback:
 			DBG(("%s: fallback -- unaccelerated upload\n",
 			     __FUNCTION__));
 			goto fallback;
-		} else {
+		} else if ((flags & COMPOSITE_UPLOAD) == 0) {
 			ret = prepare_blt_copy(sna, tmp, bo, alpha_fixup);
 			if (!ret)
 				goto fallback;
@@ -4090,8 +4109,8 @@ bool sna_blt_copy_boxes__with_alpha(struct sna *sna, uint8_t alu,
 		    !kgem_check_reloc(kgem, 2)) {
 			_kgem_submit(kgem);
 			_kgem_set_mode(kgem, KGEM_BLT);
+			kgem_bcs_set_tiling(&sna->kgem, src_bo, dst_bo);
 		}
-		kgem_bcs_set_tiling(&sna->kgem, src_bo, dst_bo);
 
 		assert(sna->kgem.mode == KGEM_BLT);
 		b = kgem->batch + kgem->nbatch;
@@ -4186,6 +4205,7 @@ bool sna_blt_copy_boxes_fallback(struct sna *sna, uint8_t alu,
 		DBG(("%s: dst == src\n", __FUNCTION__));
 
 		if (src_bo->tiling == I915_TILING_Y &&
+		    !sna->kgem.can_blt_y &&
 		    kgem_bo_blt_pitch_is_ok(&sna->kgem, src_bo)) {
 			struct kgem_bo *bo;
 
@@ -4233,6 +4253,7 @@ bool sna_blt_copy_boxes_fallback(struct sna *sna, uint8_t alu,
 		}
 	} else {
 		if (src_bo->tiling == I915_TILING_Y &&
+		    !sna->kgem.can_blt_y &&
 		    kgem_bo_blt_pitch_is_ok(&sna->kgem, src_bo)) {
 			DBG(("%s: src is y-tiled\n", __FUNCTION__));
 			if (src->type != DRAWABLE_PIXMAP)
@@ -4247,6 +4268,7 @@ bool sna_blt_copy_boxes_fallback(struct sna *sna, uint8_t alu,
 		}
 
 		if (dst_bo->tiling == I915_TILING_Y &&
+		    !sna->kgem.can_blt_y &&
 		    kgem_bo_blt_pitch_is_ok(&sna->kgem, dst_bo)) {
 			DBG(("%s: dst is y-tiled\n", __FUNCTION__));
 			if (dst->type != DRAWABLE_PIXMAP)

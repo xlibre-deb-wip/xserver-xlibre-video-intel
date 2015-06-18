@@ -213,7 +213,7 @@ struct sna_output {
 	int panel_vdisplay;
 
 	uint32_t dpms_id;
-	int dpms_mode;
+	uint8_t dpms_mode;
 	struct backlight backlight;
 	int backlight_active_level;
 
@@ -251,6 +251,7 @@ enum { /* XXX copied from hw/xfree86/modes/xf86Crtc.c */
 	OPTION_DEFAULT_MODES,
 };
 
+static void __sna_output_dpms(xf86OutputPtr output, int dpms, int fixup);
 static void sna_crtc_disable_cursor(struct sna *sna, struct sna_crtc *crtc);
 
 static bool is_zaphod(ScrnInfoPtr scrn)
@@ -766,7 +767,7 @@ has_user_backlight_override(xf86OutputPtr output)
 	if (*str == '\0')
 		return (char *)str;
 
-	if (backlight_exists(str) == BL_NONE) {
+	if (!backlight_exists(str)) {
 		xf86DrvMsg(output->scrn->scrnIndex, X_ERROR,
 			   "Unrecognised backlight control interface '%s'\n",
 			   str);
@@ -936,7 +937,7 @@ sna_crtc_force_outputs_on(xf86CrtcPtr crtc)
 		if (output->crtc != crtc)
 			continue;
 
-		output->funcs->dpms(output, DPMSModeOn);
+		__sna_output_dpms(output, DPMSModeOn, false);
 	}
 
 #if XF86_CRTC_VERSION >= 3
@@ -966,7 +967,7 @@ sna_crtc_force_outputs_off(xf86CrtcPtr crtc)
 		if (output->crtc != crtc)
 			continue;
 
-		output->funcs->dpms(output, DPMSModeOff);
+		__sna_output_dpms(output, DPMSModeOff, false);
 	}
 }
 
@@ -1099,7 +1100,7 @@ sna_crtc_apply(xf86CrtcPtr crtc)
 		 * and we lose track of the user settings.
 		 */
 		if (output->crtc == NULL)
-			output->funcs->dpms(output, DPMSModeOff);
+			__sna_output_dpms(output, DPMSModeOff, false);
 
 		if (output->crtc != crtc)
 			continue;
@@ -3580,7 +3581,7 @@ sna_output_destroy(xf86OutputPtr output)
 }
 
 static void
-sna_output_dpms(xf86OutputPtr output, int dpms)
+__sna_output_dpms(xf86OutputPtr output, int dpms, int fixup)
 {
 	struct sna *sna = to_sna(output->scrn);
 	struct sna_output *sna_output = output->driver_private;
@@ -3607,8 +3608,9 @@ sna_output_dpms(xf86OutputPtr output, int dpms)
 	if (sna_output->backlight.iface && dpms != DPMSModeOn) {
 		if (old_dpms == DPMSModeOn) {
 			sna_output->backlight_active_level = sna_output_backlight_get(output);
-			DBG(("%s: saving current backlight %d\n",
-			     __FUNCTION__, sna_output->backlight_active_level));
+			DBG(("%s(%s:%d): saving current backlight %d\n",
+			     __FUNCTION__, output->name, sna_output->id,
+			     sna_output->backlight_active_level));
 		}
 		sna_output->dpms_mode = dpms;
 		sna_output_backlight_off(sna_output);
@@ -3618,16 +3620,29 @@ sna_output_dpms(xf86OutputPtr output, int dpms)
 	    drmModeConnectorSetProperty(sna->kgem.fd,
 					sna_output->id,
 					sna_output->dpms_id,
-					dpms))
-		dpms = old_dpms;
+					dpms)) {
+		DBG(("%s(%s:%d): failed to set DPMS to %d (fixup? %d)\n",
+		     __FUNCTION__, output->name, sna_output->id, dpms, fixup));
+		if (fixup) {
+			sna_crtc_disable(output->crtc, false);
+			return;
+		}
+	}
 
 	if (sna_output->backlight.iface && dpms == DPMSModeOn) {
-		DBG(("%s: restoring previous backlight %d\n",
-		     __FUNCTION__, sna_output->backlight_active_level));
+		DBG(("%s(%d:%d: restoring previous backlight %d\n",
+		     __FUNCTION__, output->name, sna_output->id,
+		     sna_output->backlight_active_level));
 		sna_output_backlight_on(sna_output);
 	}
 
 	sna_output->dpms_mode = dpms;
+}
+
+static void
+sna_output_dpms(xf86OutputPtr output, int dpms)
+{
+	__sna_output_dpms(output, dpms, true);
 }
 
 static bool
@@ -3860,6 +3875,7 @@ static void update_properties(struct sna *sna, struct sna_output *output)
 	compat_conn.conn.prop_values_ptr = (uintptr_t)output->prop_values;
 	compat_conn.conn.count_modes = 1; /* skip detect */
 	compat_conn.conn.modes_ptr = (uintptr_t)&dummy;
+	compat_conn.conn.count_encoders = 0;
 
 	(void)drmIoctl(sna->kgem.fd,
 		       DRM_IOCTL_MODE_GETCONNECTOR,
@@ -4437,10 +4453,8 @@ reset:
 		sna_output->dpms_mode = sna_output->prop_values[i];
 		DBG(("%s: found 'DPMS' (idx=%d, id=%d), initial value=%d\n",
 		     __FUNCTION__, i, sna_output->dpms_id, sna_output->dpms_mode));
-	} else {
-		sna_output->dpms_id = -1;
+	} else
 		sna_output->dpms_mode = DPMSModeOff;
-	}
 
 	sna_output->possible_encoders = possible_encoders;
 	sna_output->attached_encoders = attached_encoders;
@@ -4502,38 +4516,6 @@ skip:
 	return len;
 }
 
-static void sna_output_del(xf86OutputPtr output)
-{
-	ScrnInfoPtr scrn = output->scrn;
-	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(scrn);
-	int i;
-
-	DBG(("%s(%s)\n", __FUNCTION__, output->name));
-	assert(to_sna_output(output));
-
-	RROutputDestroy(output->randr_output);
-	sna_output_destroy(output);
-
-	while (output->probed_modes)
-		xf86DeleteMode(&output->probed_modes, output->probed_modes);
-
-	free(output);
-
-	for (i = 0; i < config->num_output; i++)
-		if (config->output[i] == output)
-			break;
-	assert(i < to_sna(scrn)->mode.num_real_output);
-	DBG(("%s: removing output #%d of %d\n",
-	     __FUNCTION__, i, to_sna(scrn)->mode.num_real_output));
-
-	for (; i < config->num_output; i++) {
-		config->output[i] = config->output[i+1];
-		config->output[i]->possible_clones >>= 1;
-	}
-	config->num_output--;
-	to_sna(scrn)->mode.num_real_output--;
-}
-
 static int output_rank(const void *A, const void *B)
 {
 	const xf86OutputPtr *a = A;
@@ -4551,6 +4533,7 @@ static void sort_config_outputs(struct sna *sna)
 {
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(sna->scrn);
 	qsort(config->output, sna->mode.num_real_output, sizeof(*config->output), output_rank);
+	config->compat_output = 0; /* make sure it is a sane value */
 	sna_mode_compute_possible_outputs(sna);
 }
 
@@ -4674,17 +4657,11 @@ void sna_mode_discover(struct sna *sna)
 		    sna_output->serial, serial));
 
 		xf86DrvMsg(sna->scrn->scrnIndex, X_INFO,
-			   "%s output %s\n",
-			   sna->flags & SNA_REMOVE_OUTPUTS ? "Removed" : "Disabled",
+			   "Disabled output %s\n",
 			   output->name);
-		if (sna->flags & SNA_REMOVE_OUTPUTS) {
-			sna_output_del(output);
-			i--;
-		} else {
-			sna_output->id = 0;
-			output->crtc = NULL;
-			RROutputChanged(output->randr_output, TRUE);
-		}
+		sna_output->id = 0;
+		output->crtc = NULL;
+		RROutputChanged(output->randr_output, TRUE);
 		changed |= 2;
 	}
 
@@ -5253,6 +5230,40 @@ static inline void sigio_unblock(int was_blocked)
 }
 #endif
 
+static void enable_fb_access(ScrnInfoPtr scrn, int state)
+{
+	scrn->EnableDisableFBAccess(
+#ifdef XF86_HAS_SCRN_CONV
+				    scrn,
+#else
+				    scrn->scrnIndex,
+#endif
+				    state);
+}
+
+
+static void __restore_swcursor(ScrnInfoPtr scrn)
+{
+	DBG(("%s: attempting to restore SW cursor\n", __FUNCTION__));
+	enable_fb_access(scrn, FALSE);
+	enable_fb_access(scrn, TRUE);
+
+	RemoveBlockAndWakeupHandlers((BlockHandlerProcPtr)__restore_swcursor,
+				     (WakeupHandlerProcPtr)NoopDDA,
+				     scrn);
+}
+
+static void restore_swcursor(struct sna *sna)
+{
+	/* XXX Force the cursor to be restored (avoiding recursion) */
+	FreeCursor(sna->cursor.ref, None);
+	sna->cursor.ref = NULL;
+
+	RegisterBlockAndWakeupHandlers((BlockHandlerProcPtr)__restore_swcursor,
+				       (WakeupHandlerProcPtr)NoopDDA,
+				       sna->scrn);
+}
+
 static void
 sna_show_cursors(ScrnInfoPtr scrn)
 {
@@ -5306,10 +5317,17 @@ sna_show_cursors(ScrnInfoPtr scrn)
 			cursor->ref++;
 			sna_crtc->cursor = cursor;
 			sna_crtc->last_cursor_size = cursor->size;
+		} else {
+			ERR(("%s: failed to show cursor on CRTC:%d [pipe=%d], disabling hwcursor\n",
+			     __FUNCTION__, sna_crtc_id(crtc), sna_crtc_pipe(crtc)));
+			sna->cursor.disable = true;
 		}
 	}
 	sigio_unblock(sigio);
 	sna->cursor.active = true;
+
+	if (unlikely(sna->cursor.disable))
+		restore_swcursor(sna);
 }
 
 static void
@@ -5471,7 +5489,7 @@ sna_set_cursor_position(ScrnInfoPtr scrn, int x, int y)
 
 			rotate_coord_back(crtc->rotation, sna->cursor.size, &xhot, &yhot);
 
-			/* cursor will have 0.5 added to it already so floor is sufficent */
+			/* cursor will have 0.5 added to it already so floor is sufficient */
 			arg.x = floor(v.v[0]) - xhot;
 			arg.y = floor(v.v[1]) - yhot;
 		} else {
@@ -5512,8 +5530,10 @@ disable:
 		       __FUNCTION__, __sna_crtc_id(sna_crtc), arg.x, arg.y, arg.handle, arg.flags, sna_crtc->cursor ? sna_crtc->cursor->handle : 0,
 		       arg.flags & DRM_MODE_CURSOR_MOVE, arg.flags & DRM_MODE_CURSOR_BO));
 
-		if (arg.flags &&
-		    drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_CURSOR, &arg) == 0) {
+		if (arg.flags == 0)
+			continue;
+
+		if (drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_CURSOR, &arg) == 0) {
 			if (arg.flags & DRM_MODE_CURSOR_BO) {
 				if (sna_crtc->cursor) {
 					assert(sna_crtc->cursor->ref > 0);
@@ -5526,9 +5546,20 @@ disable:
 				} else
 					sna_crtc->last_cursor_size = 0;
 			}
+		} else {
+			ERR(("%s: failed to update cursor on CRTC:%d [pipe=%d], disabling hwcursor\n",
+			     __FUNCTION__, sna_crtc_id(crtc), sna_crtc_pipe(crtc)));
+			/* XXX How to force switch back to SW cursor?
+			 * Right now we just want until the next cursor image
+			 * change, which is fairly frequent.
+			 */
+			sna->cursor.disable = true;
 		}
 	}
 	sigio_unblock(sigio);
+
+	if (unlikely(sna->cursor.disable))
+		restore_swcursor(sna);
 }
 
 #if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,15,99,902,2)
@@ -5623,6 +5654,9 @@ sna_use_hw_cursor(ScreenPtr screen, CursorPtr cursor)
 
 	DBG(("%s (%dx%d)?\n", __FUNCTION__,
 	     cursor->bits->width, cursor->bits->height));
+
+	if (sna->cursor.disable)
+		return FALSE;
 
 	/* cursors are invariant */
 	if (cursor == sna->cursor.ref)
@@ -6193,6 +6227,7 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 {
 	ScrnInfoPtr scrn = sna->scrn;
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(scrn);
+	int crtc_active, crtc_enabled;
 	int width, height;
 	int i, j;
 
@@ -6230,6 +6265,7 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 	}
 
 	/* Copy the existing modes on each CRTCs */
+	crtc_active = crtc_enabled = 0;
 	for (i = 0; i < sna->mode.num_real_crtc; i++) {
 		xf86CrtcPtr crtc = config->crtc[i];
 		struct sna_crtc *sna_crtc = to_sna_crtc(crtc);
@@ -6258,6 +6294,7 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 		crtc->desiredX = mode.x;
 		crtc->desiredY = mode.y;
 		crtc->desiredTransformPresent = FALSE;
+		crtc_active++;
 	}
 
 	/* Reconstruct outputs pointing to active CRTC */
@@ -6312,13 +6349,24 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 				output->crtc = crtc;
 				output->status = XF86OutputStatusConnected;
 				crtc->enabled = TRUE;
+				crtc_enabled++;
+
+				output_set_gamma(output, crtc);
+
+				if (output->conf_monitor) {
+					output->mm_width = output->conf_monitor->mon_width;
+					output->mm_height = output->conf_monitor->mon_height;
+				}
+
+#if 0
+				sna_output_attach_edid(output);
+				sna_output_attach_tile(output);
+#endif
 
 				if (output->mm_width == 0 || output->mm_height == 0) {
 					output->mm_height = (crtc->desiredMode.VDisplay * 254) / (10*DEFAULT_DPI);
 					output->mm_width = (crtc->desiredMode.HDisplay * 254) / (10*DEFAULT_DPI);
 				}
-
-				output_set_gamma(output, crtc);
 
 				M = calloc(1, sizeof(DisplayModeRec));
 				if (M) {
@@ -6338,6 +6386,12 @@ static bool sna_probe_initial_configuration(struct sna *sna)
 			     __FUNCTION__));
 			return false;
 		}
+	}
+
+	if (crtc_active != crtc_enabled) {
+		DBG(("%s: only enabled %d out of %d active CRTC, forcing a reconfigure\n",
+		     __FUNCTION__, crtc_enabled, crtc_active));
+		return false;
 	}
 
 	width = height = 0;
@@ -6481,6 +6535,7 @@ sna_crtc_config_notify(ScreenPtr screen)
 	}
 
 	update_flush_interval(sna);
+	sna->cursor.disable = false; /* Reset HW cursor until the next fail */
 	sna_cursors_reload(sna);
 
 	probe_capabilities(sna);
@@ -6533,6 +6588,7 @@ bool sna_mode_pre_init(ScrnInfoPtr scrn, struct sna *sna)
 
 		xf86_config = XF86_CRTC_CONFIG_PTR(scrn);
 		xf86_config->xf86_crtc_notify = sna_crtc_config_notify;
+		xf86_config->compat_output = 0;
 
 		for (i = 0; i < res->count_crtcs; i++)
 			if (!sna_crtc_add(scrn, res->crtcs[i]))
@@ -7172,7 +7228,8 @@ sna_wait_for_scanline(struct sna *sna,
 void sna_mode_check(struct sna *sna)
 {
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(sna->scrn);
-	int i;
+	bool disabled = false;
+	int c, o;
 
 	if (sna->flags & SNA_IS_HOSTED)
 		return;
@@ -7182,8 +7239,8 @@ void sna_mode_check(struct sna *sna)
 		return;
 
 	/* Validate CRTC attachments and force consistency upon the kernel */
-	for (i = 0; i < sna->mode.num_real_crtc; i++) {
-		xf86CrtcPtr crtc = config->crtc[i];
+	for (c = 0; c < sna->mode.num_real_crtc; c++) {
+		xf86CrtcPtr crtc = config->crtc[c];
 		struct sna_crtc *sna_crtc = to_sna_crtc(crtc);
 		struct drm_mode_crtc mode;
 		uint32_t expected[2];
@@ -7211,11 +7268,28 @@ void sna_mode_check(struct sna *sna)
 				   "%s: invalid state found on pipe %d, disabling CRTC:%d\n",
 				   __FUNCTION__, __sna_crtc_pipe(sna_crtc), __sna_crtc_id(sna_crtc));
 			sna_crtc_disable(crtc, true);
+#if XF86_CRTC_VERSION >= 3
+			crtc->active = FALSE;
+#endif
+			if (crtc->enabled) {
+				crtc->enabled = FALSE;
+				disabled = true;
+			}
+
+			for (o = 0; o < sna->mode.num_real_output; o++) {
+				xf86OutputPtr output = config->output[o];
+
+				if (output->crtc != crtc)
+					continue;
+
+				output->funcs->dpms(output, DPMSModeOff);
+				output->crtc = NULL;
+			}
 		}
 	}
 
-	for (i = 0; i < config->num_output; i++) {
-		xf86OutputPtr output = config->output[i];
+	for (o = 0; o < config->num_output; o++) {
+		xf86OutputPtr output = config->output[o];
 		struct sna_output *sna_output;
 
 		if (output->crtc)
@@ -7229,6 +7303,9 @@ void sna_mode_check(struct sna *sna)
 	}
 
 	update_flush_interval(sna);
+
+	if (disabled)
+		xf86RandR12TellChanged(xf86ScrnToScreen(sna->scrn));
 }
 
 static bool

@@ -55,7 +55,7 @@ static inline void mark_dri3_pixmap(struct sna *sna, struct sna_pixmap *priv, st
 	if (bo->exec)
 		sna->kgem.flush = 1;
 	if (bo == priv->gpu_bo)
-		priv->flush |= 3;
+		priv->flush |= FLUSH_READ | FLUSH_WRITE;
 	else
 		priv->shm = true;
 
@@ -325,6 +325,15 @@ static int sna_dri3_fd_from_pixmap(ScreenPtr screen,
 		DBG(("%s: pixmap pitch (%d) too large for DRI3 protocol\n",
 		     __FUNCTION__, bo->pitch));
 		return -1;
+	}
+
+	if (bo->tiling && !sna->kgem.can_fence) {
+		if (!sna_pixmap_change_tiling(pixmap, I915_TILING_NONE)) {
+			DBG(("%s: unable to discard GPU tiling (%d) for DRI3 protocol\n",
+			     __FUNCTION__, bo->tiling));
+			return -1;
+		}
+		bo = priv->gpu_bo;
 	}
 
 	fd = kgem_bo_export_to_prime(&sna->kgem, bo);

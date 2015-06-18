@@ -126,6 +126,9 @@ static const struct intel_device_info intel_skylake_info = {
 	.gen = 0110,
 };
 
+static const struct intel_device_info intel_broxton_info = {
+	.gen = 0111,
+};
 
 static const SymTabRec intel_chipsets[] = {
 	{PCI_CHIP_I810,				"i810"},
@@ -324,6 +327,8 @@ static const struct pci_id_match intel_device_match[] = {
 
 	INTEL_SKL_IDS(&intel_skylake_info),
 
+	INTEL_BXT_IDS(&intel_broxton_info),
+
 	INTEL_VGA_DEVICE(PCI_MATCH_ANY, &intel_generic_info),
 #endif
 
@@ -512,6 +517,9 @@ static enum accel_method { NOACCEL, SNA, UXA } get_accel_method(void)
 	XF86ConfDevicePtr dev;
 
 	if (hosted())
+		return SNA;
+
+	if (xf86configptr == NULL) /* X -configure */
 		return SNA;
 
 	dev = _xf86findDriver("intel", xf86configptr->conf_device_lst);
