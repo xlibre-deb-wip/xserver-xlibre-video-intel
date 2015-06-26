@@ -1,4 +1,4 @@
-xserver-xorg-video-intel (2:2.99.914-1~exp1ubuntu4.5) UNRELEASED; urgency=medium
+xserver-xorg-video-intel (2:2.99.914-1~exp1ubuntu4.5) utopic; urgency=medium
 
   [ Timo Aaltonen ]
   * sna-gen8-clear-instancing-enabled-bit-between-batches.diff: Fix
@@ -9,7 +9,7 @@ xserver-xorg-video-intel (2:2.99.914-1~exp1ubuntu4.5) UNRELEASED; urgency=medium
     rotating the screen (LP: #1376760) (LP: #1443345) backport from
     a88795c641 upstream.
 
- -- Timo Aaltonen <tjaalton@debian.org>  Mon, 11 May 2015 13:41:20 +0300
+ -- Timo Aaltonen <tjaalton@debian.org>  Fri, 26 Jun 2015 14:22:42 +0300
 
 xserver-xorg-video-intel (2:2.99.914-1~exp1ubuntu4.4) utopic; urgency=medium
 
