@@ -1,3 +1,10 @@
+xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu2.2) vivid-proposed; urgency=medium
+
+  * fix-yuv-to-rgb-shared-on-intel-gen8.patch: Fix faulty yuv2rgb translation
+    on Intel Generation 8 Graphics. (LP: #1449892)
+
+ -- Alessio Treglia <quadrispro@ubuntu.com>  Fri, 29 May 2015 11:46:27 +0100
+
 xserver-xorg-video-intel-lts-vivid (2:2.99.917-1~exp1ubuntu2.1~trusty1) trusty; urgency=medium
 
   * Backport vivid package for lts-vivid stack.

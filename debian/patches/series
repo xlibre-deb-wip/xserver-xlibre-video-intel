@@ -3,3 +3,4 @@ fix-sna-external-slave-rotation.patch
 # XMir series
 
 sna-force-frontbuffer-to-cpu-for-randr-fallback.diff
+fix-yuv-to-rgb-shared-on-intel-gen8.patch
