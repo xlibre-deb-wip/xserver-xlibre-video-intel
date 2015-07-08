@@ -1,3 +1,9 @@
+xserver-xorg-video-intel-lts-vivid (2:2.99.917-1~exp1ubuntu2.2~trusty1) trusty; urgency=medium
+
+  * Backport vivid package for lts-vivid stack.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Wed, 08 Jul 2015 12:24:05 +0300
+
 xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu2.2) vivid-proposed; urgency=medium
 
   * fix-yuv-to-rgb-shared-on-intel-gen8.patch: Fix faulty yuv2rgb translation
