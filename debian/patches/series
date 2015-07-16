@@ -1,1 +1,2 @@
-# no patches currently applied
+fix-sna-fstat-include.patch
+fix-uxa-fstat-include.patch
