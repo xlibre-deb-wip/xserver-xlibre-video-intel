@@ -52,7 +52,7 @@ Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-xorg/driver/xserver-xorg-vi
 Homepage: http://www.x.org/
 
 Package: xserver-xorg-video-intel
-Architecture: amd64 i386 kfreebsd-amd64 kfreebsd-i386
+Architecture: amd64 i386 kfreebsd-amd64 kfreebsd-i386 x32
 Depends:
  ${shlibs:Depends},
  ${misc:Depends},
@@ -70,7 +70,7 @@ Description: X.Org X server -- Intel i8xx, i9xx display driver
  This package is built from the X.org xf86-video-intel driver module.
 
 Package: xserver-xorg-video-intel-dbg
-Architecture: amd64 i386 kfreebsd-amd64 kfreebsd-i386
+Architecture: amd64 i386 kfreebsd-amd64 kfreebsd-i386 x32
 Depends:
  xserver-xorg-video-intel (= ${binary:Version}),
  ${shlibs:Depends},
