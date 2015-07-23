@@ -1,1 +1,3 @@
-# no patches currently applied
+fix-yuv-to-rgb-shared-on-intel-gen8.patch
+fix-sna-fstat-include.patch
+fix-uxa-fstat-include.patch
