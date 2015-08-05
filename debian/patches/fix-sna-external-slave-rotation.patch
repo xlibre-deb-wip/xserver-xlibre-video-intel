@@ -1,6 +1,7 @@
 commit 1cffbd9a8e96642bdbabf4e40829a5f1473b5bf9
 Author: Chris Wilson <chris@chris-wilson.co.uk>
 Date:   Tue Jan 13 10:50:36 2015 +0000
+Bug-Ubuntu: https://launchpad.net/bugs/1410238
 
     sna: Combine slave CRTC offsets with rotation
     
@@ -11,11 +12,11 @@ Date:   Tue Jan 13 10:50:36 2015 +0000
     Reported-by: Maarten Lankhorst <maarten.lankhorst@canonical.com>
     Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
 
-diff --git a/src/sna/sna_display.c b/src/sna/sna_display.c
-index 569c585..0657c47 100644
---- a/src/sna/sna_display.c
-+++ b/src/sna/sna_display.c
-@@ -6696,6 +6696,7 @@ sna_crtc_redisplay__fallback(xf86CrtcPtr crtc, RegionPtr region, struct kgem_bo
+Index: xserver-xorg-video-intel-2.99.917/src/sna/sna_display.c
+===================================================================
+--- xserver-xorg-video-intel-2.99.917.orig/src/sna/sna_display.c
++++ xserver-xorg-video-intel-2.99.917/src/sna/sna_display.c
+@@ -6644,6 +6644,7 @@ sna_crtc_redisplay__fallback(xf86CrtcPtr
  	ScreenPtr screen = sna->scrn->pScreen;
  	DrawablePtr draw = crtc_source(crtc, &sx, &sy);
  	PictFormatPtr format;
@@ -23,7 +24,7 @@ index 569c585..0657c47 100644
  	PicturePtr src, dst;
  	PixmapPtr pixmap;
  	int depth, error;
-@@ -6735,9 +6736,14 @@ sna_crtc_redisplay__fallback(xf86CrtcPtr crtc, RegionPtr region, struct kgem_bo
+@@ -6683,9 +6684,14 @@ sna_crtc_redisplay__fallback(xf86CrtcPtr
  	if (!src)
  		goto free_pixmap;
  
@@ -41,7 +42,7 @@ index 569c585..0657c47 100644
  
  	if (crtc->filter && crtc->transform_in_use)
  		SetPicturePictFilter(src, crtc->filter,
-@@ -6789,6 +6795,7 @@ sna_crtc_redisplay__composite(xf86CrtcPtr crtc, RegionPtr region, struct kgem_bo
+@@ -6737,6 +6743,7 @@ sna_crtc_redisplay__composite(xf86CrtcPt
  	DrawablePtr draw = crtc_source(crtc, &sx, &sy);
  	struct sna_composite_op tmp;
  	PictFormatPtr format;
@@ -49,7 +50,7 @@ index 569c585..0657c47 100644
  	PicturePtr src, dst;
  	PixmapPtr pixmap;
  	const BoxRec *b;
-@@ -6829,9 +6836,14 @@ sna_crtc_redisplay__composite(xf86CrtcPtr crtc, RegionPtr region, struct kgem_bo
+@@ -6777,9 +6784,14 @@ sna_crtc_redisplay__composite(xf86CrtcPt
  	if (!src)
  		goto free_pixmap;
  

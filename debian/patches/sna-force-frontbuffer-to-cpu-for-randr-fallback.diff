@@ -1,6 +1,7 @@
 commit 15c307d70e00bc035bb61be5d8b6f727925e3d34
 Author: Chris Wilson <chris@chris-wilson.co.uk>
 Date:   Tue Mar 10 08:48:48 2015 +0000
+Bug-Ubuntu: https://launchpad.net/bugs/1447143
 
     sna: Force frontbuffer to CPU for randr fallback
     
@@ -10,11 +11,11 @@ Date:   Tue Mar 10 08:48:48 2015 +0000
     Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=89053
     Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
 
-diff --git a/src/sna/sna_display.c b/src/sna/sna_display.c
-index fd6c46c..f648d62 100644
---- a/src/sna/sna_display.c
-+++ b/src/sna/sna_display.c
-@@ -6977,6 +6977,14 @@ sna_crtc_redisplay__fallback(xf86CrtcPtr crtc, RegionPtr region, struct kgem_bo
+Index: xserver-xorg-video-intel-2.99.917/src/sna/sna_display.c
+===================================================================
+--- xserver-xorg-video-intel-2.99.917.orig/src/sna/sna_display.c
++++ xserver-xorg-video-intel-2.99.917/src/sna/sna_display.c
+@@ -6665,6 +6665,14 @@ sna_crtc_redisplay__fallback(xf86CrtcPtr
  	     __FUNCTION__, format->format, depth, draw->bitsPerPixel,
  	     bo->pitch, crtc->mode.HDisplay, crtc->mode.VDisplay));
  
@@ -29,7 +30,7 @@ index fd6c46c..f648d62 100644
  	ptr = kgem_bo_map__gtt(&sna->kgem, bo);
  	if (ptr == NULL)
  		return;
-@@ -6999,6 +7007,29 @@ sna_crtc_redisplay__fallback(xf86CrtcPtr crtc, RegionPtr region, struct kgem_bo
+@@ -6687,6 +6695,29 @@ sna_crtc_redisplay__fallback(xf86CrtcPtr
  	pixman_transform_init_translate(&T, sx << 16, sy << 16);
  	pixman_transform_multiply(&T, &T, &crtc->crtc_to_framebuffer);
  	if (!sna_transform_is_integer_translation(&T, &sx, &sy)) {

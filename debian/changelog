@@ -1,3 +1,27 @@
+xserver-xorg-video-intel (2:2.99.917-1ubuntu1) wily; urgency=medium
+
+  * Merge with Debian, remaining Ubuntu changes:
+  * debian/rules:
+    - Fix valgrind-enabling check (DEB_HOST_ARCH_OS instead of DEB_HOST_ARCH)
+    - Use SNA by default.  
+  * debian/patches/fix-sna-external-slave-rotation.patch:
+    - Fix rotating external display with optimus results in corruption.
+  * debian/patches/fix-sna-fstat-include.patch:
+  * debian/patches/fix-uxa-fstat-include.patch:
+    - Fix missing include for fstat
+  * debian/patches/fix-yuv-to-rgb-shared-on-intel-gen8.patch:
+    - Fix faulty yuv2rgb translation on Intel Generation 8 Graphics.
+  * debian/patches/sna-force-frontbuffer-to-cpu-for-randr-fallback.diff:
+    - Fix rotation on SKL.
+
+ -- Robert Ancell <robert.ancell@canonical.com>  Tue, 14 Jul 2015 15:21:57 +1200
+
+xserver-xorg-video-intel (2:2.99.917-1) unstable; urgency=medium
+
+  * Upload to unstable. (Closes: #748753)
+
+ -- Vincent Cheng <vcheng@debian.org>  Thu, 07 May 2015 00:46:06 -0700
+
 xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu3) wily; urgency=medium
 
   * debian/patches/xmir.patch:
@@ -37,12 +61,6 @@ xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu1) vivid; urgency=medium
   * Refresh xmir patch.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Tue, 13 Jan 2015 12:39:09 +0200
-
-xserver-xorg-video-intel (2:2.99.917-1~exp2) UNRELEASED; urgency=medium
-
-  * rules: Fix valgrind-enabling check.
-
- -- Timo Aaltonen <tjaalton@debian.org>  Tue, 13 Jan 2015 12:34:17 +0200
 
 xserver-xorg-video-intel (2:2.99.917-1~exp1) experimental; urgency=medium
 

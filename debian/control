@@ -12,8 +12,7 @@ Build-Depends:
  debhelper (>= 8),
  dh-autoreconf,
  pkg-config,
-# Depend on latest server to ensure XMir support
- xserver-xorg-dev (>= 2:1.14.2.901-2ubuntu4~),
+ xserver-xorg-dev (>= 2:1.11.99.901),
  x11proto-core-dev,
  x11proto-fonts-dev,
  x11proto-xinerama-dev,
@@ -37,7 +36,7 @@ Build-Depends:
  libxcb-dri2-0-dev,
 # end xvmc
  libudev-dev [linux-any],
- quilt (>= 0.46-7~),
+ quilt,
  xutils-dev (>= 1:7.5+4),
  valgrind [amd64 armel armhf i386 mips mipsel powerpc s390x],
 # intel-virtual-output:

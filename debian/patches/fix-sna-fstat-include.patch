@@ -12,10 +12,10 @@ Date:   Tue Feb 24 15:25:40 2015 +0000
     
     Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
 
-diff --git a/configure.ac b/configure.ac
-index 7476e2b..de3a4b3 100644
---- a/configure.ac
-+++ b/configure.ac
+Index: xserver-xorg-video-intel-2.99.917/configure.ac
+===================================================================
+--- xserver-xorg-video-intel-2.99.917.orig/configure.ac
++++ xserver-xorg-video-intel-2.99.917/configure.ac
 @@ -197,11 +197,15 @@ AC_ARG_ENABLE(udev,
  
  if test "x$UDEV" != "xno"; then
@@ -32,7 +32,7 @@ index 7476e2b..de3a4b3 100644
  	fi
  fi
  
-@@ -911,6 +915,7 @@ echo "  Support for Kernel Mode Setting? $KMS"
+@@ -902,6 +906,7 @@ echo "  Support for Kernel Mode Setting?
  echo "  Support for legacy User Mode Setting (for i810)? $UMS"
  echo "  Support for Direct Rendering Infrastructure:$dri_msg"
  echo "  Support for Xv motion compensation (XvMC and libXvMC):$xvmc_msg"
@@ -40,11 +40,11 @@ index 7476e2b..de3a4b3 100644
  echo "  Build additional tools and utilities?$tools_msg"
  if test -n "$xp_msg"; then
  echo "  Experimental support:$xp_msg"
-diff --git a/src/sna/sna_driver.c b/src/sna/sna_driver.c
-index 8c0d0b5..bc20ef0 100644
---- a/src/sna/sna_driver.c
-+++ b/src/sna/sna_driver.c
-@@ -740,6 +740,8 @@ sna_wakeup_handler(WAKEUPHANDLER_ARGS_DECL)
+Index: xserver-xorg-video-intel-2.99.917/src/sna/sna_driver.c
+===================================================================
+--- xserver-xorg-video-intel-2.99.917.orig/src/sna/sna_driver.c
++++ xserver-xorg-video-intel-2.99.917/src/sna/sna_driver.c
+@@ -780,6 +780,8 @@ sna_wakeup_handler(WAKEUPHANDLER_ARGS_DE
  }
  
  #if HAVE_UDEV

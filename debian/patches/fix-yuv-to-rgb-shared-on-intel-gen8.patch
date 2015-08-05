@@ -5,6 +5,7 @@ Subject: [PATCH] gen8: Fix the YUV->RGB shader
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
+Bug-Ubuntu: https://launchpad.net/bugs/1449892
 
 Signed-off-by: Ville Syrjälä <ville.syrjala@linux.intel.com>
 ---
