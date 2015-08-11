@@ -1,6 +1,6 @@
-xserver-xorg-video-intel (2:2.99.917+git20150618-1~exp1) UNRELEASED; urgency=medium
+xserver-xorg-video-intel (2:2.99.917+git20150808-1~exp1) UNRELEASED; urgency=medium
 
-  * New snapshot.
+  * New upstream snapshot.
   * rules: Fix valgrind-enabling check.
   * README.source: Mention that dpkg-source complains about symlinks
     which are real files on the tarball, and add a command to clean
