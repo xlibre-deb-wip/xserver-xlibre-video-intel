@@ -8,6 +8,33 @@ xserver-xorg-video-intel (2:2.99.917+git20150808-1~exp1) UNRELEASED; urgency=med
 
  -- Timo Aaltonen <tjaalton@debian.org>  Tue, 13 Jan 2015 12:34:17 +0200
 
+xserver-xorg-video-intel (2:2.99.917-2) unstable; urgency=medium
+
+  [ Robert Ancell ]
+  * debian/patches/fix-sna-fstat-include.patch:
+  * debian/patches/fix-uxa-fstat-include.patch:
+    - Fix missing include for fstat (Closes: #790911)
+
+  [ Alessio Treglia ]
+  * fix-yuv-to-rgb-shared-on-intel-gen8.patch: Fix faulty yuv2rgb translation
+    on Intel Generation 8 Graphics. (LP: #1449892, Closes: #787142)
+
+  [ Timo Aaltonen ]
+  * rules: Fix valgrind-enabling check.
+  * source: Add extend-diff-ignore to not complain about symlinks.
+  * README.source: Mention that dpkg-source complains about symlinks
+    which are real files on the tarball, and add a command to clean
+    those before source build (copied from libdrm).
+
+  [ Adam Borowski ]
+  * Add x32 to the list of architectures. (Closes: #775200)
+
+  [ Vincent Cheng ]
+  * Explicitly declare source format 1.0.
+  * Update valgrind build-dependency architecture list.
+
+ -- Vincent Cheng <vcheng@debian.org>  Thu, 16 Jul 2015 01:00:41 -0700
+
 xserver-xorg-video-intel (2:2.99.917-1) unstable; urgency=medium
 
   * Upload to unstable. (Closes: #748753)
