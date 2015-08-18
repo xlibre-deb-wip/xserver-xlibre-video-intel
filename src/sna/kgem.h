@@ -42,6 +42,7 @@ struct kgem_bo {
 #define RQ(rq) ((struct kgem_request *)((uintptr_t)(rq) & ~3))
 #define RQ_RING(rq) ((uintptr_t)(rq) & 3)
 #define RQ_IS_BLT(rq) (RQ_RING(rq) == KGEM_BLT)
+#define RQ_IS_RENDER(rq) (RQ_RING(rq) == KGEM_RENDER)
 #define MAKE_REQUEST(rq, ring) ((struct kgem_request *)((uintptr_t)(rq) | (ring)))
 
 	struct drm_i915_gem_exec_object2 *exec;
@@ -157,6 +158,8 @@ struct kgem {
 		int16_t count;
 	} vma[NUM_MAP_TYPES];
 
+	uint32_t bcs_state;
+
 	uint32_t batch_flags;
 	uint32_t batch_flags_base;
 #define I915_EXEC_SECURE (1<<9)
@@ -187,8 +190,11 @@ struct kgem {
 	uint32_t has_handle_lut :1;
 	uint32_t has_wc_mmap :1;
 
+	uint32_t can_fence :1;
 	uint32_t can_blt_cpu :1;
+	uint32_t can_blt_y :1;
 	uint32_t can_render_y :1;
+	uint32_t can_scanout_y :1;
 
 	uint16_t fence_max;
 	uint16_t half_cpu_cache_pages;
@@ -230,7 +236,7 @@ struct kgem {
 
 #define KGEM_MAX_DEFERRED_VBO 16
 
-#define KGEM_BATCH_RESERVED 1
+#define KGEM_BATCH_RESERVED 8 /* LRI(SWCTRL) + END */
 #define KGEM_RELOC_RESERVED (KGEM_MAX_DEFERRED_VBO)
 #define KGEM_EXEC_RESERVED (1+KGEM_MAX_DEFERRED_VBO)
 
@@ -342,6 +348,11 @@ static inline bool kgem_ring_is_idle(struct kgem *kgem, int ring)
 {
 	ring = ring == KGEM_BLT;
 
+	if (kgem->needs_semaphore &&
+	    !list_is_empty(&kgem->requests[!ring]) &&
+	    !__kgem_ring_is_idle(kgem, !ring))
+		return false;
+
 	if (list_is_empty(&kgem->requests[ring]))
 		return true;
 
@@ -400,7 +411,7 @@ static inline void kgem_set_mode(struct kgem *kgem,
 				 enum kgem_mode mode,
 				 struct kgem_bo *bo)
 {
-	assert(!kgem->wedged);
+	warn_unless(!kgem->wedged);
 
 #if DEBUG_FLUSH_BATCH
 	kgem_submit(kgem);
@@ -422,7 +433,7 @@ static inline void _kgem_set_mode(struct kgem *kgem, enum kgem_mode mode)
 {
 	assert(kgem->mode == KGEM_NONE);
 	assert(kgem->nbatch == 0);
-	assert(!kgem->wedged);
+	warn_unless(!kgem->wedged);
 	kgem->context_switch(kgem, mode);
 	kgem->mode = mode;
 }
@@ -566,7 +577,7 @@ static inline bool kgem_bo_can_blt(struct kgem *kgem,
 {
 	assert(bo->refcnt);
 
-	if (bo->tiling == I915_TILING_Y) {
+	if (bo->tiling == I915_TILING_Y && !kgem->can_blt_y) {
 		DBG(("%s: can not blt to handle=%d, tiling=Y\n",
 		     __FUNCTION__, bo->handle));
 		return false;
@@ -579,6 +590,22 @@ static inline bool kgem_bo_can_blt(struct kgem *kgem,
 	}
 
 	return kgem_bo_blt_pitch_is_ok(kgem, bo);
+}
+
+void __kgem_bcs_set_tiling(struct kgem *kgem,
+			   struct kgem_bo *src,
+			   struct kgem_bo *dst);
+
+inline static void kgem_bcs_set_tiling(struct kgem *kgem,
+				       struct kgem_bo *src,
+				       struct kgem_bo *dst)
+{
+	assert(kgem->mode == KGEM_BLT);
+
+	if (!kgem->can_blt_y)
+		return;
+
+	__kgem_bcs_set_tiling(kgem, src, dst);
 }
 
 static inline bool kgem_bo_is_snoop(struct kgem_bo *bo)
@@ -626,7 +653,7 @@ static inline bool kgem_bo_is_busy(struct kgem_bo *bo)
 	return bo->rq;
 }
 
-void __kgem_retire_requests_upto(struct kgem *kgem, struct kgem_bo *bo);
+bool __kgem_retire_requests_upto(struct kgem *kgem, struct kgem_bo *bo);
 static inline bool __kgem_bo_is_busy(struct kgem *kgem, struct kgem_bo *bo)
 {
 	DBG(("%s: handle=%d, domain: %d exec? %d, rq? %d\n", __FUNCTION__,
@@ -636,14 +663,13 @@ static inline bool __kgem_bo_is_busy(struct kgem *kgem, struct kgem_bo *bo)
 	if (bo->exec)
 		return true;
 
-	if (bo->rq && !__kgem_busy(kgem, bo->handle)) {
-		__kgem_retire_requests_upto(kgem, bo);
-		assert(list_is_empty(&bo->request));
-		assert(bo->rq == NULL);
-		assert(bo->domain == DOMAIN_NONE);
-	}
+	if (bo->rq == NULL)
+		return false;
 
-	return kgem_bo_is_busy(bo);
+	if (__kgem_busy(kgem, bo->handle))
+		return true;
+
+	return __kgem_retire_requests_upto(kgem, bo);
 }
 
 static inline bool kgem_bo_is_render(struct kgem_bo *bo)
@@ -651,7 +677,15 @@ static inline bool kgem_bo_is_render(struct kgem_bo *bo)
 	DBG(("%s: handle=%d, rq? %d [%d]\n", __FUNCTION__,
 	     bo->handle, bo->rq != NULL, (int)RQ_RING(bo->rq)));
 	assert(bo->refcnt);
-	return bo->rq && RQ_RING(bo->rq) == I915_EXEC_RENDER;
+	return bo->rq && RQ_RING(bo->rq) != KGEM_BLT;
+}
+
+static inline bool kgem_bo_is_blt(struct kgem_bo *bo)
+{
+	DBG(("%s: handle=%d, rq? %d\n", __FUNCTION__,
+	     bo->handle, bo->rq != NULL, (int)RQ_RING(bo->rq)));
+	assert(bo->refcnt);
+	return RQ_RING(bo->rq) == KGEM_BLT;
 }
 
 static inline void kgem_bo_mark_unreusable(struct kgem_bo *bo)

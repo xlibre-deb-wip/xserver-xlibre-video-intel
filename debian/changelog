@@ -1,66 +1,45 @@
-xserver-xorg-video-intel (2:2.99.917-1ubuntu1) wily; urgency=medium
+xserver-xorg-video-intel (2:2.99.917+git20150808-1~exp1) UNRELEASED; urgency=medium
 
-  * Merge with Debian, remaining Ubuntu changes:
-  * debian/rules:
-    - Fix valgrind-enabling check (DEB_HOST_ARCH_OS instead of DEB_HOST_ARCH)
-    - Use SNA by default.  
-  * debian/patches/fix-sna-external-slave-rotation.patch:
-    - Fix rotating external display with optimus results in corruption.
+  * New upstream snapshot.
+  * rules: Fix valgrind-enabling check.
+  * README.source: Mention that dpkg-source complains about symlinks
+    which are real files on the tarball, and add a command to clean
+    those before source build (copied from libdrm).
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Tue, 13 Jan 2015 12:34:17 +0200
+
+xserver-xorg-video-intel (2:2.99.917-2) unstable; urgency=medium
+
+  [ Robert Ancell ]
   * debian/patches/fix-sna-fstat-include.patch:
   * debian/patches/fix-uxa-fstat-include.patch:
-    - Fix missing include for fstat
-  * debian/patches/fix-yuv-to-rgb-shared-on-intel-gen8.patch:
-    - Fix faulty yuv2rgb translation on Intel Generation 8 Graphics.
-  * debian/patches/sna-force-frontbuffer-to-cpu-for-randr-fallback.diff:
-    - Fix rotation on SKL.
+    - Fix missing include for fstat (Closes: #790911)
 
- -- Robert Ancell <robert.ancell@canonical.com>  Tue, 14 Jul 2015 15:21:57 +1200
+  [ Alessio Treglia ]
+  * fix-yuv-to-rgb-shared-on-intel-gen8.patch: Fix faulty yuv2rgb translation
+    on Intel Generation 8 Graphics. (LP: #1449892, Closes: #787142)
+
+  [ Timo Aaltonen ]
+  * rules: Fix valgrind-enabling check.
+  * source: Add extend-diff-ignore to not complain about symlinks.
+  * README.source: Mention that dpkg-source complains about symlinks
+    which are real files on the tarball, and add a command to clean
+    those before source build (copied from libdrm).
+
+  [ Adam Borowski ]
+  * Add x32 to the list of architectures. (Closes: #775200)
+
+  [ Vincent Cheng ]
+  * Explicitly declare source format 1.0.
+  * Update valgrind build-dependency architecture list.
+
+ -- Vincent Cheng <vcheng@debian.org>  Thu, 16 Jul 2015 01:00:41 -0700
 
 xserver-xorg-video-intel (2:2.99.917-1) unstable; urgency=medium
 
   * Upload to unstable. (Closes: #748753)
 
  -- Vincent Cheng <vcheng@debian.org>  Thu, 07 May 2015 00:46:06 -0700
-
-xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu3) wily; urgency=medium
-
-  * debian/patches/xmir.patch:
-    - Drop XMir patch, we don't need it with new glamor based XMir (LP: #1462994)
-  * debian/patches/fix-sna-fstat-include.patch:
-  * debian/patches/fix-uxa-fstat-include.patch:
-    - Fix missing include for fstat
-
- -- Robert Ancell <robert.ancell@canonical.com>  Tue, 09 Jun 2015 15:17:18 +1200
-
-xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu2.2) vivid-proposed; urgency=medium
-
-  * fix-yuv-to-rgb-shared-on-intel-gen8.patch: Fix faulty yuv2rgb translation
-    on Intel Generation 8 Graphics. (LP: #1449892)
-
- -- Alessio Treglia <quadrispro@ubuntu.com>  Fri, 29 May 2015 11:46:27 +0100
-
-xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu2.1) vivid; urgency=medium
-
-  * sna-force-frontbuffer-to-cpu-for-randr-fallback.diff: Fix rotation
-    on SKL. (LP: #1447143)
-  * source: Add extend-diff-ignore to not complain about symlinks.
-
- -- Timo Aaltonen <tjaalton@debian.org>  Wed, 22 Apr 2015 19:48:22 +0300
-
-xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu2) vivid; urgency=medium
-
-  * Fix rotating external display with optimus results in corruption.
-    - fix-sna-external-slave-rotation.patch (LP: #1410238)
-
- -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Tue, 13 Jan 2015 15:16:03 +0100
-
-xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu1) vivid; urgency=medium
-
-  * Merge from Debian experimental.
-  * Drop dri3-flush-broken.patch, upstream
-  * Refresh xmir patch.
-
- -- Timo Aaltonen <tjaalton@debian.org>  Tue, 13 Jan 2015 12:39:09 +0200
 
 xserver-xorg-video-intel (2:2.99.917-1~exp1) experimental; urgency=medium
 

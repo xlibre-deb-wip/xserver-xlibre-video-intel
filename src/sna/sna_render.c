@@ -54,7 +54,7 @@ sna_format_for_depth(int depth)
 {
 	switch (depth) {
 	case 1: return PICT_a1;
-	case 4: return PICT_a4;
+	case 4: return PICT_x4a4;
 	case 8: return PICT_a8;
 	case 15: return PICT_x1r5g5b5;
 	case 16: return PICT_r5g6b5;
@@ -272,18 +272,6 @@ no_render_context_switch(struct kgem *kgem,
 }
 
 static void
-no_render_retire(struct kgem *kgem)
-{
-	(void)kgem;
-}
-
-static void
-no_render_expire(struct kgem *kgem)
-{
-	(void)kgem;
-}
-
-static void
 no_render_fini(struct sna *sna)
 {
 	(void)sna;
@@ -316,8 +304,6 @@ const char *no_render_init(struct sna *sna)
 	render->fini = no_render_fini;
 
 	sna->kgem.context_switch = no_render_context_switch;
-	sna->kgem.retire = no_render_retire;
-	sna->kgem.expire = no_render_expire;
 	if (sna->kgem.has_blt)
 		sna->kgem.ring = KGEM_BLT;
 
@@ -2336,6 +2322,9 @@ memcpy_copy_boxes(struct sna *sna, uint8_t op,
 	if (op != GXcopy)
 		return false;
 
+	if (src_draw->depth != dst_draw->depth)
+		return false;
+
 	clipped = (n > 1 ||
 		   box->x1 + dx > 0 ||
 		   box->y1 + dy > 0 ||
@@ -2380,4 +2369,5 @@ void
 sna_render_mark_wedged(struct sna *sna)
 {
 	sna->render.copy_boxes = memcpy_copy_boxes;
+	sna->render.prefer_gpu = 0;
 }

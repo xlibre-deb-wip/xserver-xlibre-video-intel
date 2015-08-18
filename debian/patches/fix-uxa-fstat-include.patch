@@ -10,11 +10,19 @@ Date:   Tue Feb 24 15:25:40 2015 +0000
     
     Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
 
+<<<<<<< HEAD
 Index: xserver-xorg-video-intel-2.99.917/src/uxa/intel_driver.c
 ===================================================================
 --- xserver-xorg-video-intel-2.99.917.orig/src/uxa/intel_driver.c
 +++ xserver-xorg-video-intel-2.99.917/src/uxa/intel_driver.c
 @@ -735,6 +735,8 @@ intel_flush_callback(CallbackListPtr *li
+=======
+diff --git a/src/uxa/intel_driver.c b/src/uxa/intel_driver.c
+index c554124..6e64b8c 100644
+--- a/src/uxa/intel_driver.c
++++ b/src/uxa/intel_driver.c
+@@ -728,6 +728,8 @@ intel_flush_callback(CallbackListPtr *list,
+>>>>>>> debian-experimental
  }
  
  #if HAVE_UDEV

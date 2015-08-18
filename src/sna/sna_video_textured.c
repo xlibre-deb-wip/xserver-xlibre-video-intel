@@ -152,6 +152,9 @@ sna_video_textured_put_image(ddPutImage_ARGS)
 	bool flush = false;
 	bool ret;
 
+	if (wedged(sna))
+		return BadAlloc;
+
 	clip.extents.x1 = draw->x + drw_x;
 	clip.extents.y1 = draw->y + drw_y;
 	clip.extents.x2 = clip.extents.x1 + drw_w;
@@ -316,7 +319,7 @@ void sna_video_textured_setup(struct sna *sna, ScreenPtr screen)
 
 	if (!sna->render.video) {
 		xf86DrvMsg(sna->scrn->scrnIndex, X_INFO,
-			   "Textured video not supported on this hardware\n");
+			   "Textured video not supported on this hardware or backend\n");
 		return;
 	}
 
