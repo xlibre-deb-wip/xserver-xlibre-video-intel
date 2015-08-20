@@ -1,5 +1,6 @@
 xserver-xorg-video-intel (2:2.99.917+git20150808-0ubuntu1) UNRELEASED; urgency=medium
 
+  [ Robert Hooker ]
   * Merge from debian-experimental
     - debian/patches/fix-sna-external-slave-rotation.patch
       debian/patches/fix-sna-fstat-include.patch
@@ -7,6 +8,10 @@ xserver-xorg-video-intel (2:2.99.917+git20150808-0ubuntu1) UNRELEASED; urgency=m
       debian/patches/fix-yuv-to-rgb-shared-on-intel-gen8.patch
       debian/patches/sna-force-frontbuffer-to-cpu-for-randr-fallback.diff
       Drop all upstream patches.
+
+  [ Timo Aaltonen ]
+  * sna-check-for-system-memory-contents.diff: Fix corruption on
+    lightdm, while logging in and blank background on unity.
 
  -- Robert Hooker <sarvatt@ubuntu.com>  Wed, 19 Aug 2015 00:42:34 -0400
 
