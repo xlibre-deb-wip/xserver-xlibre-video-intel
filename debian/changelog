@@ -1,4 +1,4 @@
-xserver-xorg-video-intel (2:2.99.917+git20150808-0ubuntu1) UNRELEASED; urgency=medium
+xserver-xorg-video-intel (2:2.99.917+git20150808-0ubuntu1) wily; urgency=medium
 
   [ Robert Hooker ]
   * Merge from debian-experimental
@@ -13,7 +13,7 @@ xserver-xorg-video-intel (2:2.99.917+git20150808-0ubuntu1) UNRELEASED; urgency=m
   * sna-check-for-system-memory-contents.diff: Fix corruption on
     lightdm, while logging in and blank background on unity.
 
- -- Robert Hooker <sarvatt@ubuntu.com>  Wed, 19 Aug 2015 00:42:34 -0400
+ -- Timo Aaltonen <tjaalton@debian.org>  Thu, 20 Aug 2015 14:14:34 +0300
 
 xserver-xorg-video-intel (2:2.99.917+git20150808-1~exp1) UNRELEASED; urgency=medium
 
