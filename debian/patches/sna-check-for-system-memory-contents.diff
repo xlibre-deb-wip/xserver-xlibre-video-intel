@@ -1,0 +1,35 @@
+commit 78f7451886f0a33df717c57fc1a079ee7e6f221e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Aug 20 10:43:05 2015 +0100
+
+    sna: Check for system memory contents when looking for empty sources
+    
+    Fixes a regression from
+    commit 3f128867d957e30690218404337b00bb327e647b
+    Author: Chris Wilson <chris@chris-wilson.co.uk>
+    Date:   Fri Aug 7 15:19:17 2015 +0100
+    
+        sna: Skip a no-op copy
+    
+    that forgot that we can flush damage but still have valid contents to
+    copy from.
+    
+    Reported-by: Timo Aaltonen <tjaalton@ubuntu.com>
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+diff --git a/src/sna/sna_accel.c b/src/sna/sna_accel.c
+index c624d9e..937d6a8 100644
+--- a/src/sna/sna_accel.c
++++ b/src/sna/sna_accel.c
+@@ -6446,8 +6446,9 @@ sna_copy_boxes(DrawablePtr src, DrawablePtr dst, GCPtr gc,
+ 	assert(region_num_rects(region));
+ 
+ 	if (src_priv &&
+-	    src_priv->gpu_damage == NULL &&
+-	    src_priv->cpu_damage == NULL) {
++	    src_priv->gpu_bo == NULL &&
++	    src_priv->cpu_bo == NULL &&
++	    src_priv->ptr == NULL) {
+ 		/* Rare but still happens, nothing to copy */
+ 		DBG(("%s: src pixmap=%ld is empty\n",
+ 		     __FUNCTION__, src_pixmap->drawable.serialNumber));
