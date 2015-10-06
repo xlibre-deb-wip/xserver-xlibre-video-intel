@@ -1,3 +1,11 @@
+xserver-xorg-video-intel (2:2.99.917+git20150808-0ubuntu3) wily; urgency=medium
+
+  * debian/patches/revert-dpms-fix.patch:
+    - Revert a DPMS change that causes the screen to turn off when returning
+      from a greeter (LP: #1501941)
+
+ -- Robert Ancell <robert.ancell@canonical.com>  Tue, 06 Oct 2015 14:25:00 +1300
+
 xserver-xorg-video-intel (2:2.99.917+git20150808-0ubuntu2) wily; urgency=medium
 
   * Rebuild for libxcb-util.
