@@ -1,2 +1,3 @@
 sna-check-for-system-memory-contents.diff
+randr.patch
 revert-dpms-fix.patch

@@ -36,9 +36,9 @@ Index: xserver-xorg-video-intel-2.99.917+git20150808/src/sna/sna_display.c
  
 -		__sna_output_dpms(output, DPMSModeOn, false);
 +		output->funcs->dpms(output, DPMSModeOn);
+ 		to_sna_output(output)->last_detect = now;
  	}
  
- #if XF86_CRTC_VERSION >= 3
 @@ -999,7 +998,7 @@ sna_crtc_force_outputs_off(xf86CrtcPtr c
  		if (output->crtc != crtc)
  			continue;
