@@ -755,7 +755,7 @@ sna_handle_uevents(int fd, void *closure)
 	if (fstat(sna->kgem.fd, &s))
 		memset(&s, 0, sizeof(s));
 
-	do {
+	while (poll(&pfd, 1, 0) > 0) {
 		struct udev_device *dev;
 		dev_t devnum;
 
@@ -773,14 +773,14 @@ sna_handle_uevents(int fd, void *closure)
 		}
 
 		udev_device_unref(dev);
-	} while (poll(&pfd, 1, 0) > 0);
+	}
 
 	if (hotplug) {
 		DBG(("%s: hotplug event (vtSema?=%d)\n",
 		     __FUNCTION__, sna->scrn->vtSema));
 
 		if (sna->scrn->vtSema) {
-			sna_mode_discover(sna);
+			sna_mode_discover(sna, true);
 			sna_mode_check(sna);
 		} else
 			sna->flags |= SNA_REPROBE;
@@ -890,8 +890,10 @@ sna_randr_getinfo(ScreenPtr screen, Rotation *rotations)
 {
 	struct sna *sna = to_sna_from_screen(screen);
 
+	DBG(("%s()\n", __FUNCTION__));
+
 	if (!sna_uevent_poll(sna))
-		sna_mode_discover(sna);
+		sna_mode_discover(sna, false);
 
 	return sna->mode.rrGetInfo(screen, rotations);
 }
@@ -903,8 +905,8 @@ static void sna_leave_vt(VT_FUNC_ARGS_DECL)
 
 	DBG(("%s\n", __FUNCTION__));
 
-	sna_accel_leave(sna);
 	sna_mode_reset(sna);
+	sna_accel_leave(sna);
 
 	if (intel_put_master(sna->dev))
 		xf86DrvMsg(scrn->scrnIndex, X_WARNING,
@@ -1220,8 +1222,7 @@ static Bool sna_enter_vt(VT_FUNC_ARGS_DECL)
 
 	if (sna->flags & SNA_REPROBE) {
 		DBG(("%s: reporting deferred hotplug event\n", __FUNCTION__));
-		sna_mode_discover(sna);
-		sna->flags &= ~SNA_REPROBE;
+		sna_mode_discover(sna, true);
 	}
 
 	sna_set_desired_mode(sna);

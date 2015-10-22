@@ -1706,7 +1706,13 @@ static void kgem_fixup_relocs(struct kgem *kgem, struct kgem_bo *bo, int shrink)
 
 static int kgem_bo_wait(struct kgem *kgem, struct kgem_bo *bo)
 {
-	struct drm_i915_gem_wait wait;
+	struct local_i915_gem_wait {
+		uint32_t handle;
+		uint32_t flags;
+		int64_t timeout;
+	} wait;
+#define LOCAL_I915_GEM_WAIT       0x2c
+#define LOCAL_IOCTL_I915_GEM_WAIT         DRM_IOWR(DRM_COMMAND_BASE + LOCAL_I915_GEM_WAIT, struct local_i915_gem_wait)
 	int ret;
 
 	DBG(("%s: waiting for handle=%d\n", __FUNCTION__, bo->handle));
@@ -1714,9 +1720,10 @@ static int kgem_bo_wait(struct kgem *kgem, struct kgem_bo *bo)
 		return 0;
 
 	VG_CLEAR(wait);
-	wait.bo_handle = bo->handle;
-	wait.timeout_ns = -1;
-	ret = do_ioctl(kgem->fd, DRM_IOCTL_I915_GEM_WAIT, &wait);
+	wait.handle = bo->handle;
+	wait.flags = 0;
+	wait.timeout = -1;
+	ret = do_ioctl(kgem->fd, LOCAL_IOCTL_I915_GEM_WAIT, &wait);
 	if (ret) {
 		struct drm_i915_gem_set_domain set_domain;
 
@@ -1815,12 +1822,50 @@ no_context_switch(struct kgem *kgem, int new_mode)
 	(void)new_mode;
 }
 
-void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
+static uint64_t get_gtt_size(int fd)
 {
 	struct drm_i915_gem_get_aperture aperture;
+	struct local_i915_gem_context_param {
+		uint32_t context;
+		uint32_t size;
+		uint64_t param;
+#define LOCAL_CONTEXT_PARAM_BAN_PERIOD	0x1
+#define LOCAL_CONTEXT_PARAM_NO_ZEROMAP	0x2
+#define LOCAL_CONTEXT_PARAM_GTT_SIZE	0x3
+		uint64_t value;
+	} p;
+#define LOCAL_I915_GEM_CONTEXT_GETPARAM       0x34
+#define LOCAL_IOCTL_I915_GEM_CONTEXT_GETPARAM DRM_IOWR (DRM_COMMAND_BASE + LOCAL_I915_GEM_CONTEXT_GETPARAM, struct local_i915_gem_context_param)
+
+	memset(&aperture, 0, sizeof(aperture));
+
+	memset(&p, 0, sizeof(p));
+	p.param = LOCAL_CONTEXT_PARAM_GTT_SIZE;
+	if (drmIoctl(fd, LOCAL_IOCTL_I915_GEM_CONTEXT_GETPARAM, &p) == 0)
+		aperture.aper_size = p.value;
+	if (aperture.aper_size == 0)
+		(void)drmIoctl(fd, DRM_IOCTL_I915_GEM_GET_APERTURE, &aperture);
+	if (aperture.aper_size == 0)
+		aperture.aper_size = 64*1024*1024;
+
+	DBG(("%s: aperture size %lld, available now %lld\n",
+	     __FUNCTION__,
+	     (long long)aperture.aper_size,
+	     (long long)aperture.aper_available_size));
+
+	/* clamp aperture to uint32_t for simplicity */
+	if (aperture.aper_size > 0xc0000000)
+		aperture.aper_size = 0xc0000000;
+
+	return aperture.aper_size;
+}
+
+void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
+{
 	size_t totalram;
 	unsigned half_gpu_max;
 	unsigned int i, j;
+	uint64_t gtt_size;
 
 	DBG(("%s: fd=%d, gen=%d\n", __FUNCTION__, fd, gen));
 
@@ -1972,23 +2017,10 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 	     !DBG_NO_CPU && (kgem->has_llc | kgem->has_userptr | kgem->has_caching),
 	     kgem->has_llc, kgem->has_caching, kgem->has_userptr));
 
-	VG_CLEAR(aperture);
-	aperture.aper_size = 0;
-	(void)do_ioctl(fd, DRM_IOCTL_I915_GEM_GET_APERTURE, &aperture);
-	if (aperture.aper_size == 0)
-		aperture.aper_size = 64*1024*1024;
-
-	DBG(("%s: aperture size %lld, available now %lld\n",
-	     __FUNCTION__,
-	     (long long)aperture.aper_size,
-	     (long long)aperture.aper_available_size));
-
-	/* clamp aperture to uint32_t for simplicity */
-	if (aperture.aper_size > 0xc0000000)
-		aperture.aper_size = 0xc0000000;
-	kgem->aperture_total = aperture.aper_size;
-	kgem->aperture_high = aperture.aper_size * 3/4;
-	kgem->aperture_low = aperture.aper_size * 1/3;
+	gtt_size = get_gtt_size(fd);
+	kgem->aperture_total = gtt_size;
+	kgem->aperture_high = gtt_size * 3/4;
+	kgem->aperture_low = gtt_size * 1/3;
 	if (gen < 033) {
 		/* Severe alignment penalties */
 		kgem->aperture_high /= 2;
@@ -2001,9 +2033,8 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 	kgem->aperture_mappable = 256 * 1024 * 1024;
 	if (dev != NULL)
 		kgem->aperture_mappable = agp_aperture_size(dev, gen);
-	if (kgem->aperture_mappable == 0 ||
-	    kgem->aperture_mappable > aperture.aper_size)
-		kgem->aperture_mappable = aperture.aper_size;
+	if (kgem->aperture_mappable == 0 || kgem->aperture_mappable > gtt_size)
+		kgem->aperture_mappable = gtt_size;
 	DBG(("%s: aperture mappable=%d [%d MiB]\n", __FUNCTION__,
 	     kgem->aperture_mappable, kgem->aperture_mappable / (1024*1024)));
 
@@ -2800,7 +2831,7 @@ void kgem_bo_undo(struct kgem *kgem, struct kgem_bo *bo)
 	DBG(("%s: only handle in batch, discarding last operations for handle=%d\n",
 	     __FUNCTION__, bo->handle));
 
-	assert(bo->exec == &kgem->exec[0]);
+	assert(bo->exec == &_kgem_dummy_exec || bo->exec == &kgem->exec[0]);
 	assert(kgem->exec[0].handle == bo->handle);
 	assert(RQ(bo->rq) == kgem->next_request);
 
@@ -2828,16 +2859,23 @@ void kgem_bo_pair_undo(struct kgem *kgem, struct kgem_bo *a, struct kgem_bo *b)
 
 	if (a == NULL || b == NULL)
 		return;
+	assert(a != b);
 	if (a->exec == NULL || b->exec == NULL)
 		return;
 
-	DBG(("%s: only handles in batch, discarding last operations for handle=%d and handle=%d\n",
-	     __FUNCTION__, a->handle, b->handle));
+	DBG(("%s: only handles in batch, discarding last operations for handle=%d (index=%d) and handle=%d (index=%d)\n",
+	     __FUNCTION__,
+	     a->handle, a->proxy ? -1 : a->exec - kgem->exec,
+	     b->handle, b->proxy ? -1 : b->exec - kgem->exec));
 
-	assert(a->exec == &kgem->exec[0] || a->exec == &kgem->exec[1]);
+	assert(a->exec == &_kgem_dummy_exec ||
+	       a->exec == &kgem->exec[0] ||
+	       a->exec == &kgem->exec[1]);
 	assert(a->handle == kgem->exec[0].handle || a->handle == kgem->exec[1].handle);
 	assert(RQ(a->rq) == kgem->next_request);
-	assert(b->exec == &kgem->exec[0] || b->exec == &kgem->exec[1]);
+	assert(b->exec == &_kgem_dummy_exec ||
+	       b->exec == &kgem->exec[0] ||
+	       b->exec == &kgem->exec[1]);
 	assert(b->handle == kgem->exec[0].handle || b->handle == kgem->exec[1].handle);
 	assert(RQ(b->rq) == kgem->next_request);
 
@@ -3084,7 +3122,6 @@ static bool __kgem_retire_rq(struct kgem *kgem, struct kgem_request *rq)
 		}
 
 		bo->domain = DOMAIN_NONE;
-		bo->gtt_dirty = false;
 		bo->rq = NULL;
 		if (bo->refcnt)
 			continue;
@@ -3328,6 +3365,7 @@ static void kgem_commit(struct kgem *kgem)
 		bo->binding.offset = 0;
 		bo->domain = DOMAIN_GPU;
 		bo->gpu_dirty = false;
+		bo->gtt_dirty = false;
 
 		if (bo->proxy) {
 			/* proxies are not used for domain tracking */
@@ -3349,6 +3387,23 @@ static void kgem_commit(struct kgem *kgem)
 		if (do_ioctl(kgem->fd, DRM_IOCTL_I915_GEM_SET_DOMAIN, &set_domain)) {
 			DBG(("%s: sync: GPU hang detected\n", __FUNCTION__));
 			kgem_throttle(kgem);
+		}
+
+		while (!list_is_empty(&rq->buffers)) {
+			bo = list_first_entry(&rq->buffers,
+					      struct kgem_bo,
+					      request);
+
+			assert(RQ(bo->rq) == rq);
+			assert(bo->exec == NULL);
+			assert(bo->domain == DOMAIN_GPU);
+
+			list_del(&bo->request);
+			bo->domain = DOMAIN_NONE;
+			bo->rq = NULL;
+
+			if (bo->refcnt == 0)
+				_kgem_bo_destroy(kgem, bo);
 		}
 
 		kgem_retire(kgem);
@@ -6721,6 +6776,7 @@ void *kgem_bo_map(struct kgem *kgem, struct kgem_bo *bo)
 			DBG(("%s: sync: GPU hang detected\n", __FUNCTION__));
 			kgem_throttle(kgem);
 		}
+		bo->needs_flush = false;
 		kgem_bo_retire(kgem, bo);
 		bo->domain = DOMAIN_GTT;
 		bo->gtt_dirty = true;
@@ -6851,8 +6907,26 @@ struct kgem_bo *kgem_create_map(struct kgem *kgem,
 			     (void *)first_page, last_page-first_page,
 			     read_only);
 	if (handle == 0) {
-		DBG(("%s: import failed, errno=%d\n", __FUNCTION__, errno));
-		return NULL;
+		if (read_only && kgem->has_wc_mmap) {
+			struct drm_i915_gem_set_domain set_domain;
+
+			handle = gem_userptr(kgem->fd,
+					     (void *)first_page, last_page-first_page,
+					     false);
+
+			VG_CLEAR(set_domain);
+			set_domain.handle = handle;
+			set_domain.read_domains = I915_GEM_DOMAIN_GTT;
+			set_domain.write_domain = 0;
+			if (do_ioctl(kgem->fd, DRM_IOCTL_I915_GEM_SET_DOMAIN, &set_domain)) {
+				gem_close(kgem->fd, handle);
+				handle = 0;
+			}
+		}
+		if (handle == 0) {
+			DBG(("%s: import failed, errno=%d\n", __FUNCTION__, errno));
+			return NULL;
+		}
 	}
 
 	bo = __kgem_bo_alloc(handle, (last_page - first_page) / PAGE_SIZE);
@@ -6915,6 +6989,7 @@ void kgem_bo_sync__cpu(struct kgem *kgem, struct kgem_bo *bo)
 			DBG(("%s: sync: GPU hang detected\n", __FUNCTION__));
 			kgem_throttle(kgem);
 		}
+		bo->needs_flush = false;
 		kgem_bo_retire(kgem, bo);
 		bo->domain = DOMAIN_CPU;
 	}
@@ -6955,6 +7030,7 @@ void kgem_bo_sync__cpu_full(struct kgem *kgem, struct kgem_bo *bo, bool write)
 			kgem_throttle(kgem);
 		}
 		if (write) {
+			bo->needs_flush = false;
 			kgem_bo_retire(kgem, bo);
 			bo->domain = DOMAIN_CPU;
 		} else {
@@ -6991,6 +7067,7 @@ void kgem_bo_sync__gtt(struct kgem *kgem, struct kgem_bo *bo)
 			DBG(("%s: sync: GPU hang detected\n", __FUNCTION__));
 			kgem_throttle(kgem);
 		}
+		bo->needs_flush = false;
 		kgem_bo_retire(kgem, bo);
 		bo->domain = DOMAIN_GTT;
 		bo->gtt_dirty = true;
