@@ -1,4 +1,4 @@
-xserver-xorg-video-intel (2:2.99.917+git20151019-1~exp1) UNRELEASED; urgency=medium
+xserver-xorg-video-intel (2:2.99.917+git20151019-1~exp1) experimental; urgency=medium
 
   * New upstream snapshot.
   * rules: Fix valgrind-enabling check.
@@ -7,7 +7,7 @@ xserver-xorg-video-intel (2:2.99.917+git20151019-1~exp1) UNRELEASED; urgency=med
     those before source build (copied from libdrm).
   * patches: Dropped, all upstream.
 
- -- Timo Aaltonen <tjaalton@debian.org>  Tue, 13 Jan 2015 12:34:17 +0200
+ -- Timo Aaltonen <tjaalton@debian.org>  Tue, 27 Oct 2015 19:07:45 +0200
 
 xserver-xorg-video-intel (2:2.99.917-2) unstable; urgency=medium
 
