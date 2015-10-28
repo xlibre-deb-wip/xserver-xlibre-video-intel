@@ -1,9 +1,9 @@
-xserver-xorg-video-intel (2:2.99.917+git20151019-1~exp1ubuntu1) UNRELEASED; urgency=medium
+xserver-xorg-video-intel (2:2.99.917+git20151019-1~exp1ubuntu1) xenial; urgency=medium
 
   * Merge from Debian experimental.
   * Drop sna-check-for-system-memory-contents.diff, randr.patch. Upstream.
 
- -- Timo Aaltonen <tjaalton@debian.org>  Wed, 28 Oct 2015 07:37:35 +0200
+ -- Timo Aaltonen <tjaalton@debian.org>  Wed, 28 Oct 2015 07:50:57 +0200
 
 xserver-xorg-video-intel (2:2.99.917+git20151019-1~exp1) experimental; urgency=medium
 
