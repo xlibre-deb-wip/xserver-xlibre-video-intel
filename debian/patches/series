@@ -5,3 +5,4 @@ xmir.patch
 
 sna-force-frontbuffer-to-cpu-for-randr-fallback.diff
 fix-yuv-to-rgb-shared-on-intel-gen8.patch
+sna-reject-cpu-blits-that-require-format-conversions.patch

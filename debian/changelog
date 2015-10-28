@@ -1,3 +1,10 @@
+xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu2.3) UNRELEASED; urgency=medium
+
+  * Add sna-reject-cpu-blits-that-require-format-conversions.patch and build with
+    --enable-wc-mmap: Fix webcam problems on Skylake (LP: #1506107)
+
+ -- Robert Hooker <sarvatt@ubuntu.com>  Tue, 13 Oct 2015 12:25:21 -0400
+
 xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu2.2) vivid-proposed; urgency=medium
 
   * fix-yuv-to-rgb-shared-on-intel-gen8.patch: Fix faulty yuv2rgb translation

@@ -24,6 +24,7 @@ override_dh_auto_configure:
 	    --with-default-accel=sna \
 	    --with-builderstring="$(SOURCE_NAME) $(SOURCE_VERSION) ($(BUILDER))" \
 	    --disable-silent-rules \
+	    --enable-wc-mmap \
 	    $(valgrind)
 
 # Install in debian/tmp to retain control through dh_install:
