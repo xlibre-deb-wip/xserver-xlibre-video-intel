@@ -90,6 +90,8 @@ void *alloca(size_t);
 #include <memcheck.h>
 #endif
 
+#define COLDPLUG_DELAY_MS 2000
+
 /* Minor discrepancy between 32-bit/64-bit ABI in old kernels */
 union compat_mode_get_connector{
 	struct drm_mode_get_connector conn;
@@ -166,6 +168,8 @@ struct sna_crtc {
 	bool cursor_transform;
 	bool hwcursor;
 	bool flip_pending;
+
+	struct pict_f_transform cursor_to_fb, fb_to_cursor;
 
 	RegionRec client_damage; /* XXX overlap with shadow damage? */
 
@@ -951,6 +955,8 @@ static void
 sna_crtc_force_outputs_on(xf86CrtcPtr crtc)
 {
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(crtc->scrn);
+	/* All attached outputs are valid, so update our timestamps */
+	unsigned now = GetTimeInMillis();
 	int i;
 
 	assert(to_sna_crtc(crtc));
@@ -970,6 +976,7 @@ sna_crtc_force_outputs_on(xf86CrtcPtr crtc)
 			continue;
 
 		__sna_output_dpms(output, DPMSModeOn, false);
+		to_sna_output(output)->last_detect = now;
 	}
 
 #if XF86_CRTC_VERSION >= 3
@@ -1004,28 +1011,40 @@ sna_crtc_force_outputs_off(xf86CrtcPtr crtc)
 }
 
 static unsigned
+rotation_reflect(unsigned rotation)
+{
+	unsigned other_bits;
+
+	/* paranoia for future extensions */
+	other_bits = rotation & ~RR_Rotate_All;
+
+	/* flip the reflection to compensate for reflecting the rotation */
+	other_bits ^= RR_Reflect_X | RR_Reflect_Y;
+
+	/* Reflect the screen by rotating the rotation bit,
+	 * which has to have at least RR_Rotate_0 set. This allows
+	 * us to reflect any of the rotation bits, not just 0.
+	 */
+	rotation &= RR_Rotate_All;
+	assert(rotation);
+	rotation <<= 2; /* RR_Rotate_0 -> RR_Rotate_180 etc */
+	rotation |= rotation >> 4; /* RR_Rotate_270' to RR_Rotate_90 */
+
+	return rotation | other_bits;
+}
+
+static unsigned
 rotation_reduce(struct plane *p, unsigned rotation)
 {
-	unsigned unsupported_rotations = rotation & ~p->rotation.supported;
-
-	if (unsupported_rotations == 0)
-		return rotation;
-
-#define RR_Reflect_XY (RR_Reflect_X | RR_Reflect_Y)
-
-	if ((unsupported_rotations & RR_Reflect_XY) == RR_Reflect_XY &&
-	    p->rotation.supported& RR_Rotate_180) {
-		rotation &= ~RR_Reflect_XY;
-		rotation ^= RR_Rotate_180;
+	/* If unsupported try exchanging rotation for a reflection */
+	if (rotation & ~p->rotation.supported) {
+		unsigned new_rotation = rotation_reflect(rotation);
+		if ((new_rotation & p->rotation.supported) == new_rotation)
+			rotation = new_rotation;
 	}
 
-	if ((unsupported_rotations & RR_Rotate_180) &&
-	    (p->rotation.supported& RR_Reflect_XY) == RR_Reflect_XY) {
-		rotation ^= RR_Reflect_XY;
-		rotation &= ~RR_Rotate_180;
-	}
-
-#undef RR_Reflect_XY
+	/* Only one rotation bit should be set */
+	assert(is_power_of_two(rotation & RR_Rotate_All));
 
 	return rotation;
 }
@@ -1045,7 +1064,7 @@ rotation_set(struct sna *sna, struct plane *p, uint32_t desired)
 	if (desired == p->rotation.current)
 		return true;
 
-	if ((desired & p->rotation.supported) == 0) {
+	if ((desired & p->rotation.supported) != desired) {
 		errno = EINVAL;
 		return false;
 	}
@@ -1199,9 +1218,10 @@ sna_crtc_apply(xf86CrtcPtr crtc)
 	     output_count, output_count ? output_ids[0] : 0));
 
 	ret = drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_SETCRTC, &arg) == 0;
-
-	sna_crtc->mode_serial++;
-	sna_crtc_force_outputs_on(crtc);
+	if (ret) {
+		sna_crtc->mode_serial++;
+		sna_crtc_force_outputs_on(crtc);
+	}
 unblock:
 	sigio_unblock(sigio);
 	return ret;
@@ -1971,9 +1991,9 @@ static bool use_shadow(struct sna *sna, xf86CrtcPtr crtc)
 		bool needs_transform = true;
 		unsigned rotation = rotation_reduce(&to_sna_crtc(crtc)->primary, crtc->rotation);
 		DBG(("%s: natively supported rotation? rotation=%x & supported=%x == %d\n",
-		     __FUNCTION__, crtc->rotation, to_sna_crtc(crtc)->primary.rotation.supported,
-		     !!(crtc->rotation & to_sna_crtc(crtc)->primary.rotation.supported)));
-		if (to_sna_crtc(crtc)->primary.rotation.supported & rotation)
+		     __FUNCTION__, rotation, to_sna_crtc(crtc)->primary.rotation.supported,
+		     rotation == (rotation & to_sna_crtc(crtc)->primary.rotation.supported)));
+		if ((to_sna_crtc(crtc)->primary.rotation.supported & rotation) == rotation)
 			needs_transform = RRTransformCompute(crtc->x, crtc->y,
 							     crtc->mode.HDisplay, crtc->mode.VDisplay,
 							     RR_Rotate_0, transform,
@@ -2621,7 +2641,7 @@ error:
 	sna_crtc->cursor_transform = saved_cursor_transform;
 	sna_crtc->hwcursor = saved_hwcursor;
 	sna_crtc->bo = saved_bo;
-	sna_mode_discover(sna);
+	sna_mode_discover(sna, true);
 	return FALSE;
 }
 
@@ -2866,6 +2886,8 @@ static int plane_details(struct sna *sna, struct plane *p)
 	}
 
 	p->rotation.supported &= DBG_NATIVE_ROTATION;
+	if (!xf86ReturnOptValBool(sna->Options, OPTION_ROTATION, TRUE))
+		p->rotation.supported = RR_Rotate_0;
 
 	if (props != (uint32_t *)stack_props)
 		free(props);
@@ -4773,17 +4795,53 @@ static bool disable_unused_crtc(struct sna *sna)
 	return update;
 }
 
-void sna_mode_discover(struct sna *sna)
+static bool
+output_check_status(struct sna *sna, struct sna_output *output)
+{
+	union compat_mode_get_connector compat_conn;
+	struct drm_mode_modeinfo dummy;
+	xf86OutputStatus status;
+
+	VG_CLEAR(compat_conn);
+
+	compat_conn.conn.connector_id = output->id;
+	compat_conn.conn.count_modes = 1; /* skip detect */
+	compat_conn.conn.modes_ptr = (uintptr_t)&dummy;
+	compat_conn.conn.count_encoders = 0;
+	compat_conn.conn.count_props = 0;
+
+	(void)drmIoctl(sna->kgem.fd,
+		       DRM_IOCTL_MODE_GETCONNECTOR,
+		       &compat_conn.conn);
+
+	switch (compat_conn.conn.connection) {
+	case DRM_MODE_CONNECTED:
+		status = XF86OutputStatusConnected;
+		break;
+	case DRM_MODE_DISCONNECTED:
+		status = XF86OutputStatusDisconnected;
+		break;
+	default:
+	case DRM_MODE_UNKNOWNCONNECTION:
+		status = XF86OutputStatusUnknown;
+		break;
+	}
+	return output->status == status;
+}
+
+void sna_mode_discover(struct sna *sna, bool tell)
 {
 	ScreenPtr screen = xf86ScrnToScreen(sna->scrn);
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(sna->scrn);
 	struct drm_mode_card_res res;
-	uint32_t connectors[32];
+	uint32_t connectors[32], now;
 	unsigned changed = 0;
 	unsigned serial;
 	int i, j;
 
 	DBG(("%s()\n", __FUNCTION__));
+	sna->flags &= ~SNA_REPROBE;
+
 	VG_CLEAR(connectors);
 
 	memset(&res, 0, sizeof(res));
@@ -4808,6 +4866,7 @@ void sna_mode_discover(struct sna *sna)
 	if (serial == 0)
 		serial = ++sna->mode.serial;
 
+	now = GetTimeInMillis();
 	for (i = 0; i < res.count_connectors; i++) {
 		DBG(("%s: connector[%d] = %d\n", __FUNCTION__, i, connectors[i]));
 		for (j = 0; j < sna->mode.num_real_output; j++) {
@@ -4832,10 +4891,17 @@ void sna_mode_discover(struct sna *sna)
 		if (sna_output->id == 0)
 			continue;
 
-		sna_output->last_detect = 0;
 		if (sna_output->serial == serial) {
-			if (sna_output_detect(output) != output->status)
-				RROutputChanged(output->randr_output, TRUE);
+			if (output_check_status(sna, sna_output)) {
+				DBG(("%s: output %s (id=%d), retained state\n",
+				     __FUNCTION__, output->name, sna_output->id));
+				sna_output->last_detect = now;
+			} else {
+				DBG(("%s: output %s (id=%d), changed state, reprobing\n",
+				     __FUNCTION__, output->name, sna_output->id));
+				sna_output->last_detect = 0;
+				changed |= 4;
+			}
 			continue;
 		}
 
@@ -4847,12 +4913,14 @@ void sna_mode_discover(struct sna *sna)
 			   "Disabled output %s\n",
 			   output->name);
 		sna_output->id = 0;
+		sna_output->last_detect = 0;
 		output->crtc = NULL;
 		RROutputChanged(output->randr_output, TRUE);
 		changed |= 2;
 	}
 
-	if (changed) {
+	/* Have the list of available outputs been updated? */
+	if (changed & 3) {
 		DBG(("%s: outputs changed, broadcasting\n", __FUNCTION__));
 
 		sna_mode_set_primary(sna);
@@ -4867,7 +4935,50 @@ void sna_mode_discover(struct sna *sna)
 		xf86RandR12TellChanged(screen);
 	}
 
-	RRTellChanged(screen);
+	/* If anything has changed, refresh the RandR information.
+	 * Note this could recurse once from udevless RRGetInfo() probes,
+	 * but only once.
+	 */
+	if (changed && tell)
+		RRGetInfo(screen, TRUE);
+}
+
+/* Since we only probe the current mode on startup, we may not have the full
+ * list of modes available until the user explicitly requests them. Fake a
+ * hotplug event after a second after starting to fill in any missing modes.
+ */
+static CARD32 sna_mode_coldplug(OsTimerPtr timer, CARD32 now, void *data)
+{
+	struct sna *sna = data;
+	ScreenPtr screen = xf86ScrnToScreen(sna->scrn);
+	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(sna->scrn);
+	bool reprobe = false;
+	int i;
+
+	DBG(("%s()\n", __FUNCTION__));
+
+	for (i = 0; i < sna->mode.num_real_output; i++) {
+		xf86OutputPtr output = config->output[i];
+		struct sna_output *sna_output = to_sna_output(output);
+
+		if (sna_output->id == 0)
+			continue;
+		if (sna_output->last_detect)
+			continue;
+		if (output->status == XF86OutputStatusDisconnected)
+			continue;
+
+		DBG(("%s: output %s connected, needs reprobe\n",
+		     __FUNCTION__, output->name));
+		reprobe = true;
+	}
+
+	if (reprobe) {
+		RRGetInfo(screen, TRUE);
+		RRTellChanged(screen);
+	}
+	free(timer);
+	return 0;
 }
 
 static void copy_front(struct sna *sna, PixmapPtr old, PixmapPtr new)
@@ -5099,36 +5210,6 @@ rotate_coord(Rotation rotation, int size,
 	*y_src = y_dst;
 }
 
-static void
-rotate_coord_back(Rotation rotation, int size, int *x, int *y)
-{
-	int t;
-
-	if (rotation & RR_Reflect_X)
-		*x = size - *x - 1;
-	if (rotation & RR_Reflect_Y)
-		*y = size - *y - 1;
-
-	switch (rotation & 0xf) {
-	case RR_Rotate_0:
-		break;
-	case RR_Rotate_90:
-		t = *x;
-		*x = *y;
-		*y = size - t - 1;
-		break;
-	case RR_Rotate_180:
-		*x = size - *x - 1;
-		*y = size - *y - 1;
-		break;
-	case RR_Rotate_270:
-		t = *x;
-		*x = size - *y - 1;
-		*y = t;
-		break;
-	}
-}
-
 static struct sna_cursor *__sna_create_cursor(struct sna *sna, int size)
 {
 	struct sna_cursor *c;
@@ -5208,7 +5289,6 @@ static struct sna_cursor *__sna_get_cursor(struct sna *sna, xf86CrtcPtr crtc)
 	uint32_t *image;
 	int width, height, pitch, size, x, y;
 	PictTransform cursor_to_fb;
-	struct pict_f_transform f_cursor_to_fb, f_fb_to_cursor;
 	bool transformed;
 	Rotation rotation;
 
@@ -5260,16 +5340,16 @@ static struct sna_cursor *__sna_get_cursor(struct sna *sna, xf86CrtcPtr crtc)
 
 		pixman_f_transform_bounds(&crtc->f_crtc_to_framebuffer, &box);
 		size = __cursor_size(box.x2 - box.x1, box.y2 - box.y1);
-
-		RRTransformCompute(0, 0,
-				   sna->cursor.ref->bits->width,
-				   sna->cursor.ref->bits->height,
-				   crtc->rotation, &crtc->transform,
-				   &cursor_to_fb,
-				   &f_cursor_to_fb,
-				   &f_fb_to_cursor);
 	} else
 		size = sna->cursor.size;
+
+	if (crtc->transform_in_use)
+                RRTransformCompute(0, 0, size, size,
+                                   crtc->rotation,
+                                   crtc->transformPresent ? &crtc->transform : NULL,
+                                   &cursor_to_fb,
+                                   &to_sna_crtc(crtc)->cursor_to_fb,
+                                   &to_sna_crtc(crtc)->fb_to_cursor);
 
 	cursor = to_sna_crtc(crtc)->cursor;
 	if (cursor && cursor->alloc < 4*size*size)
@@ -5325,15 +5405,15 @@ static struct sna_cursor *__sna_get_cursor(struct sna *sna, xf86CrtcPtr crtc)
 			if (transformed) {
 				affine_blt(image, cursor->image, 32,
 					   0, 0, width, height, size * 4,
-					   0, 0, width, height, size * 4,
-					   &f_cursor_to_fb);
+					   0, 0, size, size, size * 4,
+					   &to_sna_crtc(crtc)->cursor_to_fb);
 				image = cursor->image;
 			}
 		} else if (transformed) {
 			affine_blt(argb, cursor->image, 32,
 				   0, 0, width, height, width * 4,
-				   0, 0, width, height, size * 4,
-				   &f_cursor_to_fb);
+				   0, 0, size, size, size * 4,
+				   &to_sna_crtc(crtc)->cursor_to_fb);
 			image = cursor->image;
 		} else
 			memcpy_blt(argb, image, 32,
@@ -5644,18 +5724,20 @@ sna_set_cursor_position(ScrnInfoPtr scrn, int x, int y)
 		if (crtc->transform_in_use) {
 			int xhot = sna->cursor.ref->bits->xhot;
 			int yhot = sna->cursor.ref->bits->yhot;
-			struct pict_f_vector v;
+			struct pict_f_vector v, hot;
 
-			v.v[0] = (x + xhot) + 0.5;
-			v.v[1] = (y + yhot) + 0.5;
-			v.v[2] = 1;
+			v.v[0] = x + xhot + .5;
+			v.v[1] = y + yhot + .5;
+			v.v[2] = 1.;
 			pixman_f_transform_point(&crtc->f_framebuffer_to_crtc, &v);
 
-			rotate_coord_back(crtc->rotation, sna->cursor.size, &xhot, &yhot);
+			hot.v[0] = xhot;
+			hot.v[1] = yhot;
+			hot.v[2] = 1.;
+			pixman_f_transform_point(&sna_crtc->fb_to_cursor, &hot);
 
-			/* cursor will have 0.5 added to it already so floor is sufficient */
-			arg.x = floor(v.v[0]) - xhot;
-			arg.y = floor(v.v[1]) - yhot;
+			arg.x = floor(v.v[0] - hot.v[0]);
+			arg.y = floor(v.v[1] - hot.v[1]);
 		} else {
 			arg.x = x - crtc->x;
 			arg.y = y - crtc->y;
@@ -6804,6 +6886,7 @@ bool sna_mode_pre_init(ScrnInfoPtr scrn, struct sna *sna)
 		}
 	}
 	sort_config_outputs(sna);
+	TimerSet(NULL, 0, COLDPLUG_DELAY_MS, sna_mode_coldplug, sna);
 
 	sna_setup_provider(scrn);
 	return scrn->modes != NULL;
@@ -8598,10 +8681,7 @@ again:
 				assert(sna->mode.flip_active);
 				if (--sna->mode.flip_active == 0) {
 					assert(crtc->flip_handler);
-					assert(crtc->flip_data);
 					crtc->flip_handler(vbl, crtc->flip_data);
-					dbg(crtc->flip_handler = NULL);
-					dbg(crtc->flip_data = NULL);
 				}
 			}
 			break;

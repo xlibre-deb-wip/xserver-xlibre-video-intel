@@ -1,3 +1,14 @@
+xserver-xorg-video-intel (2:2.99.917+git20151019-1~exp1) experimental; urgency=medium
+
+  * New upstream snapshot.
+  * rules: Fix valgrind-enabling check.
+  * README.source: Mention that dpkg-source complains about symlinks
+    which are real files on the tarball, and add a command to clean
+    those before source build (copied from libdrm).
+  * patches: Dropped, all upstream.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Tue, 27 Oct 2015 19:07:45 +0200
+
 xserver-xorg-video-intel (2:2.99.917+git20150808-0ubuntu4) wily; urgency=medium
 
   * debian/patches/randr.patch:
@@ -38,16 +49,6 @@ xserver-xorg-video-intel (2:2.99.917+git20150808-0ubuntu1) wily; urgency=medium
 
  -- Timo Aaltonen <tjaalton@debian.org>  Thu, 20 Aug 2015 14:14:34 +0300
 
-xserver-xorg-video-intel (2:2.99.917+git20150808-1~exp1) UNRELEASED; urgency=medium
-
-  * New upstream snapshot.
-  * rules: Fix valgrind-enabling check.
-  * README.source: Mention that dpkg-source complains about symlinks
-    which are real files on the tarball, and add a command to clean
-    those before source build (copied from libdrm).
-
- -- Timo Aaltonen <tjaalton@debian.org>  Tue, 13 Jan 2015 12:34:17 +0200
-
 xserver-xorg-video-intel (2:2.99.917-2) unstable; urgency=medium
 
   [ Robert Ancell ]
@@ -81,7 +82,6 @@ xserver-xorg-video-intel (2:2.99.917-1ubuntu1) wily; urgency=medium
   * debian/rules:
     - Fix valgrind-enabling check (DEB_HOST_ARCH_OS instead of DEB_HOST_ARCH)
     - Use SNA by default.
- * debian/patches/fix-sna-external-slave-rotation.patch:
     - Fix rotating external display with optimus results in corruption.
   * debian/patches/fix-sna-fstat-include.patch:
   * debian/patches/fix-uxa-fstat-include.patch:
