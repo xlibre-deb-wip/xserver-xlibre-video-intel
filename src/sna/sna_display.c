@@ -128,6 +128,42 @@ struct local_mode_obj_get_properties {
 };
 #define LOCAL_MODE_OBJECT_PLANE 0xeeeeeeee
 
+struct local_mode_set_plane {
+	uint32_t plane_id;
+	uint32_t crtc_id;
+	uint32_t fb_id; /* fb object contains surface format type */
+	uint32_t flags;
+
+	/* Signed dest location allows it to be partially off screen */
+	int32_t crtc_x, crtc_y;
+	uint32_t crtc_w, crtc_h;
+
+	/* Source values are 16.16 fixed point */
+	uint32_t src_x, src_y;
+	uint32_t src_h, src_w;
+};
+#define LOCAL_IOCTL_MODE_SETPLANE DRM_IOWR(0xB7, struct local_mode_set_plane)
+
+struct local_mode_get_plane {
+	uint32_t plane_id;
+
+	uint32_t crtc_id;
+	uint32_t fb_id;
+
+	uint32_t possible_crtcs;
+	uint32_t gamma_size;
+
+	uint32_t count_format_types;
+	uint64_t format_type_ptr;
+};
+#define LOCAL_IOCTL_MODE_GETPLANE DRM_IOWR(0xb6, struct local_mode_get_plane)
+
+struct local_mode_get_plane_res {
+	uint64_t plane_id_ptr;
+	uint64_t count_planes;
+};
+#define LOCAL_IOCTL_MODE_GETPLANERESOURCES DRM_IOWR(0xb5, struct local_mode_get_plane_res)
+
 #if 0
 #define __DBG DBG
 #else
@@ -270,6 +306,81 @@ static void sna_crtc_disable_cursor(struct sna *sna, struct sna_crtc *crtc);
 static bool is_zaphod(ScrnInfoPtr scrn)
 {
 	return xf86IsEntityShared(scrn->entityList[0]);
+}
+
+static bool
+sna_zaphod_match(struct sna *sna, const char *output)
+{
+	const char *s, *colon;
+	char t[20];
+	unsigned int i = 0;
+
+	s = xf86GetOptValString(sna->Options, OPTION_ZAPHOD);
+	if (s == NULL)
+		return false;
+
+	colon = strchr(s, ':');
+	if (colon) /* Skip over the ZaphodPipes */
+		s = colon + 1;
+
+	do {
+		/* match any outputs in a comma list, stopping at whitespace */
+		switch (*s) {
+		case '\0':
+			t[i] = '\0';
+			return strcmp(t, output) == 0;
+
+		case ',':
+			t[i] ='\0';
+			if (strcmp(t, output) == 0)
+				return TRUE;
+			i = 0;
+			break;
+
+		case ' ':
+		case '\t':
+		case '\n':
+		case '\r':
+			break;
+
+		default:
+			t[i++] = *s;
+			break;
+		}
+
+		s++;
+	} while (i < sizeof(t));
+
+	return false;
+}
+
+static unsigned
+get_zaphod_crtcs(struct sna *sna)
+{
+	const char *str, *colon;
+	unsigned crtcs = 0;
+
+	str = xf86GetOptValString(sna->Options, OPTION_ZAPHOD);
+	if (str == NULL || (colon = strchr(str, ':')) == NULL) {
+		DBG(("%s: no zaphod pipes, using screen number: %x\n",
+		     __FUNCTION__,
+		     sna->scrn->confScreen->device->screen));
+		return 1 << sna->scrn->confScreen->device->screen;
+	}
+
+	DBG(("%s: ZaphodHeads='%s'\n", __FUNCTION__, str));
+	while (str < colon) {
+		char *end;
+		unsigned crtc = strtoul(str, &end, 0);
+		if (end == str)
+			break;
+		DBG(("%s: adding CRTC %d to zaphod pipes\n",
+		     __FUNCTION__, crtc));
+		crtcs |= 1 << crtc;
+		str = end + 1;
+	}
+	DBG(("%s: ZaphodPipes=%x\n", __FUNCTION__, crtcs));
+	return crtcs;
 }
 
 inline static unsigned count_to_mask(int x)
@@ -738,9 +849,22 @@ sna_output_backlight_set(struct sna_output *sna_output, int level)
 	return ret;
 }
 
+static bool
+has_native_backlight(struct sna_output *sna_output)
+{
+	return sna_output->backlight.type == BL_RAW;
+}
+
 static void
 sna_output_backlight_off(struct sna_output *sna_output)
 {
+	/* Trust the kernel to turn the native backlight off. However, we
+	 * do explicitly turn the backlight back on (when we wake the output)
+	 * just in case a third party turns it off!
+	 */
+	if (has_native_backlight(sna_output))
+		return;
+
 	DBG(("%s(%s)\n", __FUNCTION__, sna_output->base->name));
 	backlight_off(&sna_output->backlight);
 	sna_output_backlight_set(sna_output, 0);
@@ -976,7 +1100,8 @@ sna_crtc_force_outputs_on(xf86CrtcPtr crtc)
 			continue;
 
 		__sna_output_dpms(output, DPMSModeOn, false);
-		to_sna_output(output)->last_detect = now;
+		if (to_sna_output(output)->last_detect)
+			to_sna_output(output)->last_detect = now;
 	}
 
 #if XF86_CRTC_VERSION >= 3
@@ -1110,6 +1235,81 @@ bool sna_crtc_set_sprite_rotation(xf86CrtcPtr crtc, uint32_t rotation)
 			    rotation_reduce(&to_sna_crtc(crtc)->sprite, rotation));
 }
 
+#if HAS_DEBUG_FULL
+struct kmsg {
+	int fd;
+	int saved_loglevel;
+};
+
+static int kmsg_get_debug(void)
+{
+	FILE *file;
+	int v = -1;
+
+	file = fopen("/sys/module/drm/parameters/debug", "r");
+	if (file) {
+		fscanf(file, "%d", &v);
+		fclose(file);
+	}
+
+	return v;
+}
+
+static void kmsg_set_debug(int v)
+{
+	FILE *file;
+
+	file = fopen("/sys/module/drm/parameters/debug", "w");
+	if (file) {
+		fprintf(file, "%d\n", v);
+		fclose(file);
+	}
+}
+
+static void kmsg_open(struct kmsg *k)
+{
+	k->saved_loglevel = kmsg_get_debug();
+	if (k->saved_loglevel != -1)
+		kmsg_set_debug(0xff);
+
+	k->fd = open("/dev/kmsg", O_RDONLY | O_NONBLOCK);
+	if (k->fd != -1)
+		lseek(k->fd, 0, SEEK_END);
+}
+
+static void kmsg_close(struct kmsg *k, int dump)
+{
+	FILE *file;
+
+	file = NULL;
+	if (k->fd != -1 && dump)
+		file = fdopen(k->fd, "r");
+	if (file) {
+		size_t len = 0;
+		char *line = NULL;
+
+		while (getline(&line, &len, file) != -1) {
+			char *start = strchr(line, ';');
+			if (start)
+				LogF("KMSG: %s", start + 1);
+		}
+
+		free(line);
+		fclose(file);
+	}
+
+	if (k->fd != -1)
+		close(k->fd);
+
+	if (k->saved_loglevel != -1)
+		kmsg_set_debug(k->saved_loglevel);
+}
+#else
+struct kmsg { int unused; };
+static void kmsg_open(struct kmsg *k) {}
+static void kmsg_close(struct kmsg *k, int dump) {}
+#endif
+
 static bool
 sna_crtc_apply(xf86CrtcPtr crtc)
 {
@@ -1120,6 +1320,7 @@ sna_crtc_apply(xf86CrtcPtr crtc)
 	uint32_t output_ids[32];
 	int output_count = 0;
 	int sigio, i;
+	struct kmsg kmsg;
 	bool ret = false;
 
 	DBG(("%s CRTC:%d [pipe=%d], handle=%d\n", __FUNCTION__,
@@ -1132,6 +1333,7 @@ sna_crtc_apply(xf86CrtcPtr crtc)
 	}
 
 	sigio = sigio_block();
+	kmsg_open(&kmsg);
 
 	assert(sna->mode.num_real_output < ARRAY_SIZE(output_ids));
 	sna_crtc_disable_cursor(sna, sna_crtc);
@@ -1223,6 +1425,7 @@ sna_crtc_apply(xf86CrtcPtr crtc)
 		sna_crtc_force_outputs_on(crtc);
 	}
 unblock:
+	kmsg_close(&kmsg, !ret);
 	sigio_unblock(sigio);
 	return ret;
 }
@@ -1258,8 +1461,10 @@ static bool wait_for_shadow(struct sna *sna,
 	assert(priv->move_to_gpu_data == sna);
 	assert(sna->mode.shadow != priv->gpu_bo);
 
-	if (flags == 0 || pixmap != sna->front || !sna->mode.shadow_damage)
+	if (flags == 0 || pixmap != sna->front || !sna->mode.shadow_enabled)
 		goto done;
+
+	assert(sna->mode.shadow_damage);
 
 	if ((flags & MOVE_WRITE) == 0) {
 		if ((flags & __MOVE_SCANOUT) == 0) {
@@ -1301,7 +1506,7 @@ static bool wait_for_shadow(struct sna *sna,
 	}
 
 	assert(sna->mode.shadow_active);
-	assert(sna->mode.shadow_enabled);
+	sna->mode.shadow_wait = true;
 	sna->mode.shadow_enabled = false;
 
 	flip_active = sna->mode.flip_active;
@@ -1355,6 +1560,8 @@ static bool wait_for_shadow(struct sna *sna,
 		}
 	}
 	assert(!sna->mode.shadow_enabled);
+	assert(sna->mode.shadow_wait);
+	sna->mode.shadow_wait = false;
 	sna->mode.shadow_enabled = true;
 
 	if (bo->refcnt > 1) {
@@ -1456,6 +1663,8 @@ done:
 
 	priv->move_to_gpu_data = NULL;
 	priv->move_to_gpu = NULL;
+
+	assert(!sna->mode.shadow_wait);
 
 	return ret;
 }
@@ -2286,26 +2495,26 @@ out_shadow:
 		}
 
 		if (sna->flags & SNA_TEAR_FREE) {
+			RegionRec region;
+
 			assert(sna_crtc->slave_pixmap == NULL);
 
 			DBG(("%s: enabling TearFree shadow\n", __FUNCTION__));
+			region.extents.x1 = 0;
+			region.extents.y1 = 0;
+			region.extents.x2 = sna->scrn->virtualX;
+			region.extents.y2 = sna->scrn->virtualY;
+			region.data = NULL;
+
 			if (!sna_crtc_enable_shadow(sna, sna_crtc)) {
 				DBG(("%s: failed to enable crtc shadow\n", __FUNCTION__));
 				return NULL;
 			}
 
 			if (sna->mode.shadow == NULL && !wedged(sna)) {
-				RegionRec region;
 				struct kgem_bo *shadow;
 
 				DBG(("%s: creating TearFree shadow bo\n", __FUNCTION__));
-
-				region.extents.x1 = 0;
-				region.extents.y1 = 0;
-				region.extents.x2 = sna->scrn->virtualX;
-				region.extents.y2 = sna->scrn->virtualY;
-				region.data = NULL;
-
 				shadow = kgem_create_2d(&sna->kgem,
 							region.extents.x2,
 							region.extents.y2,
@@ -2334,8 +2543,8 @@ out_shadow:
 				assert(__sna_pixmap_get_bo(sna->front) == NULL ||
 				       __sna_pixmap_get_bo(sna->front)->pitch == shadow->pitch);
 				sna->mode.shadow = shadow;
-				set_shadow(sna, &region);
 			}
+			set_shadow(sna, &region);
 
 			sna_crtc_disable_override(sna, sna_crtc);
 		} else
@@ -2900,16 +3109,11 @@ static void
 sna_crtc_find_planes(struct sna *sna, struct sna_crtc *crtc)
 {
 #define LOCAL_IOCTL_SET_CAP	DRM_IOWR(0x0d, struct local_set_cap)
-#define LOCAL_IOCTL_MODE_GETPLANERESOURCES DRM_IOWR(0xb5, struct local_mode_get_plane_res)
-#define LOCAL_IOCTL_MODE_GETPLANE DRM_IOWR(0xb6, struct local_mode_get_plane)
 	struct local_set_cap {
 		uint64_t name;
 		uint64_t value;
 	} cap;
-	struct local_mode_get_plane_res {
-		uint64_t plane_id_ptr;
-		uint64_t count_planes;
-	} r;
+	struct local_mode_get_plane_res r;
 	uint32_t stack_planes[32];
 	uint32_t *planes = stack_planes;
 	int i;
@@ -2942,18 +3146,7 @@ sna_crtc_find_planes(struct sna *sna, struct sna_crtc *crtc)
 	VG(VALGRIND_MAKE_MEM_DEFINED(planes, sizeof(uint32_t)*r.count_planes));
 
 	for (i = 0; i < r.count_planes; i++) {
-		struct local_mode_get_plane {
-			uint32_t plane_id;
-
-			uint32_t crtc_id;
-			uint32_t fb_id;
-
-			uint32_t possible_crtcs;
-			uint32_t gamma_size;
-
-			uint32_t count_format_types;
-			uint64_t format_type_ptr;
-		} p;
+		struct local_mode_get_plane p;
 		struct plane details;
 
 		VG_CLEAR(p);
@@ -3027,7 +3220,7 @@ sna_crtc_add(ScrnInfoPtr scrn, unsigned id)
 	struct sna_crtc *sna_crtc;
 	struct drm_i915_get_pipe_from_crtc_id get_pipe;
 
-	DBG(("%s(%d)\n", __FUNCTION__, id));
+	DBG(("%s(%d): is-zaphod? %d\n", __FUNCTION__, id, is_zaphod(scrn)));
 
 	sna_crtc = calloc(sizeof(struct sna_crtc), 1);
 	if (sna_crtc == NULL)
@@ -3049,7 +3242,7 @@ sna_crtc_add(ScrnInfoPtr scrn, unsigned id)
 	sna_crtc->flags |= get_pipe.pipe << 8;
 
 	if (is_zaphod(scrn) &&
-	    scrn->confScreen->device->screen != get_pipe.pipe) {
+	    (get_zaphod_crtcs(sna) & (1 << get_pipe.pipe)) == 0) {
 		free(sna_crtc);
 		return true;
 	}
@@ -3111,6 +3304,29 @@ find_property(struct sna *sna, struct sna_output *output, const char *name)
 	}
 
 	return -1;
+}
+
+static void update_properties(struct sna *sna, struct sna_output *output)
+{
+	union compat_mode_get_connector compat_conn;
+	struct drm_mode_modeinfo dummy;
+
+	VG_CLEAR(compat_conn);
+
+	compat_conn.conn.connector_id = output->id;
+	compat_conn.conn.count_props = output->num_props;
+	compat_conn.conn.props_ptr = (uintptr_t)output->prop_ids;
+	compat_conn.conn.prop_values_ptr = (uintptr_t)output->prop_values;
+	compat_conn.conn.count_modes = 1; /* skip detect */
+	compat_conn.conn.modes_ptr = (uintptr_t)&dummy;
+	compat_conn.conn.count_encoders = 0;
+
+	(void)drmIoctl(sna->kgem.fd,
+		       DRM_IOCTL_MODE_GETCONNECTOR,
+		       &compat_conn.conn);
+
+	assert(compat_conn.conn.count_props == output->num_props);
+	output->update_properties = false;
 }
 
 static xf86OutputStatus
@@ -3240,6 +3456,13 @@ sna_output_attach_edid(xf86OutputPtr output)
 	if (sna_output->edid_idx == -1)
 		return;
 
+	/* Always refresh the blob as the kernel may randomly update the
+	 * id even if the contents of the blob doesn't change, and a
+	 * request for the stale id will return nothing.
+	 */
+	if (sna_output->update_properties)
+		update_properties(sna, sna_output);
+
 	raw = sna_output->edid_raw;
 	blob.length = sna_output->edid_len;
 
@@ -3250,8 +3473,12 @@ sna_output_attach_edid(xf86OutputPtr output)
 		old = NULL;
 
 	blob.blob_id = sna_output->prop_values[sna_output->edid_idx];
-	DBG(("%s: attaching EDID id=%d, current=%d\n",
-	     __FUNCTION__, blob.blob_id, sna_output->edid_blob_id));
+	if (!blob.blob_id)
+		goto done;
+
+	DBG(("%s(%s): attaching EDID id=%d, current=%d\n",
+	     __FUNCTION__, output->name,
+	     blob.blob_id, sna_output->edid_blob_id));
 	if (blob.blob_id == sna_output->edid_blob_id && 0) { /* sigh */
 		if (output->MonInfo) {
 			/* XXX the property keeps on disappearing... */
@@ -3269,11 +3496,14 @@ sna_output_attach_edid(xf86OutputPtr output)
 	}
 
 	blob.data = (uintptr_t)raw;
-	if (drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_GETPROPBLOB, &blob))
-		goto done;
+	if (drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_GETPROPBLOB, &blob)) {
+		DBG(("%s(%s): failed to read blob, reusing previous\n",
+		     __FUNCTION__, output->name));
+		goto skip_read;
+	}
 
-	DBG(("%s: retrieving blob id=%d, length=%d\n",
-	     __FUNCTION__, blob.blob_id, blob.length));
+	DBG(("%s(%s): retrieving blob id=%d, length=%d\n",
+	     __FUNCTION__, output->name, blob.blob_id, blob.length));
 
 	if (blob.length > sna_output->edid_len) {
 		raw = realloc(raw, blob.length);
@@ -3300,6 +3530,8 @@ sna_output_attach_edid(xf86OutputPtr output)
 	if (old &&
 	    blob.length == sna_output->edid_len &&
 	    memcmp(old, raw, blob.length) == 0) {
+		DBG(("%s(%s): EDID + MonInfo is unchanged\n",
+		     __FUNCTION__, output->name));
 		assert(sna_output->edid_raw == raw);
 		sna_output->edid_blob_id = blob.blob_id;
 		RRChangeOutputProperty(output->randr_output,
@@ -3342,6 +3574,9 @@ sna_output_attach_tile(xf86OutputPtr output)
 	DBG(("%s: found? TILE=%d\n", __FUNCTION__, id));
 	if (id == -1)
 		goto out;
+
+	if (sna_output->update_properties)
+		update_properties(sna, sna_output);
 
 	VG_CLEAR(blob);
 	blob.blob_id = sna_output->prop_values[id];
@@ -3953,29 +4188,6 @@ sna_output_set_property(xf86OutputPtr output, Atom property,
 	return TRUE;
 }
 
-static void update_properties(struct sna *sna, struct sna_output *output)
-{
-	union compat_mode_get_connector compat_conn;
-	struct drm_mode_modeinfo dummy;
-
-	VG_CLEAR(compat_conn);
-
-	compat_conn.conn.connector_id = output->id;
-	compat_conn.conn.count_props = output->num_props;
-	compat_conn.conn.props_ptr = (uintptr_t)output->prop_ids;
-	compat_conn.conn.prop_values_ptr = (uintptr_t)output->prop_values;
-	compat_conn.conn.count_modes = 1; /* skip detect */
-	compat_conn.conn.modes_ptr = (uintptr_t)&dummy;
-	compat_conn.conn.count_encoders = 0;
-
-	(void)drmIoctl(sna->kgem.fd,
-		       DRM_IOCTL_MODE_GETCONNECTOR,
-		       &compat_conn.conn);
-
-	assert(compat_conn.conn.count_props == output->num_props);
-	output->update_properties = false;
-}
-
 static Bool
 sna_output_get_property(xf86OutputPtr output, Atom property)
 {
@@ -4091,43 +4303,6 @@ static const char * const output_names[] = {
 	/* DRM_MODE_CONNECTOR_VIRTUAL */	"Virtual",
 	/* DRM_MODE_CONNECTOR_DSI */		"DSI"
 };
-
-static bool
-sna_zaphod_match(const char *s, const char *output)
-{
-	char t[20];
-	unsigned int i = 0;
-
-	do {
-		/* match any outputs in a comma list, stopping at whitespace */
-		switch (*s) {
-		case '\0':
-			t[i] = '\0';
-			return strcmp(t, output) == 0;
-
-		case ',':
-			t[i] ='\0';
-			if (strcmp(t, output) == 0)
-				return TRUE;
-			i = 0;
-			break;
-
-		case ' ':
-		case '\t':
-		case '\n':
-		case '\r':
-			break;
-
-		default:
-			t[i++] = *s;
-			break;
-		}
-
-		s++;
-	} while (i < sizeof(t));
-
-	return false;
-}
 
 static bool
 output_ignored(ScrnInfoPtr scrn, const char *name)
@@ -4522,25 +4697,26 @@ sna_output_add(struct sna *sna, unsigned id, unsigned serial)
 	}
 
 	if (is_zaphod(scrn)) {
-		const char *str;
+		unsigned zaphod_crtcs;
 
-		str = xf86GetOptValString(sna->Options, OPTION_ZAPHOD);
-		if (str && !sna_zaphod_match(str, name)) {
-			DBG(("%s: zaphod mismatch, want %s, have %s\n", __FUNCTION__, str, name));
+		if (!sna_zaphod_match(sna, name)) {
+			DBG(("%s: zaphod mismatch, want %s, have %s\n",
+			     __FUNCTION__,
+			     xf86GetOptValString(sna->Options, OPTION_ZAPHOD) ?: "???",
+			     name));
 			return 0;
 		}
 
-		if ((possible_crtcs & (1 << scrn->confScreen->device->screen)) == 0) {
-			if (str) {
-				xf86DrvMsg(scrn->scrnIndex, X_ERROR,
-					   "%s is an invalid output for screen (pipe) %d\n",
-					   name, scrn->confScreen->device->screen);
-				return -1;
-			} else
-				return 0;
+		zaphod_crtcs = get_zaphod_crtcs(sna);
+		possible_crtcs &= zaphod_crtcs;
+		if (possible_crtcs == 0) {
+			xf86DrvMsg(scrn->scrnIndex, X_ERROR,
+				   "%s is an invalid output for screen %d\n",
+				   name, scrn->confScreen->device->screen);
+			return -1;
 		}
 
-		possible_crtcs = 1;
+		possible_crtcs >>= ffs(zaphod_crtcs) - 1;
 	}
 
 	sna_output = calloc(sizeof(struct sna_output), 1);
@@ -4580,16 +4756,16 @@ sna_output_add(struct sna *sna, unsigned id, unsigned serial)
 	/* Construct name from topology, and recheck if output is acceptable */
 	path = name_from_path(sna, sna_output, name);
 	if (path) {
-		const char *str;
-
 		if (output_ignored(scrn, name)) {
 			len = 0;
 			goto skip;
 		}
 
-		str = xf86GetOptValString(sna->Options, OPTION_ZAPHOD);
-		if (str && !sna_zaphod_match(str, name)) {
-			DBG(("%s: zaphod mismatch, want %s, have %s\n", __FUNCTION__, str, name));
+		if (is_zaphod(scrn) && !sna_zaphod_match(sna, name)) {
+			DBG(("%s: zaphod mismatch, want %s, have %s\n",
+			     __FUNCTION__,
+			     xf86GetOptValString(sna->Options, OPTION_ZAPHOD) ?: "???",
+			     name));
 			len = 0;
 			goto skip;
 		}
@@ -7473,10 +7649,184 @@ sna_wait_for_scanline(struct sna *sna,
 	return ret;
 }
 
+static bool sna_mode_shutdown_crtc(xf86CrtcPtr crtc)
+{
+	struct sna *sna = to_sna(crtc->scrn);
+	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(crtc->scrn);
+	bool disabled = false;
+	int o;
+
+	xf86DrvMsg(crtc->scrn->scrnIndex, X_ERROR,
+		   "%s: invalid state found on pipe %d, disabling CRTC:%d\n",
+		   __FUNCTION__,
+		   __sna_crtc_pipe(to_sna_crtc(crtc)),
+		   __sna_crtc_id(to_sna_crtc(crtc)));
+	sna_crtc_disable(crtc, true);
+#if XF86_CRTC_VERSION >= 3
+	crtc->active = FALSE;
+#endif
+	if (crtc->enabled) {
+		crtc->enabled = FALSE;
+		disabled = true;
+	}
+
+	for (o = 0; o < sna->mode.num_real_output; o++) {
+		xf86OutputPtr output = config->output[o];
+
+		if (output->crtc != crtc)
+			continue;
+
+		output->funcs->dpms(output, DPMSModeOff);
+		output->crtc = NULL;
+	}
+
+	return disabled;
+}
+
+static xf86CrtcPtr
+lookup_crtc_by_id(struct sna *sna, int id)
+{
+	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(sna->scrn);
+	int c;
+
+	for (c = 0; c < sna->mode.num_real_crtc; c++) {
+		xf86CrtcPtr crtc = config->crtc[c];
+		if (__sna_crtc_id(to_sna_crtc(crtc)) == id)
+			return crtc;
+	}
+
+	return NULL;
+}
+
+static int plane_type(struct sna *sna, int id)
+{
+	struct local_mode_obj_get_properties arg;
+	uint64_t stack_props[24];
+	uint32_t *props = (uint32_t *)stack_props;
+	uint64_t *values = stack_props + 8;
+	int i, type = -1;
+
+	memset(&arg, 0, sizeof(struct local_mode_obj_get_properties));
+	arg.obj_id = id;
+	arg.obj_type = LOCAL_MODE_OBJECT_PLANE;
+
+	arg.props_ptr = (uintptr_t)props;
+	arg.prop_values_ptr = (uintptr_t)values;
+	arg.count_props = 16;
+
+	if (drmIoctl(sna->kgem.fd, LOCAL_IOCTL_MODE_OBJ_GETPROPERTIES, &arg))
+		return -1;
+
+	DBG(("%s: object %d (type %x) has %d props\n", __FUNCTION__,
+	     id, LOCAL_MODE_OBJECT_PLANE, arg.count_props));
+
+	if (arg.count_props > 16) {
+		props = malloc(2*sizeof(uint64_t)*arg.count_props);
+		if (props == NULL)
+			return -1;
+
+		values = (uint64_t *)props + arg.count_props;
+
+		arg.props_ptr = (uintptr_t)props;
+		arg.prop_values_ptr = (uintptr_t)values;
+
+		if (drmIoctl(sna->kgem.fd, LOCAL_IOCTL_MODE_OBJ_GETPROPERTIES, &arg))
+			arg.count_props = 0;
+	}
+	VG(VALGRIND_MAKE_MEM_DEFINED(arg.props_ptr, sizeof(uint32_t)*arg.count_props));
+	VG(VALGRIND_MAKE_MEM_DEFINED(arg.prop_values_ptr, sizeof(uint64_t)*arg.count_props));
+
+	for (i = 0; i < arg.count_props; i++) {
+		struct drm_mode_get_property prop;
+
+		memset(&prop, 0, sizeof(prop));
+		prop.prop_id = props[i];
+		if (drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_GETPROPERTY, &prop)) {
+			ERR(("%s: prop[%d].id=%d GETPROPERTY failed with errno=%d\n",
+			     __FUNCTION__, i, props[i], errno));
+			continue;
+		}
+
+		DBG(("%s: prop[%d] .id=%ld, .name=%s, .flags=%x, .value=%ld\n", __FUNCTION__, i,
+		     (long)props[i], prop.name, (unsigned)prop.flags, (long)values[i]));
+
+		if (strcmp(prop.name, "type") == 0) {
+			type = values[i];
+			break;
+		}
+	}
+
+	if (props != (uint32_t *)stack_props)
+		free(props);
+
+	return type;
+}
+
+static bool
+sna_mode_disable_secondary_planes(struct sna *sna)
+{
+	struct local_mode_get_plane_res r;
+	uint32_t stack_planes[64];
+	uint32_t *planes = stack_planes;
+	bool disabled = false;
+	int i;
+
+	VG_CLEAR(r);
+	r.plane_id_ptr = (uintptr_t)planes;
+	r.count_planes = ARRAY_SIZE(stack_planes);
+	if (drmIoctl(sna->kgem.fd, LOCAL_IOCTL_MODE_GETPLANERESOURCES, &r))
+		return false;
+
+	DBG(("%s: %d planes\n", __FUNCTION__, (int)r.count_planes));
+
+	if (r.count_planes > ARRAY_SIZE(stack_planes)) {
+		planes = malloc(sizeof(uint32_t)*r.count_planes);
+		if (planes == NULL)
+			return false;
+
+		r.plane_id_ptr = (uintptr_t)planes;
+		if (drmIoctl(sna->kgem.fd, LOCAL_IOCTL_MODE_GETPLANERESOURCES, &r))
+			r.count_planes = 0;
+	}
+
+	VG(VALGRIND_MAKE_MEM_DEFINED(planes, sizeof(uint32_t)*r.count_planes));
+
+	for (i = 0; i < r.count_planes; i++) {
+		struct local_mode_get_plane p;
+		struct local_mode_set_plane s;
+
+		VG_CLEAR(p);
+		p.plane_id = planes[i];
+		p.count_format_types = 0;
+		if (drmIoctl(sna->kgem.fd, LOCAL_IOCTL_MODE_GETPLANE, &p))
+			continue;
+
+		if (p.fb_id == 0 || p.crtc_id == 0)
+			continue;
+
+		if (plane_type(sna, p.plane_id) == DRM_PLANE_TYPE_PRIMARY)
+			continue;
+
+		memset(&s, 0, sizeof(s));
+		s.plane_id = p.plane_id;
+		s.crtc_id = p.crtc_id;
+		if (drmIoctl(sna->kgem.fd, LOCAL_IOCTL_MODE_SETPLANE, &s)) {
+			xf86CrtcPtr crtc = lookup_crtc_by_id(sna, p.crtc_id);
+			if (crtc)
+				disabled |= sna_mode_shutdown_crtc(crtc);
+		}
+	}
+
+	if (planes != stack_planes)
+		free(planes);
+
+	return disabled;
+}
+
 void sna_mode_check(struct sna *sna)
 {
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(sna->scrn);
-	bool disabled = false;
+	bool disabled;
 	int c, o;
 
 	if (sna->flags & SNA_IS_HOSTED)
@@ -7485,6 +7835,8 @@ void sna_mode_check(struct sna *sna)
 	DBG(("%s: hidden?=%d\n", __FUNCTION__, sna->mode.hidden));
 	if (sna->mode.hidden)
 		return;
+
+	disabled = sna_mode_disable_secondary_planes(sna);
 
 	/* Validate CRTC attachments and force consistency upon the kernel */
 	for (c = 0; c < sna->mode.num_real_crtc; c++) {
@@ -7511,29 +7863,8 @@ void sna_mode_check(struct sna *sna)
 		     mode.crtc_id, mode.mode_valid,
 		     mode.fb_id, expected[0], expected[1]));
 
-		if (mode.fb_id != expected[0] && mode.fb_id != expected[1]) {
-			xf86DrvMsg(crtc->scrn->scrnIndex, X_ERROR,
-				   "%s: invalid state found on pipe %d, disabling CRTC:%d\n",
-				   __FUNCTION__, __sna_crtc_pipe(sna_crtc), __sna_crtc_id(sna_crtc));
-			sna_crtc_disable(crtc, true);
-#if XF86_CRTC_VERSION >= 3
-			crtc->active = FALSE;
-#endif
-			if (crtc->enabled) {
-				crtc->enabled = FALSE;
-				disabled = true;
-			}
-
-			for (o = 0; o < sna->mode.num_real_output; o++) {
-				xf86OutputPtr output = config->output[o];
-
-				if (output->crtc != crtc)
-					continue;
-
-				output->funcs->dpms(output, DPMSModeOff);
-				output->crtc = NULL;
-			}
-		}
+		if (mode.fb_id != expected[0] && mode.fb_id != expected[1])
+			disabled |= sna_mode_shutdown_crtc(crtc);
 	}
 
 	for (o = 0; o < config->num_output; o++) {
@@ -7559,21 +7890,7 @@ void sna_mode_check(struct sna *sna)
 static bool
 sna_crtc_hide_planes(struct sna *sna, struct sna_crtc *crtc)
 {
-#define LOCAL_IOCTL_MODE_SETPLANE DRM_IOWR(0xB7, struct local_mode_set_plane)
-	struct local_mode_set_plane {
-		uint32_t plane_id;
-		uint32_t crtc_id;
-		uint32_t fb_id; /* fb object contains surface format type */
-		uint32_t flags;
-
-		/* Signed dest location allows it to be partially off screen */
-		int32_t crtc_x, crtc_y;
-		uint32_t crtc_w, crtc_h;
-
-		/* Source values are 16.16 fixed point */
-		uint32_t src_x, src_y;
-		uint32_t src_h, src_w;
-	} s;
+	struct local_mode_set_plane s;
 
 	if (crtc->primary.id == 0)
 		return false;
@@ -8449,7 +8766,7 @@ disable1:
 
 			assert(crtc != NULL);
 			DBG(("%s: crtc %d [%d, pipe=%d] active? %d, transformed? %d\n",
-			     __FUNCTION__, i, __sna_crtc_id(crtc), crtc->bo ? crtc->bo->handle : 0, crtc->transform));
+			     __FUNCTION__, i, __sna_crtc_id(crtc), __sna_crtc_pipe(crtc), crtc->bo ? crtc->bo->handle : 0, crtc->transform));
 			if (crtc->bo == NULL || crtc->transform)
 				continue;
 
@@ -8500,6 +8817,8 @@ fixup_shadow:
 
 			if (crtc->bo == flip_bo) {
 				assert(crtc->bo->refcnt >= crtc->bo->active_scanout);
+				DBG(("%s: flip handle=%d is already on the CRTC\n",
+				     __FUNCTION__, flip_bo->handle));
 				continue;
 			}
 
