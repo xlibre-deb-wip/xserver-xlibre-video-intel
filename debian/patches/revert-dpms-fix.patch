@@ -9,11 +9,9 @@ This reverts commit 7d9a74622e5a936e4860fcef8358619bf59adae8.
  src/sna/sna_display.c | 41 ++++++++++++++---------------------------
  1 file changed, 14 insertions(+), 27 deletions(-)
 
-Index: xserver-xorg-video-intel-2.99.917+git20150808/src/sna/sna_display.c
-===================================================================
---- xserver-xorg-video-intel-2.99.917+git20150808.orig/src/sna/sna_display.c
-+++ xserver-xorg-video-intel-2.99.917+git20150808/src/sna/sna_display.c
-@@ -222,7 +222,7 @@ struct sna_output {
+--- a/src/sna/sna_display.c
++++ b/src/sna/sna_display.c
+@@ -262,7 +262,7 @@ struct sna_output {
  	int panel_vdisplay;
  
  	uint32_t dpms_id;
@@ -22,7 +20,7 @@ Index: xserver-xorg-video-intel-2.99.917+git20150808/src/sna/sna_display.c
  	struct backlight backlight;
  	int backlight_active_level;
  
-@@ -260,7 +260,6 @@ enum { /* XXX copied from hw/xfree86/mod
+@@ -300,7 +300,6 @@ enum { /* XXX copied from hw/xfree86/mod
  	OPTION_DEFAULT_MODES,
  };
  
@@ -30,16 +28,16 @@ Index: xserver-xorg-video-intel-2.99.917+git20150808/src/sna/sna_display.c
  static void sna_crtc_disable_cursor(struct sna *sna, struct sna_crtc *crtc);
  
  static bool is_zaphod(ScrnInfoPtr scrn)
-@@ -969,7 +968,7 @@ sna_crtc_force_outputs_on(xf86CrtcPtr cr
+@@ -1099,7 +1098,7 @@ sna_crtc_force_outputs_on(xf86CrtcPtr cr
  		if (output->crtc != crtc)
  			continue;
  
 -		__sna_output_dpms(output, DPMSModeOn, false);
 +		output->funcs->dpms(output, DPMSModeOn);
- 		to_sna_output(output)->last_detect = now;
+ 		if (to_sna_output(output)->last_detect)
+ 			to_sna_output(output)->last_detect = now;
  	}
- 
-@@ -999,7 +998,7 @@ sna_crtc_force_outputs_off(xf86CrtcPtr c
+@@ -1131,7 +1130,7 @@ sna_crtc_force_outputs_off(xf86CrtcPtr c
  		if (output->crtc != crtc)
  			continue;
  
@@ -48,7 +46,7 @@ Index: xserver-xorg-video-intel-2.99.917+git20150808/src/sna/sna_display.c
  	}
  }
  
-@@ -1135,7 +1134,7 @@ sna_crtc_apply(xf86CrtcPtr crtc)
+@@ -1356,7 +1355,7 @@ sna_crtc_apply(xf86CrtcPtr crtc)
  		 * and we lose track of the user settings.
  		 */
  		if (output->crtc == NULL)
@@ -57,7 +55,7 @@ Index: xserver-xorg-video-intel-2.99.917+git20150808/src/sna/sna_display.c
  
  		if (output->crtc != crtc)
  			continue;
-@@ -3650,7 +3649,7 @@ sna_output_destroy(xf86OutputPtr output)
+@@ -3907,7 +3906,7 @@ sna_output_destroy(xf86OutputPtr output)
  }
  
  static void
@@ -66,7 +64,7 @@ Index: xserver-xorg-video-intel-2.99.917+git20150808/src/sna/sna_display.c
  {
  	struct sna *sna = to_sna(output->scrn);
  	struct sna_output *sna_output = output->driver_private;
-@@ -3677,9 +3676,8 @@ __sna_output_dpms(xf86OutputPtr output,
+@@ -3934,9 +3933,8 @@ __sna_output_dpms(xf86OutputPtr output,
  	if (sna_output->backlight.iface && dpms != DPMSModeOn) {
  		if (old_dpms == DPMSModeOn) {
  			sna_output->backlight_active_level = sna_output_backlight_get(output);
@@ -78,7 +76,7 @@ Index: xserver-xorg-video-intel-2.99.917+git20150808/src/sna/sna_display.c
  		}
  		sna_output->dpms_mode = dpms;
  		sna_output_backlight_off(sna_output);
-@@ -3689,31 +3687,18 @@ __sna_output_dpms(xf86OutputPtr output,
+@@ -3946,31 +3944,18 @@ __sna_output_dpms(xf86OutputPtr output,
  	    drmModeConnectorSetProperty(sna->kgem.fd,
  					sna_output->id,
  					sna_output->dpms_id,
@@ -114,7 +112,7 @@ Index: xserver-xorg-video-intel-2.99.917+git20150808/src/sna/sna_display.c
  static bool
  sna_property_ignore(drmModePropertyPtr prop)
  {
-@@ -4638,8 +4623,10 @@ reset:
+@@ -4836,8 +4821,10 @@ reset:
  		sna_output->dpms_mode = sna_output->prop_values[i];
  		DBG(("%s: found 'DPMS' (idx=%d, id=%d), initial value=%d\n",
  		     __FUNCTION__, i, sna_output->dpms_id, sna_output->dpms_mode));
