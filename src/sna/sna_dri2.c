@@ -2464,8 +2464,7 @@ static void chain_swap(struct sna_dri2_event *chain)
 	switch (chain->type) {
 	case SWAP_COMPLETE:
 		DBG(("%s: emitting chained vsync'ed blit\n", __FUNCTION__));
-		if (chain->sna->mode.shadow &&
-		    !chain->sna->mode.shadow_damage) {
+		if (chain->sna->mode.shadow && chain->sna->mode.shadow_wait) {
 			/* recursed from wait_for_shadow(), simply requeue */
 			DBG(("%s -- recursed from wait_for_shadow(), requeuing\n", __FUNCTION__));
 			if (sna_next_vblank(chain))
@@ -2528,7 +2527,10 @@ static bool sna_dri2_blit_complete(struct sna_dri2_event *info)
 	}
 
 	DBG(("%s: blit finished\n", __FUNCTION__));
-	info->bo = NULL;
+	if (info->bo) {
+		kgem_bo_destroy(&info->sna->kgem, info->bo);
+		info->bo = NULL;
+	}
 	return true;
 }
 
@@ -2562,7 +2564,7 @@ void sna_dri2_vblank_handler(struct drm_event_vblank *event)
 		/* else fall through to blit */
 	case SWAP:
 		assert(info->signal);
-		if (sna->mode.shadow && !sna->mode.shadow_damage) {
+		if (sna->mode.shadow && sna->mode.shadow_wait) {
 			/* recursed from wait_for_shadow(), simply requeue */
 			DBG(("%s -- recursed from wait_for_shadow(), requeuing\n", __FUNCTION__));
 		} else if (can_xchg(info->sna, draw, info->front, info->back)) {
@@ -2600,6 +2602,13 @@ void sna_dri2_vblank_handler(struct drm_event_vblank *event)
 		}
 
 		if (info->pending.bo) {
+			if (sna->mode.shadow && sna->mode.shadow_wait) {
+				/* recursed from wait_for_shadow(), simply requeue */
+				DBG(("%s -- recursed from wait_for_shadow(), requeuing\n", __FUNCTION__));
+				if (sna_next_vblank(info))
+					return;
+			}
+
 			assert(info->pending.bo->active_scanout > 0);
 			info->pending.bo->active_scanout--;
 
@@ -2782,6 +2791,7 @@ sna_dri2_flip_continue(struct sna_dri2_event *info)
 	       info->sna->dri2.flip_pending == info);
 	info->sna->dri2.flip_pending = info;
 	info->queued = true;
+	info->signal = info->type == FLIP_THROTTLE;
 
 	return true;
 }
@@ -3053,17 +3063,18 @@ sna_dri2_schedule_flip(ClientPtr client, DrawablePtr draw, xf86CrtcPtr crtc,
 			}
 			DBG(("%s: executing xchg of pending flip: flip_continue=%d, keepalive=%d, chain?=%d\n", __FUNCTION__, info->flip_continue, info->keepalive, current_msc < *target_msc));
 			sna_dri2_xchg(draw, front, back);
-			info->flip_continue = FLIP_COMPLETE;
 			info->keepalive = KEEPALIVE;
-			signal = info->signal;
-			info->signal = true;
 			if (xorg_can_triple_buffer() &&
 			    current_msc < *target_msc) {
 				DBG(("%s: chaining flip\n", __FUNCTION__));
-				info->type = FLIP_THROTTLE;
+				info->flip_continue = FLIP_THROTTLE;
 				goto out;
-			} else
+			} else {
+				info->flip_continue = FLIP_COMPLETE;
+				signal = info->signal;
+				info->signal = true;
 				goto new_back;
+			}
 		}
 
 		info = sna_dri2_add_event(sna, draw, client, crtc);

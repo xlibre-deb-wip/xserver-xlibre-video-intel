@@ -1087,8 +1087,12 @@ sna_pixmap_create_scratch(ScreenPtr screen,
 
 static unsigned small_copy(const RegionRec *region)
 {
-	if ((region->extents.x2 - region->extents.x1)*(region->extents.y2 - region->extents.y1) < 1024)
+	if ((region->extents.x2 - region->extents.x1)*(region->extents.y2 - region->extents.y1) < 1024) {
+		DBG(("%s: region:%dx%d\n", __FUNCTION__,
+		     (region->extents.x2 - region->extents.x1),
+		     (region->extents.y2 - region->extents.y1)));
 		return COPY_SMALL;
+	}
 
 	return 0;
 }
@@ -1544,7 +1548,7 @@ static inline bool has_coherent_ptr(struct sna *sna, struct sna_pixmap *priv, un
 		if (!priv->cpu_bo)
 			return true;
 
-		assert(!priv->cpu_bo->needs_flush);
+		assert(!priv->cpu_bo->needs_flush || (flags & MOVE_WRITE) == 0);
 		assert(priv->pixmap->devKind == priv->cpu_bo->pitch);
 		return priv->pixmap->devPrivate.ptr == MAP(priv->cpu_bo->map__cpu);
 	}
@@ -17985,7 +17989,7 @@ static bool sna_option_accel_none(struct sna *sna)
 	if (wedged(sna))
 		return true;
 
-	if (xf86ReturnOptValBool(sna->Options, OPTION_ACCEL_DISABLE, FALSE))
+	if (!xf86ReturnOptValBool(sna->Options, OPTION_ACCEL_ENABLE, TRUE))
 		return true;
 
 	if (sna->kgem.gen >= 0120)
