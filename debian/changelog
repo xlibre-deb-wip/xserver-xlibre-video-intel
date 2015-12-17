@@ -1,3 +1,9 @@
+xserver-xorg-video-intel (2:2.99.917+git20151217-1~exp1) UNRELEASED; urgency=medium
+
+  * New upstream snapshot.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Thu, 17 Dec 2015 15:07:27 +0200
+
 xserver-xorg-video-intel (2:2.99.917+git20151019-1~exp1) experimental; urgency=medium
 
   * New upstream snapshot.
