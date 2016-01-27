@@ -46,6 +46,7 @@ Build-Depends:
  libxtst-dev,
  libxrender-dev,
  libpixman-1-dev,
+ libxss-dev,
 # dri3info:
 # libxcomposite-dev,
 # tests, benchmarks:

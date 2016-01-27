@@ -5,6 +5,7 @@ xserver-xorg-video-intel (2:2.99.917+git20160127-1~exp1) UNRELEASED; urgency=med
   * control: Update description to mention that this driver is
     deprecated in favor of -modesetting.
   * rules: Use upstream-unstable branch to build a snapshot tarball.
+  * control: Add libxss-dev to build-depends for intel-virtual-output.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Wed, 20 Jan 2016 15:27:15 +0200
 
