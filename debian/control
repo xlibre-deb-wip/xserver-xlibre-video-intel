@@ -73,6 +73,9 @@ Description: X.Org X server -- Intel i8xx, i9xx display driver
  for i810/i815 and i9xx and newer chipsets.
  .
  This package is built from the X.org xf86-video-intel driver module.
+ .
+ This driver is deprecated in favor of the server builtin modesetting
+ driver.
 
 Package: xserver-xorg-video-intel-dbg
 Architecture: amd64 i386 kfreebsd-amd64 kfreebsd-i386 x32
