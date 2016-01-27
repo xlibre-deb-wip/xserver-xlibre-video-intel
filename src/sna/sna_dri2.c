@@ -1110,13 +1110,12 @@ static void sna_dri2_select_mode(struct sna *sna, struct kgem_bo *dst, struct kg
 	 * The ultimate question is whether preserving the ring outweighs
 	 * the cost of the query.
 	 */
-	if (popcount(busy.busy >> 16) > 1)
-		mode = busy.busy & 0xffff ? KGEM_BLT : KGEM_RENDER;
-	else if (busy.busy & (0xfffe << 16))
+	mode = KGEM_RENDER;
+	if ((busy.busy & 0xffff) == KGEM_BLT)
 		mode = KGEM_BLT;
-	else
-		mode = KGEM_RENDER;
-	kgem_bo_mark_busy(&sna->kgem, busy.handle == src->handle ? src : dst, mode);
+	kgem_bo_mark_busy(&sna->kgem,
+			  busy.handle == src->handle ? src : dst,
+			  mode);
 	_kgem_set_mode(&sna->kgem, mode);
 }
 
@@ -1507,6 +1506,7 @@ draw_current_msc(DrawablePtr draw, xf86CrtcPtr crtc, uint64_t msc)
 {
 	struct dri2_window *priv;
 
+	assert(draw);
 	if (draw->type != DRAWABLE_WINDOW)
 		return msc;
 
@@ -1594,6 +1594,8 @@ static void fake_swap_complete(struct sna *sna, ClientPtr client,
 			       int type, DRI2SwapEventPtr func, void *data)
 {
 	const struct ust_msc *swap;
+
+	assert(draw);
 
 	swap = sna_crtc_last_swap(crtc);
 	DBG(("%s(type=%d): draw=%ld, pipe=%d, frame=%lld [msc %lld], tv=%d.%06d\n",
@@ -1716,6 +1718,8 @@ sna_dri2_client_gone(CallbackListPtr *list, void *closure, void *data)
 
 		event->client = NULL;
 		event->draw = NULL;
+		event->keepalive = 1;
+		assert(!event->signal);
 
 		if (!event->queued)
 			sna_dri2_event_free(event);
@@ -1751,6 +1755,7 @@ sna_dri2_add_event(struct sna *sna,
 	struct dri2_window *priv;
 	struct sna_dri2_event *info, *chain;
 
+	assert(draw != NULL);
 	assert(draw->type == DRAWABLE_WINDOW);
 	DBG(("%s: adding event to window %ld)\n",
 	     __FUNCTION__, (long)draw->id));
@@ -1837,21 +1842,23 @@ void sna_dri2_destroy_window(WindowPtr win)
 
 		chain = priv->chain;
 		while ((info = chain)) {
+			DBG(("%s: freeing event, pending signal? %d, pending swap? handle=%d\n",
+			     __FUNCTION__, info->signal,
+			     info->pending.bo ? info->pending.bo->handle : 0));
 			assert(info->draw == &win->drawable);
-			if (info->signal)
-				frame_swap_complete(info, DRI2_EXCHANGE_COMPLETE);
+
 			if (info->pending.bo) {
 				assert(info->pending.bo->active_scanout > 0);
 				info->pending.bo->active_scanout--;
-
-				info->signal = true;
-				frame_swap_complete(info, DRI2_EXCHANGE_COMPLETE);
 
 				kgem_bo_destroy(&sna->kgem, info->pending.bo);
 				info->pending.bo = NULL;
 			}
 
+			info->signal = false;
 			info->draw = NULL;
+			info->keepalive = 1;
+			assert(!info->signal);
 			list_del(&info->link);
 
 			chain = info->chain;
@@ -2636,8 +2643,10 @@ void sna_dri2_vblank_handler(struct drm_event_vblank *event)
 			else
 				__sna_dri2_copy_event(info, info->sync | DRI2_BO);
 
-			info->keepalive++;
-			info->signal = true;
+			if (info->draw) {
+				info->keepalive++;
+				info->signal = true;
+			}
 		}
 
 		if (--info->keepalive) {
@@ -2729,6 +2738,7 @@ sna_dri2_immediate_blit(struct sna *sna,
 			bool signal = chain->signal;
 
 			DBG(("%s: swap elision, unblocking client\n", __FUNCTION__));
+			assert(chain->draw);
 			chain->signal = true;
 			frame_swap_complete(chain, DRI2_EXCHANGE_COMPLETE);
 			chain->signal = signal;
@@ -2777,6 +2787,9 @@ sna_dri2_flip_continue(struct sna_dri2_event *info)
 	info->type = info->flip_continue;
 	info->flip_continue = 0;
 
+	if (info->draw == NULL)
+		return false;
+
 	if (info->sna->mode.front_active == 0)
 		return false;
 
@@ -2791,6 +2804,7 @@ sna_dri2_flip_continue(struct sna_dri2_event *info)
 	       info->sna->dri2.flip_pending == info);
 	info->sna->dri2.flip_pending = info;
 	info->queued = true;
+	assert(info->draw);
 	info->signal = info->type == FLIP_THROTTLE;
 
 	return true;
@@ -2863,8 +2877,10 @@ static void sna_dri2_flip_event(struct sna_dri2_event *flip)
 	/* We assume our flips arrive in order, so we don't check the frame */
 	switch (flip->type) {
 	case FLIP:
-		DBG(("%s: swap complete, unblocking client\n", __FUNCTION__));
-		frame_swap_complete(flip, DRI2_FLIP_COMPLETE);
+		if (flip->signal) {
+			DBG(("%s: swap complete, unblocking client\n", __FUNCTION__));
+			frame_swap_complete(flip, DRI2_FLIP_COMPLETE);
+		}
 		sna_dri2_event_free(flip);
 
 		if (sna->dri2.flip_pending)
@@ -3072,6 +3088,7 @@ sna_dri2_schedule_flip(ClientPtr client, DrawablePtr draw, xf86CrtcPtr crtc,
 			} else {
 				info->flip_continue = FLIP_COMPLETE;
 				signal = info->signal;
+				assert(info->draw);
 				info->signal = true;
 				goto new_back;
 			}
@@ -3084,6 +3101,7 @@ sna_dri2_schedule_flip(ClientPtr client, DrawablePtr draw, xf86CrtcPtr crtc,
 		assert(info->crtc == crtc);
 		info->event_complete = func;
 		info->event_data = data;
+		assert(info->draw);
 		info->signal = true;
 
 		info->front = sna_dri2_reference_buffer(front);
@@ -3120,6 +3138,7 @@ new_back:
 				sna_dri2_get_back(sna, draw, back);
 			DBG(("%s: fake triple buffering, unblocking client\n", __FUNCTION__));
 			frame_swap_complete(info, DRI2_EXCHANGE_COMPLETE);
+			assert(info->draw);
 			info->signal = signal;
 			if (info->type == FLIP_ASYNC)
 				sna_dri2_event_free(info);
@@ -3143,6 +3162,7 @@ queue:
 	assert(info->crtc == crtc);
 	info->event_complete = func;
 	info->event_data = data;
+	assert(info->draw);
 	info->signal = true;
 	info->type = FLIP;
 
@@ -3299,6 +3319,7 @@ sna_dri2_schedule_swap(ClientPtr client, DrawablePtr draw, DRI2BufferPtr front,
 	assert(info->crtc == crtc);
 	info->event_complete = func;
 	info->event_data = data;
+	assert(info->draw);
 	info->signal = true;
 
 	info->front = sna_dri2_reference_buffer(front);
@@ -3363,6 +3384,7 @@ skip:
 		info->type = SWAP_COMPLETE;
 		info->event_complete = func;
 		info->event_data = data;
+		assert(info->draw);
 		info->signal = true;
 
 		info->front = sna_dri2_reference_buffer(front);
@@ -3377,6 +3399,7 @@ fake:
 		/* XXX Use a Timer to throttle the client? */
 		fake_swap_complete(sna, client, draw, crtc, type, func, data);
 		if (info) {
+			assert(info->draw);
 			info->signal = false;
 			sna_dri2_event_free(info);
 		}
