@@ -90,6 +90,8 @@ void *alloca(size_t);
 #include <memcheck.h>
 #endif
 
+#define FAIL_CURSOR_IOCTL 0
+
 #define COLDPLUG_DELAY_MS 2000
 
 /* Minor discrepancy between 32-bit/64-bit ABI in old kernels */
@@ -655,6 +657,7 @@ static uint32_t gem_create(int fd, int size)
 static void *gem_mmap(int fd, int handle, int size)
 {
 	struct drm_i915_gem_mmap_gtt mmap_arg;
+	struct drm_i915_gem_set_domain set_domain;
 	void *ptr;
 
 	VG_CLEAR(mmap_arg);
@@ -665,6 +668,15 @@ static void *gem_mmap(int fd, int handle, int size)
 	ptr = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, mmap_arg.offset);
 	if (ptr == MAP_FAILED)
 		return NULL;
+
+	VG_CLEAR(set_domain);
+	set_domain.handle = handle;
+	set_domain.read_domains = I915_GEM_DOMAIN_GTT;
+	set_domain.write_domain = I915_GEM_DOMAIN_GTT;
+	if (drmIoctl(fd, DRM_IOCTL_I915_GEM_SET_DOMAIN, &set_domain)) {
+		munmap(ptr, size);
+		return NULL;
+	}
 
 	return ptr;
 }
@@ -1337,6 +1349,12 @@ sna_crtc_apply(xf86CrtcPtr crtc)
 
 	assert(sna->mode.num_real_output < ARRAY_SIZE(output_ids));
 	sna_crtc_disable_cursor(sna, sna_crtc);
+
+	if (!rotation_set(sna, &sna_crtc->primary, sna_crtc->rotation)) {
+		memset(&arg, 0, sizeof(arg));
+		arg.crtc_id = __sna_crtc_id(sna_crtc);
+		(void)drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_SETCRTC, &arg);
+	}
 
 	if (!rotation_set(sna, &sna_crtc->primary, sna_crtc->rotation)) {
 		ERR(("%s: set-primary-rotation failed (rotation-id=%d, rotation=%d) on CRTC:%d [pipe=%d], errno=%d\n",
@@ -2376,6 +2394,10 @@ force_shadow:
 		}
 
 		tiling = I915_TILING_X;
+		if (crtc->rotation & (RR_Rotate_90 | RR_Rotate_270) &&
+		    sna->kgem.can_scanout_y)
+			tiling = I915_TILING_Y;
+
 		if (sna->kgem.gen == 071)
 			tiled_limit = 16 * 1024 * 8;
 		else if ((sna->kgem.gen >> 3) > 4)
@@ -5729,7 +5751,8 @@ sna_show_cursors(ScrnInfoPtr scrn)
 		arg.width = arg.height = cursor->size;
 		arg.handle = cursor->handle;
 
-		if (drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_CURSOR, &arg) == 0) {
+		if (!FAIL_CURSOR_IOCTL &&
+		    drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_CURSOR, &arg) == 0) {
 			if (sna_crtc->cursor) {
 				assert(sna_crtc->cursor->ref > 0);
 				sna_crtc->cursor->ref--;
@@ -5955,7 +5978,8 @@ disable:
 		if (arg.flags == 0)
 			continue;
 
-		if (drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_CURSOR, &arg) == 0) {
+		if (!FAIL_CURSOR_IOCTL &&
+		    drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_CURSOR, &arg) == 0) {
 			if (arg.flags & DRM_MODE_CURSOR_BO) {
 				if (sna_crtc->cursor) {
 					assert(sna_crtc->cursor->ref > 0);

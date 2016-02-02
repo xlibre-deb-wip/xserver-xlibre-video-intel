@@ -47,6 +47,12 @@ Build-Depends:
  libxtst-dev,
  libxrender-dev,
  libpixman-1-dev,
+ libxss-dev,
+# dri3info:
+# libxcomposite-dev,
+# tests, benchmarks:
+# libcairo2-dev,
+# libpng12-dev,
 Standards-Version: 3.9.6
 Vcs-Git: git://anonscm.debian.org/pkg-xorg/driver/xserver-xorg-video-intel
 Vcs-Browser: http://anonscm.debian.org/cgit/pkg-xorg/driver/xserver-xorg-video-intel.git
@@ -69,6 +75,9 @@ Description: X.Org X server -- Intel i8xx, i9xx display driver
  for i810/i815 and i9xx and newer chipsets.
  .
  This package is built from the X.org xf86-video-intel driver module.
+ .
+ This driver is deprecated in favor of the server builtin modesetting
+ driver.
 
 Package: xserver-xorg-video-intel-dbg
 Architecture: amd64 i386 kfreebsd-amd64 kfreebsd-i386 x32
