@@ -1733,6 +1733,11 @@ bool sna_pixmap_discard_shadow_damage(struct sna_pixmap *priv,
 
 static void sna_mode_damage(DamagePtr damage, RegionPtr region, void *closure)
 {
+	struct sna *sna = closure;
+
+	if (sna->mode.rr_active)
+		return;
+
 	/* Throw away the rectangles if the region grows too big */
 	region = DamageRegion(damage);
 	if (region->data) {
@@ -7096,15 +7101,55 @@ bool
 sna_mode_wants_tear_free(struct sna *sna)
 {
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(sna->scrn);
+	bool found = false;
+	FILE *file;
 	int i;
+
+	file = fopen("/sys/module/i915/parameters/enable_fbc", "r");
+	if (file) {
+		int fbc_enabled = 0;
+		int value;
+
+		if (fscanf(file, "%d", &value) == 1)
+			fbc_enabled = value > 0;
+		fclose(file);
+
+		DBG(("%s: module parameter 'enable_fbc' enabled? %d\n",
+		     __FUNCTION__, fbc_enabled));
+
+		if (fbc_enabled)
+			return true;
+	}
 
 	for (i = 0; i < sna->mode.num_real_output; i++) {
 		struct sna_output *output = to_sna_output(config->output[i]);
 		int id = find_property(sna, output, "Panel Self-Refresh");
-		if (id !=-1 && output->prop_values[id] != -1) {
+		if (id == -1)
+			continue;
+
+		found = true;
+		if (output->prop_values[id] != -1) {
 			DBG(("%s: Panel Self-Refresh detected on %s\n",
 			     __FUNCTION__, config->output[i]->name));
 			return true;
+		}
+	}
+
+	if (!found) {
+		file = fopen("/sys/module/i915/parameters/enable_psr", "r");
+		if (file) {
+			int psr_enabled = 0;
+			int value;
+
+			if (fscanf(file, "%d", &value) == 1)
+				psr_enabled = value > 0;
+			fclose(file);
+
+			DBG(("%s: module parameter 'enable_psr' enabled? %d\n",
+			     __FUNCTION__, psr_enabled));
+
+			if (psr_enabled)
+				return true;
 		}
 	}
 
@@ -8215,36 +8260,38 @@ sna_crtc_redisplay__composite(xf86CrtcPtr crtc, RegionPtr region, struct kgem_bo
 	ValidatePicture(src);
 	ValidatePicture(dst);
 
-	if (!sna->render.composite(sna,
-				   PictOpSrc, src, NULL, dst,
-				   sx, sy,
-				   0, 0,
-				   0, 0,
-				   crtc->mode.HDisplay, crtc->mode.VDisplay,
-				   COMPOSITE_PARTIAL, memset(&tmp, 0, sizeof(tmp)))) {
-		DBG(("%s: unsupported operation!\n", __FUNCTION__));
-		sna_crtc_redisplay__fallback(crtc, region, bo);
-		goto free_dst;
-	}
-
+	/* Composite each box individually as if we are dealing with a rotation
+	 * on a large display, we may have to perform intermediate copies. We
+	 * can then minimise the overdraw by looking at individual boxes rather
+	 * than the bbox.
+	 */
 	n = region_num_rects(region);
 	b = region_rects(region);
 	do {
-		BoxRec box;
-
-		box = *b++;
+		BoxRec box = *b;
 		transformed_box(&box, crtc);
 
 		DBG(("%s: (%d, %d)x(%d, %d) -> (%d, %d), (%d, %d)\n",
 		     __FUNCTION__,
-		     b[-1].x1, b[-1].y1, b[-1].x2-b[-1].x1, b[-1].y2-b[-1].y1,
+		     b->x1, b->y1, b->x2-b->x1, b->y2-b->y1,
 		     box.x1, box.y1, box.x2, box.y2));
 
-		tmp.box(sna, &tmp, &box);
-	} while (--n);
-	tmp.done(sna, &tmp);
+		if (!sna->render.composite(sna,
+					   PictOpSrc, src, NULL, dst,
+					   sx + box.x1, sy + box.y1,
+					   0, 0,
+					   box.x1, box.y1,
+					   box.x2 - box.x1, box.y2 - box.y1,
+					   0, memset(&tmp, 0, sizeof(tmp)))) {
+			DBG(("%s: unsupported operation!\n", __FUNCTION__));
+			sna_crtc_redisplay__fallback(crtc, region, bo);
+			break;
+		} else {
+			tmp.box(sna, &tmp, &box);
+			tmp.done(sna, &tmp);
+		}
+	} while (b++, --n);
 
-free_dst:
 	FreePicture(dst, None);
 free_src:
 	FreePicture(src, None);

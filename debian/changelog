@@ -1,3 +1,9 @@
+xserver-xorg-video-intel (2:2.99.917+git20160218-1) unstable; urgency=medium
+
+  * New upstream snapshot.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Fri, 19 Feb 2016 00:06:43 +0200
+
 xserver-xorg-video-intel (2:2.99.917+git20160127-1ubuntu1) xenial; urgency=medium
 
   * Merge from debian.
