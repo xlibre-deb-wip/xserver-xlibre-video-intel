@@ -86,6 +86,7 @@ search_snoop_cache(struct kgem *kgem, unsigned int num_pages, unsigned flags);
 #define DBG_NO_WC_MMAP 0
 #define DBG_NO_BLT_Y 0
 #define DBG_NO_SCANOUT_Y 0
+#define DBG_NO_DIRTYFB 0
 #define DBG_NO_DETILING 0
 #define DBG_DUMP 0
 #define DBG_NO_MALLOC_CACHE 0
@@ -1499,6 +1500,47 @@ static bool test_can_scanout_y(struct kgem *kgem)
 	return ret;
 }
 
+static bool test_has_dirtyfb(struct kgem *kgem)
+{
+	struct drm_mode_fb_cmd create;
+	bool ret = false;
+
+	if (DBG_NO_DIRTYFB)
+		return false;
+
+	VG_CLEAR(create);
+	create.width = 32;
+	create.height = 32;
+	create.pitch = 4*32;
+	create.bpp = 32;
+	create.depth = 32;
+	create.handle = gem_create(kgem->fd, 1);
+	if (create.handle == 0)
+		return false;
+
+	if (drmIoctl(kgem->fd, DRM_IOCTL_MODE_ADDFB, &create) == 0) {
+		struct drm_mode_fb_dirty_cmd dirty;
+
+		memset(&dirty, 0, sizeof(dirty));
+		dirty.fb_id = create.fb_id;
+		ret = drmIoctl(kgem->fd,
+			       DRM_IOCTL_MODE_DIRTYFB,
+			       &dirty) == 0;
+
+		/* XXX There may be multiple levels of DIRTYFB, depending on
+		 * whether the kernel thinks tracking dirty regions is
+		 * beneficial vs flagging the whole fb as dirty.
+		 */
+
+		drmIoctl(kgem->fd,
+			 DRM_IOCTL_MODE_RMFB,
+			 &create.fb_id);
+	}
+	gem_close(kgem->fd, create.handle);
+
+	return ret;
+}
+
 static bool test_has_secure_batches(struct kgem *kgem)
 {
 	if (DBG_NO_SECURE_BATCHES)
@@ -1980,6 +2022,9 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 	kgem->can_scanout_y = test_can_scanout_y(kgem);
 	DBG(("%s: can scanout Y-tiled surfaces? %d\n", __FUNCTION__,
 	     kgem->can_scanout_y));
+
+	kgem->has_dirtyfb = test_has_dirtyfb(kgem);
+	DBG(("%s: has dirty fb? %d\n", __FUNCTION__, kgem->has_dirtyfb));
 
 	kgem->has_secure_batches = test_has_secure_batches(kgem);
 	DBG(("%s: can use privileged batchbuffers? %d\n", __FUNCTION__,
@@ -2910,6 +2955,7 @@ static void __kgem_bo_destroy(struct kgem *kgem, struct kgem_bo *bo)
 	DBG(("%s: handle=%d, size=%d\n", __FUNCTION__, bo->handle, bytes(bo)));
 
 	assert(list_is_empty(&bo->list));
+	assert(list_is_empty(&bo->vma));
 	assert(bo->refcnt == 0);
 	assert(bo->proxy == NULL);
 	assert(bo->active_scanout == 0);
@@ -4791,8 +4837,9 @@ struct kgem_bo *kgem_create_for_name(struct kgem *kgem, uint32_t name)
 
 	bo->unique_id = kgem_get_unique_id(kgem);
 	bo->tiling = tiling.tiling_mode;
-	bo->reusable = false;
 	bo->prime = true;
+	bo->reusable = false;
+	kgem_bo_unclean(kgem, bo);
 
 	debug_alloc__bo(kgem, bo);
 	return bo;
@@ -6088,7 +6135,7 @@ static void __kgem_flush(struct kgem *kgem, struct kgem_bo *bo)
 
 void kgem_scanout_flush(struct kgem *kgem, struct kgem_bo *bo)
 {
-	if (!bo->needs_flush)
+	if (!bo->needs_flush && !bo->gtt_dirty)
 		return;
 
 	kgem_bo_submit(kgem, bo);
@@ -6100,6 +6147,13 @@ void kgem_scanout_flush(struct kgem *kgem, struct kgem_bo *bo)
 	assert(bo->exec == NULL);
 	if (bo->rq)
 		__kgem_flush(kgem, bo);
+
+	if (bo->scanout && kgem->needs_dirtyfb) {
+		struct drm_mode_fb_dirty_cmd cmd;
+		memset(&cmd, 0, sizeof(cmd));
+		cmd.fb_id = bo->delta;
+		(void)drmIoctl(kgem->fd, DRM_IOCTL_MODE_DIRTYFB, &cmd);
+	}
 
 	/* Whatever actually happens, we can regard the GTT write domain
 	 * as being flushed.
@@ -6914,7 +6968,6 @@ uint32_t kgem_bo_flink(struct kgem *kgem, struct kgem_bo *bo)
 	 * party, we track the lifetime accurately.
 	 */
 	bo->reusable = false;
-
 	kgem_bo_unclean(kgem, bo);
 
 	return flink.name;
@@ -7003,9 +7056,6 @@ void kgem_bo_sync__cpu(struct kgem *kgem, struct kgem_bo *bo)
 	assert(!bo->scanout);
 	assert_tiling(kgem, bo);
 
-	if (bo->rq == NULL && (kgem->has_llc || bo->snoop))
-		return;
-
 	kgem_bo_submit(kgem, bo);
 
 	/* SHM pixmaps use proxies for subpage offsets */
@@ -7043,9 +7093,6 @@ void kgem_bo_sync__cpu_full(struct kgem *kgem, struct kgem_bo *bo, bool write)
 	assert(!bo->scanout || !write);
 	assert_tiling(kgem, bo);
 
-	if (bo->rq == NULL && (kgem->has_llc || bo->snoop))
-		return;
-
 	if (write || bo->needs_flush)
 		kgem_bo_submit(kgem, bo);
 
@@ -7056,6 +7103,9 @@ void kgem_bo_sync__cpu_full(struct kgem *kgem, struct kgem_bo *bo, bool write)
 		bo = bo->proxy;
 	assert(bo->refcnt);
 	assert(!bo->purged);
+
+	if (bo->rq == NULL && (kgem->has_llc || bo->snoop) && !write)
+		return;
 
 	if (bo->domain != DOMAIN_CPU || FORCE_MMAP_SYNC & (1 << DOMAIN_CPU)) {
 		struct drm_i915_gem_set_domain set_domain;
@@ -7092,9 +7142,7 @@ void kgem_bo_sync__gtt(struct kgem *kgem, struct kgem_bo *bo)
 	assert(bo->refcnt);
 	assert(bo->proxy == NULL);
 	assert_tiling(kgem, bo);
-
-	if (bo->rq == NULL)
-		return;
+	assert(!bo->snoop);
 
 	kgem_bo_submit(kgem, bo);
 
