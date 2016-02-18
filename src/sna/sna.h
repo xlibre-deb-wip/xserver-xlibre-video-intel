@@ -181,18 +181,31 @@ static inline WindowPtr get_root_window(ScreenPtr screen)
 #endif
 }
 
+#if !NDEBUG
+static PixmapPtr check_pixmap(PixmapPtr pixmap)
+{
+	if (pixmap != NULL) {
+		assert(pixmap->refcnt >= 1);
+		assert(pixmap->devKind != 0xdeadbeef);
+	}
+	return pixmap;
+}
+#else
+#define check_pixmap(p) p
+#endif
+
 static inline PixmapPtr get_window_pixmap(WindowPtr window)
 {
 	assert(window);
 	assert(window->drawable.type != DRAWABLE_PIXMAP);
-	return fbGetWindowPixmap(window);
+	return check_pixmap(fbGetWindowPixmap(window));
 }
 
 static inline PixmapPtr get_drawable_pixmap(DrawablePtr drawable)
 {
 	assert(drawable);
 	if (drawable->type == DRAWABLE_PIXMAP)
-		return (PixmapPtr)drawable;
+		return check_pixmap((PixmapPtr)drawable);
 	else
 		return get_window_pixmap((WindowPtr)drawable);
 }
@@ -291,6 +304,7 @@ struct sna {
 		unsigned flip_active;
 		unsigned hidden;
 		bool shadow_enabled;
+		bool shadow_wait;
 		bool dirty;
 
 		int max_crtc_width, max_crtc_height;
@@ -429,7 +443,7 @@ bool sna_mode_pre_init(ScrnInfoPtr scrn, struct sna *sna);
 bool sna_mode_fake_init(struct sna *sna, int num_fake);
 bool sna_mode_wants_tear_free(struct sna *sna);
 void sna_mode_adjust_frame(struct sna *sna, int x, int y);
-extern void sna_mode_discover(struct sna *sna);
+extern void sna_mode_discover(struct sna *sna, bool tell);
 extern void sna_mode_check(struct sna *sna);
 extern bool sna_mode_disable(struct sna *sna);
 extern void sna_mode_enable(struct sna *sna);

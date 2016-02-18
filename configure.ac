@@ -212,6 +212,7 @@ fi
 
 PKG_CHECK_MODULES(X11, [x11 x11-xcb xcb-dri2 xcomposite xdamage xrender xrandr xext xfixes cairo cairo-xlib-xrender pixman-1 libpng], [x11="yes"], [x11="no"])
 AM_CONDITIONAL(HAVE_X11, test "x$x11" = "xyes")
+echo X11_CLFAGS="$X11_CLFAGS" X11_LIBS="$X11_LIBS"
 
 cpuid="yes"
 AC_TRY_LINK([
@@ -290,7 +291,7 @@ if test "x$shm" != "xyes"; then
 	tools="no"
 fi
 if test "x$tools" != "xno"; then
-	ivo_requires="xrandr xdamage xfixes xcursor xtst xrender xext x11 pixman-1"
+	ivo_requires="xrandr xdamage xfixes xcursor xtst xrender xscrnsaver xext x11 pixman-1"
 	extra_cflags=""
 
 	ignore="xinerama"
@@ -864,6 +865,7 @@ AC_CONFIG_FILES([
                 xvmc/shader/mc/Makefile
                 xvmc/shader/vld/Makefile
 		test/Makefile
+		benchmarks/Makefile
 		tools/Makefile
 		tools/org.x.xf86-video-intel.backlight-helper.policy
 ])

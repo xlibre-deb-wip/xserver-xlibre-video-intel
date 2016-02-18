@@ -878,7 +878,11 @@ __pop_freed_pixmap(struct sna *sna)
 	pixmap = sna->freed_pixmap;
 	sna->freed_pixmap = pixmap->devPrivate.ptr;
 
+	DBG(("%s: reusing freed pixmap=%ld header\n",
+	     __FUNCTION__, pixmap->drawable.serialNumber));
+
 	assert(pixmap->refcnt == 0);
+	assert(pixmap->devKind = 0xdeadbeef);
 	assert(sna_pixmap(pixmap));
 	assert(sna_pixmap(pixmap)->header);
 
@@ -1083,8 +1087,12 @@ sna_pixmap_create_scratch(ScreenPtr screen,
 
 static unsigned small_copy(const RegionRec *region)
 {
-	if ((region->extents.x2 - region->extents.x1)*(region->extents.y2 - region->extents.y1) < 1024)
+	if ((region->extents.x2 - region->extents.x1)*(region->extents.y2 - region->extents.y1) < 1024) {
+		DBG(("%s: region:%dx%d\n", __FUNCTION__,
+		     (region->extents.x2 - region->extents.x1),
+		     (region->extents.y2 - region->extents.y1)));
 		return COPY_SMALL;
+	}
 
 	return 0;
 }
@@ -1427,6 +1435,9 @@ static void __sna_free_pixmap(struct sna *sna,
 	if (priv->flush)
 		sna_accel_watch_flush(sna, -1);
 
+#if !NDEBUG
+	pixmap->devKind = 0xdeadbeef;
+#endif
 	if (priv->header) {
 		assert(pixmap->drawable.pScreen == to_screen_from_sna(sna));
 		assert(!priv->shm);
@@ -1537,7 +1548,7 @@ static inline bool has_coherent_ptr(struct sna *sna, struct sna_pixmap *priv, un
 		if (!priv->cpu_bo)
 			return true;
 
-		assert(!priv->cpu_bo->needs_flush);
+		assert(!priv->cpu_bo->needs_flush || (flags & MOVE_WRITE) == 0);
 		assert(priv->pixmap->devKind == priv->cpu_bo->pitch);
 		return priv->pixmap->devPrivate.ptr == MAP(priv->cpu_bo->map__cpu);
 	}
@@ -6438,6 +6449,16 @@ sna_copy_boxes(DrawablePtr src, DrawablePtr dst, GCPtr gc,
 
 	assert(region_num_rects(region));
 
+	if (src_priv &&
+	    src_priv->gpu_bo == NULL &&
+	    src_priv->cpu_bo == NULL &&
+	    src_priv->ptr == NULL) {
+		/* Rare but still happens, nothing to copy */
+		DBG(("%s: src pixmap=%ld is empty\n",
+		     __FUNCTION__, src_pixmap->drawable.serialNumber));
+		return;
+	}
+
 	if (src_pixmap == dst_pixmap)
 		return sna_self_copy_boxes(src, dst, gc,
 					   region, dx, dy,
@@ -7237,19 +7258,25 @@ sna_copy_area(DrawablePtr src, DrawablePtr dst, GCPtr gc,
 	if (sna->ignore_copy_area)
 		return NULL;
 
-	DBG(("%s: src=(%d, %d)x(%d, %d)+(%d, %d) -> dst=(%d, %d)+(%d, %d); alu=%d, pm=%lx, depth=%d\n",
+	DBG(("%s: src=pixmap=%ld:(%d, %d)x(%d, %d)+(%d, %d) -> dst=pixmap=%ld:(%d, %d)+(%d, %d); alu=%d, pm=%lx, depth=%d\n",
 	     __FUNCTION__,
+	     get_drawable_pixmap(src)->drawable.serialNumber,
 	     src_x, src_y, width, height, src->x, src->y,
+	     get_drawable_pixmap(dst)->drawable.serialNumber,
 	     dst_x, dst_y, dst->x, dst->y,
 	     gc->alu, gc->planemask, gc->depth));
 
 	if (FORCE_FALLBACK || !ACCEL_COPY_AREA || wedged(sna) ||
-	    !PM_IS_SOLID(dst, gc->planemask) || gc->depth < 8)
+	    !PM_IS_SOLID(dst, gc->planemask) || gc->depth < 8) {
+		DBG(("%s: fallback copy\n", __FUNCTION__));
 		copy = sna_fallback_copy_boxes;
-	else if (src == dst)
+	} else if (src == dst) {
+		DBG(("%s: self copy\n", __FUNCTION__));
 		copy = sna_self_copy_boxes;
-	else
+	} else {
+		DBG(("%s: normal copy\n", __FUNCTION__));
 		copy = sna_copy_boxes;
+	}
 
 	return sna_do_copy(src, dst, gc,
 			   src_x, src_y,
@@ -8336,6 +8363,8 @@ sna_copy_bitmap_blt(DrawablePtr _bitmap, DrawablePtr drawable, GCPtr gc,
 	}
 	br13 |= blt_depth(drawable->depth) << 24;
 	br13 |= copy_ROP[gc->alu] << 16;
+	DBG(("%s: target-depth=%d, alu=%d, bg=%08x, fg=%08x\n",
+	     __FUNCTION__, drawable->depth, gc->alu, gc->bgPixel, gc->fgPixel));
 
 	kgem_set_mode(&sna->kgem, KGEM_BLT, arg->bo);
 	assert(kgem_bo_can_blt(&sna->kgem, arg->bo));
@@ -8384,8 +8413,8 @@ sna_copy_bitmap_blt(DrawablePtr _bitmap, DrawablePtr drawable, GCPtr gc,
 							 I915_GEM_DOMAIN_RENDER |
 							 KGEM_RELOC_FENCED,
 							 0);
-				b[5] = gc->bgPixel;
-				b[6] = gc->fgPixel;
+				b[6] = gc->bgPixel;
+				b[7] = gc->fgPixel;
 
 				dst = (uint8_t *)&b[8];
 				sna->kgem.nbatch += 8 + src_stride;
@@ -17392,10 +17421,13 @@ static bool has_offload_slaves(struct sna *sna)
 
 static bool has_shadow(struct sna *sna)
 {
-	DamagePtr damage = sna->mode.shadow_damage;
+	DamagePtr damage;
 
-	if (damage == NULL)
+	if (!sna->mode.shadow_enabled)
 		return false;
+
+	damage = sna->mode.shadow_damage;
+	assert(damage);
 
 	DBG(("%s: has pending damage? %d, outstanding flips: %d\n",
 	     __FUNCTION__,
@@ -17854,6 +17886,7 @@ sna_set_screen_pixmap(PixmapPtr pixmap)
 static Bool
 sna_create_window(WindowPtr win)
 {
+	DBG(("%s: window=%ld\n", __FUNCTION__, win->drawable.id));
 	sna_set_window_pixmap(win, win->drawable.pScreen->devPrivate);
 	return TRUE;
 }
@@ -17879,6 +17912,7 @@ sna_unmap_window(WindowPtr win)
 static Bool
 sna_destroy_window(WindowPtr win)
 {
+	DBG(("%s: window=%ld\n", __FUNCTION__, win->drawable.id));
 	sna_video_destroy_window(win);
 	sna_dri2_destroy_window(win);
 	return TRUE;
@@ -17955,7 +17989,7 @@ static bool sna_option_accel_none(struct sna *sna)
 	if (wedged(sna))
 		return true;
 
-	if (xf86ReturnOptValBool(sna->Options, OPTION_ACCEL_DISABLE, FALSE))
+	if (!xf86ReturnOptValBool(sna->Options, OPTION_ACCEL_ENABLE, TRUE))
 		return true;
 
 	if (sna->kgem.gen >= 0120)

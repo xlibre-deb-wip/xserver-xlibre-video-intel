@@ -1,3 +1,103 @@
+xserver-xorg-video-intel (2:2.99.917+git20160218-1ubuntu1) xenial; urgency=medium
+
+  * Merge from Debian.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Fri, 19 Feb 2016 00:18:14 +0200
+
+xserver-xorg-video-intel (2:2.99.917+git20160218-1) unstable; urgency=medium
+
+  * New upstream snapshot.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Fri, 19 Feb 2016 00:06:43 +0200
+
+xserver-xorg-video-intel (2:2.99.917+git20160127-1ubuntu1) xenial; urgency=medium
+
+  * Merge from debian.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Tue, 02 Feb 2016 18:39:09 +0200
+
+xserver-xorg-video-intel (2:2.99.917+git20160127-1) unstable; urgency=medium
+
+  * New upstream snapshot.
+  * control: Document build-depends for dri3info and tests, benchmarks.
+  * control: Update description to mention that this driver is
+    deprecated in favor of -modesetting.
+  * rules: Use upstream-unstable branch to build a snapshot tarball.
+  * control: Add libxss-dev to build-depends for intel-virtual-output.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Wed, 27 Jan 2016 14:56:38 +0200
+
+xserver-xorg-video-intel (2:2.99.917+git20151217-1~exp1ubuntu1) xenial; urgency=medium
+
+  * Merge from debian.
+  * Refresh revert-dpms-fix.patch.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Thu, 17 Dec 2015 15:43:05 +0200
+
+xserver-xorg-video-intel (2:2.99.917+git20151217-1~exp1) experimental; urgency=medium
+
+  * New upstream snapshot.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Thu, 17 Dec 2015 15:10:01 +0200
+
+xserver-xorg-video-intel (2:2.99.917+git20151019-1~exp1ubuntu1) xenial; urgency=medium
+
+  * Merge from Debian experimental.
+  * Drop sna-check-for-system-memory-contents.diff, randr.patch. Upstream.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Wed, 28 Oct 2015 07:50:57 +0200
+
+xserver-xorg-video-intel (2:2.99.917+git20151019-1~exp1) experimental; urgency=medium
+
+  * New upstream snapshot.
+  * rules: Fix valgrind-enabling check.
+  * README.source: Mention that dpkg-source complains about symlinks
+    which are real files on the tarball, and add a command to clean
+    those before source build (copied from libdrm).
+  * patches: Dropped, all upstream.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Tue, 27 Oct 2015 19:07:45 +0200
+
+xserver-xorg-video-intel (2:2.99.917+git20150808-0ubuntu4) wily; urgency=medium
+
+  * debian/patches/randr.patch:
+    - Combine upstream RandR changes to fix hotplug events not working
+      (LP: #1505695)
+
+ -- Robert Ancell <robert.ancell@canonical.com>  Wed, 14 Oct 2015 14:59:19 +0100
+
+xserver-xorg-video-intel (2:2.99.917+git20150808-0ubuntu3) wily; urgency=medium
+
+  * debian/patches/revert-dpms-fix.patch:
+    - Revert a DPMS change that causes the screen to turn off when returning
+      from a greeter (LP: #1501941)
+
+ -- Robert Ancell <robert.ancell@canonical.com>  Tue, 06 Oct 2015 14:25:00 +1300
+
+xserver-xorg-video-intel (2:2.99.917+git20150808-0ubuntu2) wily; urgency=medium
+
+  * Rebuild for libxcb-util.
+  * libxcb-util0-dev -> libxcb-util-dev.
+
+ -- Matthias Klose <doko@ubuntu.com>  Tue, 01 Sep 2015 13:12:05 +0200
+
+xserver-xorg-video-intel (2:2.99.917+git20150808-0ubuntu1) wily; urgency=medium
+
+  [ Robert Hooker ]
+  * Merge from debian-experimental
+    - debian/patches/fix-sna-external-slave-rotation.patch
+      debian/patches/fix-sna-fstat-include.patch
+      debian/patches/fix-uxa-fstat-include.patch
+      debian/patches/fix-yuv-to-rgb-shared-on-intel-gen8.patch
+      debian/patches/sna-force-frontbuffer-to-cpu-for-randr-fallback.diff
+      Drop all upstream patches.
+
+  [ Timo Aaltonen ]
+  * sna-check-for-system-memory-contents.diff: Fix corruption on
+    lightdm, while logging in and blank background on unity.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Thu, 20 Aug 2015 14:14:34 +0300
+
 xserver-xorg-video-intel (2:2.99.917+git20150618-1~exp1ubuntu1) UNRELEASED; urgency=medium
 
   * Merge from debian-experimental git.
@@ -5,55 +105,49 @@ xserver-xorg-video-intel (2:2.99.917+git20150618-1~exp1ubuntu1) UNRELEASED; urge
 
  -- Timo Aaltonen <tjaalton@debian.org>  Thu, 18 Jun 2015 15:49:36 +0300
 
-xserver-xorg-video-intel (2:2.99.917+git20150618-1~exp1) UNRELEASED; urgency=medium
+xserver-xorg-video-intel (2:2.99.917-2) unstable; urgency=medium
 
-  * New snapshot.
+  [ Robert Ancell ]
+  * debian/patches/fix-sna-fstat-include.patch:
+  * debian/patches/fix-uxa-fstat-include.patch:
+    - Fix missing include for fstat (Closes: #790911)
+
+  [ Alessio Treglia ]
+  * fix-yuv-to-rgb-shared-on-intel-gen8.patch: Fix faulty yuv2rgb translation
+    on Intel Generation 8 Graphics. (LP: #1449892, Closes: #787142)
+
+  [ Timo Aaltonen ]
   * rules: Fix valgrind-enabling check.
+  * source: Add extend-diff-ignore to not complain about symlinks.
   * README.source: Mention that dpkg-source complains about symlinks
     which are real files on the tarball, and add a command to clean
     those before source build (copied from libdrm).
 
- -- Timo Aaltonen <tjaalton@debian.org>  Tue, 13 Jan 2015 12:34:17 +0200
+  [ Adam Borowski ]
+  * Add x32 to the list of architectures. (Closes: #775200)
 
-xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu3) wily; urgency=medium
+  [ Vincent Cheng ]
+  * Explicitly declare source format 1.0.
+  * Update valgrind build-dependency architecture list.
 
-  * debian/patches/xmir.patch:
-    - Drop XMir patch, we don't need it with new glamor based XMir (LP: #1462994)
+ -- Vincent Cheng <vcheng@debian.org>  Thu, 16 Jul 2015 01:00:41 -0700
+
+xserver-xorg-video-intel (2:2.99.917-1ubuntu1) wily; urgency=medium
+
+  * Merge with Debian, remaining Ubuntu changes:
+  * debian/rules:
+    - Fix valgrind-enabling check (DEB_HOST_ARCH_OS instead of DEB_HOST_ARCH)
+    - Use SNA by default.
+    - Fix rotating external display with optimus results in corruption.
   * debian/patches/fix-sna-fstat-include.patch:
   * debian/patches/fix-uxa-fstat-include.patch:
     - Fix missing include for fstat
+  * debian/patches/fix-yuv-to-rgb-shared-on-intel-gen8.patch:
+    - Fix faulty yuv2rgb translation on Intel Generation 8 Graphics.
+  * debian/patches/sna-force-frontbuffer-to-cpu-for-randr-fallback.diff:
+    - Fix rotation on SKL.
 
- -- Robert Ancell <robert.ancell@canonical.com>  Tue, 09 Jun 2015 15:17:18 +1200
-
-xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu2.2) vivid-proposed; urgency=medium
-
-  * fix-yuv-to-rgb-shared-on-intel-gen8.patch: Fix faulty yuv2rgb translation
-    on Intel Generation 8 Graphics. (LP: #1449892)
-
- -- Alessio Treglia <quadrispro@ubuntu.com>  Fri, 29 May 2015 11:46:27 +0100
-
-xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu2.1) vivid; urgency=medium
-
-  * sna-force-frontbuffer-to-cpu-for-randr-fallback.diff: Fix rotation
-    on SKL. (LP: #1447143)
-  * source: Add extend-diff-ignore to not complain about symlinks.
-
- -- Timo Aaltonen <tjaalton@debian.org>  Wed, 22 Apr 2015 19:48:22 +0300
-
-xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu2) vivid; urgency=medium
-
-  * Fix rotating external display with optimus results in corruption.
-    - fix-sna-external-slave-rotation.patch (LP: #1410238)
-
- -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Tue, 13 Jan 2015 15:16:03 +0100
-
-xserver-xorg-video-intel (2:2.99.917-1~exp1ubuntu1) vivid; urgency=medium
-
-  * Merge from Debian experimental.
-  * Drop dri3-flush-broken.patch, upstream
-  * Refresh xmir patch.
-
- -- Timo Aaltonen <tjaalton@debian.org>  Tue, 13 Jan 2015 12:39:09 +0200
+ -- Robert Ancell <robert.ancell@canonical.com>  Tue, 14 Jul 2015 15:21:57 +1200
 
 xserver-xorg-video-intel (2:2.99.917-1) unstable; urgency=medium
 

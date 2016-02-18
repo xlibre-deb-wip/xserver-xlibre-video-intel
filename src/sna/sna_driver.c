@@ -461,13 +461,13 @@ static bool enable_tear_free(struct sna *sna)
 	return ENABLE_TEAR_FREE;
 }
 
-static void setup_tear_free(struct sna *sna)
+static bool setup_tear_free(struct sna *sna)
 {
 	MessageType from;
 	Bool enable;
 
 	if (sna->flags & SNA_LINEAR_FB)
-		return;
+		return false;
 
 	if ((sna->flags & SNA_HAS_FLIP) == 0) {
 		from = X_PROBED;
@@ -486,6 +486,7 @@ static void setup_tear_free(struct sna *sna)
 done:
 	xf86DrvMsg(sna->scrn->scrnIndex, from, "TearFree %sabled\n",
 		   sna->flags & SNA_TEAR_FREE ? "en" : "dis");
+	return sna->flags & SNA_TEAR_FREE;
 }
 
 /**
@@ -653,7 +654,8 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int probe)
 	}
 	scrn->currentMode = scrn->modes;
 
-	setup_tear_free(sna);
+	if (!setup_tear_free(sna) && sna_mode_wants_tear_free(sna))
+		sna->kgem.needs_dirtyfb = sna->kgem.has_dirtyfb;
 
 	xf86SetGamma(scrn, zeros);
 	xf86SetDpi(scrn, 0, 0);
@@ -681,9 +683,10 @@ cleanup:
 
 static bool has_shadow(struct sna *sna)
 {
-	if (!sna->mode.shadow_damage)
+	if (!sna->mode.shadow_enabled)
 		return false;
 
+	assert(sna->mode.shadow_damage);
 	if (RegionNil(DamageRegion(sna->mode.shadow_damage)))
 		return false;
 
@@ -742,37 +745,47 @@ static void
 sna_handle_uevents(int fd, void *closure)
 {
 	struct sna *sna = closure;
-	struct udev_device *dev;
-	const char *str;
 	struct stat s;
-	dev_t udev_devnum;
+	struct pollfd pfd;
+	bool hotplug = false;
 
 	DBG(("%s\n", __FUNCTION__));
 
-	dev = udev_monitor_receive_device(sna->uevent_monitor);
-	if (!dev)
-		return;
+	pfd.fd = udev_monitor_get_fd(sna->uevent_monitor);
+	pfd.events = POLLIN;
 
-	udev_devnum = udev_device_get_devnum(dev);
-	if (fstat(sna->kgem.fd, &s) || memcmp(&s.st_rdev, &udev_devnum, sizeof (dev_t))) {
+	if (fstat(sna->kgem.fd, &s))
+		memset(&s, 0, sizeof(s));
+
+	while (poll(&pfd, 1, 0) > 0) {
+		struct udev_device *dev;
+		dev_t devnum;
+
+		dev = udev_monitor_receive_device(sna->uevent_monitor);
+		if (dev == NULL)
+			break;
+
+		devnum = udev_device_get_devnum(dev);
+		if (memcmp(&s.st_rdev, &devnum, sizeof(dev_t)) == 0) {
+			const char *str;
+
+			str = udev_device_get_property_value(dev, "HOTPLUG");
+			if (str && atoi(str) == 1)
+				hotplug = true;
+		}
+
 		udev_device_unref(dev);
-		return;
 	}
 
-	str = udev_device_get_property_value(dev, "HOTPLUG");
-	if (str && atoi(str) == 1) {
-		ScrnInfoPtr scrn = sna->scrn;
+	if (hotplug) {
+		DBG(("%s: hotplug event (vtSema?=%d)\n",
+		     __FUNCTION__, sna->scrn->vtSema));
 
-		DBG(("%s: hotplug event (vtSema?=%d)\n", __FUNCTION__, scrn->vtSema));
-
-		if (scrn->vtSema) {
-			sna_mode_discover(sna);
-			sna_mode_check(sna);
-		} else
+		if (sna->scrn->vtSema)
+			sna_mode_discover(sna, true);
+		else
 			sna->flags |= SNA_REPROBE;
 	}
-
-	udev_device_unref(dev);
 }
 
 static bool has_randr(void)
@@ -841,17 +854,10 @@ err_dev:
 
 static bool sna_uevent_poll(struct sna *sna)
 {
-	struct pollfd pfd;
-
 	if (sna->uevent_monitor == NULL)
 		return false;
 
-	pfd.fd = udev_monitor_get_fd(sna->uevent_monitor);
-	pfd.events = POLLIN;
-
-	while (poll(&pfd, 1, 0) > 0)
-		sna_handle_uevents(pfd.fd, sna);
-
+	sna_handle_uevents(udev_monitor_get_fd(sna->uevent_monitor), sna);
 	return true;
 }
 
@@ -885,8 +891,10 @@ sna_randr_getinfo(ScreenPtr screen, Rotation *rotations)
 {
 	struct sna *sna = to_sna_from_screen(screen);
 
+	DBG(("%s()\n", __FUNCTION__));
+
 	if (!sna_uevent_poll(sna))
-		sna_mode_discover(sna);
+		sna_mode_discover(sna, false);
 
 	return sna->mode.rrGetInfo(screen, rotations);
 }
@@ -898,8 +906,8 @@ static void sna_leave_vt(VT_FUNC_ARGS_DECL)
 
 	DBG(("%s\n", __FUNCTION__));
 
-	sna_accel_leave(sna);
 	sna_mode_reset(sna);
+	sna_accel_leave(sna);
 
 	if (intel_put_master(sna->dev))
 		xf86DrvMsg(scrn->scrnIndex, X_WARNING,
@@ -1215,8 +1223,7 @@ static Bool sna_enter_vt(VT_FUNC_ARGS_DECL)
 
 	if (sna->flags & SNA_REPROBE) {
 		DBG(("%s: reporting deferred hotplug event\n", __FUNCTION__));
-		sna_mode_discover(sna);
-		sna->flags &= ~SNA_REPROBE;
+		sna_mode_discover(sna, true);
 	}
 
 	sna_set_desired_mode(sna);
