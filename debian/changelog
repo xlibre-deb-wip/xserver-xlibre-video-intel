@@ -1,8 +1,15 @@
-xserver-xorg-video-intel (2:2.99.917+git20160218-1ubuntu2) xenial; urgency=medium
+xserver-xorg-video-intel (2:2.99.917+git20160218-1ubuntu3) xenial; urgency=medium
 
   * Rebuild against new xserver.
 
- -- Timo Aaltonen <tjaalton@debian.org>  Fri, 19 Feb 2016 00:28:08 +0200
+ -- Timo Aaltonen <tjaalton@debian.org>  Thu, 03 Mar 2016 16:21:42 +0200
+
+xserver-xorg-video-intel (2:2.99.917+git20160218-1ubuntu2) xenial; urgency=medium
+
+  * Move the shared libraries into the multiarch libdir.
+  * Enable parallel builds.
+
+ -- Matthias Klose <doko@ubuntu.com>  Fri, 26 Feb 2016 16:24:05 +0100
 
 xserver-xorg-video-intel (2:2.99.917+git20160218-1ubuntu1) xenial; urgency=medium
 
@@ -103,13 +110,6 @@ xserver-xorg-video-intel (2:2.99.917+git20150808-0ubuntu1) wily; urgency=medium
     lightdm, while logging in and blank background on unity.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Thu, 20 Aug 2015 14:14:34 +0300
-
-xserver-xorg-video-intel (2:2.99.917+git20150618-1~exp1ubuntu1) UNRELEASED; urgency=medium
-
-  * Merge from debian-experimental git.
-  * Drop patches, all upstream.
-
- -- Timo Aaltonen <tjaalton@debian.org>  Thu, 18 Jun 2015 15:49:36 +0300
 
 xserver-xorg-video-intel (2:2.99.917-2) unstable; urgency=medium
 
