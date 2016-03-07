@@ -1,3 +1,11 @@
+xserver-xorg-video-intel (2:2.99.917+git20160307-1) UNRELEASED; urgency=medium
+
+  * New upstream snapshot.
+  * control: Update the description, older hw likely still wants this
+    driver.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Mon, 07 Mar 2016 15:20:56 +0200
+
 xserver-xorg-video-intel (2:2.99.917+git20160218-1) unstable; urgency=medium
 
   * New upstream snapshot.
