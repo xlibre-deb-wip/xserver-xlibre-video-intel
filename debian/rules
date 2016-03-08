@@ -51,7 +51,7 @@ override_dh_installchangelogs:
 	dh_installchangelogs debian/upstream.changelog
 
 %:
-	dh $@ --with quilt,autoreconf,xsf --builddirectory=build/
+	dh $@ --parallel --with quilt,autoreconf,xsf --builddirectory=build/
 
 # Snapshots should only target experimental:
 generate-snapshot: UPSTREAM_VERSION = $(shell echo $(SOURCE_VERSION) | sed 's/^[0-9]*://;s/-.*$$//')
