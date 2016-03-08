@@ -76,8 +76,9 @@ Description: X.Org X server -- Intel i8xx, i9xx display driver
  .
  This package is built from the X.org xf86-video-intel driver module.
  .
- This driver is deprecated in favor of the server builtin modesetting
- driver.
+ The use of this driver is discouraged if your hw is new enough (ca.
+ 2007 and newer). You can try uninstalling this driver and let the
+ server use it's builtin modesetting driver instead.
 
 Package: xserver-xorg-video-intel-dbg
 Architecture: amd64 i386 kfreebsd-amd64 kfreebsd-i386 x32

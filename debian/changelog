@@ -1,3 +1,18 @@
+xserver-xorg-video-intel (2:2.99.917+git20160307-1) unstable; urgency=medium
+
+  [ Timo Aaltonen ]
+  * New upstream snapshot.
+  * control: Update the description, older hw likely still wants this
+    driver.
+  * sna-let-modesetting-handle-gen9+.diff: Use modesetting+glamor on
+    Skylake and up.
+
+  [ Matthias Klose ]
+  * Move the shared libraries into multiarch libdir.
+  * rules: Enable parallel builds.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Tue, 08 Mar 2016 15:26:40 +0200
+
 xserver-xorg-video-intel (2:2.99.917+git20160218-1ubuntu3) xenial; urgency=medium
 
   * Rebuild against new xserver.
