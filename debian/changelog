@@ -1,4 +1,4 @@
-xserver-xorg-video-intel (2:2.99.917+git20160307-1) UNRELEASED; urgency=medium
+xserver-xorg-video-intel (2:2.99.917+git20160307-1) unstable; urgency=medium
 
   [ Timo Aaltonen ]
   * New upstream snapshot.
@@ -11,7 +11,7 @@ xserver-xorg-video-intel (2:2.99.917+git20160307-1) UNRELEASED; urgency=medium
   * Move the shared libraries into multiarch libdir.
   * rules: Enable parallel builds.
 
- -- Timo Aaltonen <tjaalton@debian.org>  Mon, 07 Mar 2016 15:20:56 +0200
+ -- Timo Aaltonen <tjaalton@debian.org>  Wed, 09 Mar 2016 21:26:17 +0200
 
 xserver-xorg-video-intel (2:2.99.917+git20160218-1) unstable; urgency=medium
 
