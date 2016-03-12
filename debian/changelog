@@ -1,3 +1,9 @@
+xserver-xorg-video-intel (2:2.99.917+git20160307-2ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge from Debian.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Sat, 12 Mar 2016 12:04:17 +0200
+
 xserver-xorg-video-intel (2:2.99.917+git20160307-2) unstable; urgency=medium
 
   * Disable the patch to use modesetting on skylake for now, since it reveals
