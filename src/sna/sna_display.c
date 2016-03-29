@@ -479,14 +479,14 @@ uint64_t sna_crtc_record_swap(xf86CrtcPtr crtc,
 	assert(sna_crtc);
 
 	if (msc64(sna_crtc, seq, &msc)) {
-		DBG(("%s: recording last swap on pipe=%d, frame %d [%08llx], time %d.%06d\n",
+		DBG(("%s: recording last swap on pipe=%d, frame %d [msc=%08lld], time %d.%06d\n",
 		     __FUNCTION__, __sna_crtc_pipe(sna_crtc), seq, (long long)msc,
 		     tv_sec, tv_usec));
 		sna_crtc->swap.tv_sec = tv_sec;
 		sna_crtc->swap.tv_usec = tv_usec;
 		sna_crtc->swap.msc = msc;
 	} else {
-		DBG(("%s: swap event on pipe=%d, frame %d [%08llx], time %d.%06d\n",
+		DBG(("%s: swap event on pipe=%d, frame %d [msc=%08lld], time %d.%06d\n",
 		     __FUNCTION__, __sna_crtc_pipe(sna_crtc), seq, (long long)msc,
 		     tv_sec, tv_usec));
 	}
@@ -533,6 +533,9 @@ static unsigned get_fb(struct sna *sna, struct kgem_bo *bo,
 {
 	ScrnInfoPtr scrn = sna->scrn;
 	struct drm_mode_fb_cmd arg;
+
+	if (!kgem_bo_is_fenced(&sna->kgem, bo))
+		return 0;
 
 	assert(bo->refcnt);
 	assert(bo->proxy == NULL);
@@ -5343,6 +5346,8 @@ sna_mode_resize(ScrnInfoPtr scrn, int width, int height)
 	assert(sna->mode.shadow_damage == NULL);
 	assert(sna->mode.shadow == NULL);
 
+	/* Cancel a pending [un]flip (as the pixmaps no longer match) */
+	sna_present_cancel_flip(sna);
 	copy_front(sna, sna->front, new_front);
 
 	screen->SetScreenPixmap(new_front);
@@ -6661,6 +6666,7 @@ static void crtc_init_gamma(xf86CrtcPtr crtc)
 			crtc->gamma_red = gamma;
 			crtc->gamma_green = gamma + 256;
 			crtc->gamma_blue = gamma + 2*256;
+			crtc->gamma_size = 256;
 		}
 	}
 }
