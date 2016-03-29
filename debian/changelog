@@ -1,3 +1,9 @@
+xserver-xorg-video-intel (2:2.99.917+git20160325-1) unstable; urgency=medium
+
+  * New upstream snapshot.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Tue, 29 Mar 2016 10:29:35 +0300
+
 xserver-xorg-video-intel (2:2.99.917+git20160307-2) unstable; urgency=medium
 
   * Disable the patch to use modesetting on skylake for now, since it reveals
