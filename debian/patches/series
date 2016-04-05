@@ -5,3 +5,4 @@
 
 # ubuntu
 revert-dpms-fix.patch
+install-dri3info.diff
