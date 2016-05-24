@@ -49,7 +49,7 @@ Build-Depends:
  libpixman-1-dev,
  libxss-dev,
 # dri3info:
-# libxcomposite-dev,
+ libxcomposite-dev,
 # tests, benchmarks:
 # libcairo2-dev,
 # libpng12-dev,
