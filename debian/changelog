@@ -1,5 +1,6 @@
-xserver-xorg-video-intel (2:2.99.917+git20160522-1ubuntu1) UNRELEASED; urgency=medium
+xserver-xorg-video-intel (2:2.99.917+git20160522-1ubuntu1) yakkety; urgency=medium
 
+  * Merge from Debian.
   * install-dri3info.diff: Install dri3info with the driver, add libxcomposite-dev
     to build-depends.
 
