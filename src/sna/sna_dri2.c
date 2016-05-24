@@ -1246,6 +1246,7 @@ __sna_dri2_copy_region(struct sna *sna, DrawablePtr draw, RegionPtr region,
 
 	src_bo = src_priv->bo;
 	assert(src_bo->refcnt);
+	kgem_bo_unclean(&sna->kgem, src_bo);
 	if (is_front(src->attachment)) {
 		struct sna_pixmap *priv;
 
@@ -1615,6 +1616,9 @@ static void fake_swap_complete(struct sna *sna, ClientPtr client,
 	const struct ust_msc *swap;
 
 	assert(draw);
+
+	if (crtc == NULL)
+		crtc = sna_primary_crtc(sna);
 
 	swap = sna_crtc_last_swap(crtc);
 	DBG(("%s(type=%d): draw=%ld, pipe=%d, frame=%lld [msc %lld], tv=%d.%06d\n",
@@ -2549,33 +2553,27 @@ static inline bool rq_is_busy(struct kgem *kgem, struct kgem_bo *bo)
 	if (bo == NULL)
 		return false;
 
-	DBG(("%s: handle=%d, domain: %d exec? %d, rq? %d\n", __FUNCTION__,
-	     bo->handle, bo->domain, bo->exec != NULL, bo->rq != NULL));
-	assert(bo->refcnt);
-
-	if (bo->exec)
-		return true;
-
-	if (bo->rq == NULL)
-		return false;
-
-	return __kgem_busy(kgem, bo->handle);
+	return __kgem_bo_is_busy(kgem, bo);
 }
 
 static bool sna_dri2_blit_complete(struct sna_dri2_event *info)
 {
-	if (rq_is_busy(&info->sna->kgem, info->bo)) {
+	if (!info->bo)
+		return true;
+
+	if (__kgem_bo_is_busy(&info->sna->kgem, info->bo)) {
 		DBG(("%s: vsync'ed blit is still busy, postponing\n",
 		     __FUNCTION__));
 		if (sna_next_vblank(info))
 			return false;
+
+		kgem_bo_sync__gtt(&info->sna->kgem, info->bo);
 	}
 
 	DBG(("%s: blit finished\n", __FUNCTION__));
-	if (info->bo) {
-		kgem_bo_destroy(&info->sna->kgem, info->bo);
-		info->bo = NULL;
-	}
+	kgem_bo_destroy(&info->sna->kgem, info->bo);
+	info->bo = NULL;
+
 	return true;
 }
 
@@ -2648,7 +2646,9 @@ void sna_dri2_vblank_handler(struct drm_event_vblank *event)
 		}
 
 		if (info->pending.bo) {
-			DBG(("%s: swapping old back handle=%d [name=%d, active=%d] for pending handle=%d [name=%d, active=%d], front handle=%d [name=%d, active=%d]\n",
+			struct copy current_back;
+
+			DBG(("%s: swapping back handle=%d [name=%d, active=%d] for pending handle=%d [name=%d, active=%d], front handle=%d [name=%d, active=%d]\n",
 			     __FUNCTION__,
 			     get_private(info->back)->bo->handle, info->back->name, get_private(info->back)->bo->active_scanout,
 			     info->pending.bo->handle, info->pending.name, info->pending.bo->active_scanout,
@@ -2664,11 +2664,10 @@ void sna_dri2_vblank_handler(struct drm_event_vblank *event)
 			assert(info->pending.bo->active_scanout > 0);
 			info->pending.bo->active_scanout--;
 
-			sna_dri2_cache_bo(info->sna, info->draw,
-					  get_private(info->back)->bo,
-					  info->back->name,
-					  get_private(info->back)->size,
-					  info->back->flags);
+			current_back.bo = get_private(info->back)->bo;
+			current_back.size = get_private(info->back)->size;
+			current_back.name = info->back->name;
+			current_back.flags = info->back->flags;
 
 			get_private(info->back)->bo = info->pending.bo;
 			get_private(info->back)->size = info->pending.size;
@@ -2687,6 +2686,23 @@ void sna_dri2_vblank_handler(struct drm_event_vblank *event)
 						   info->front, info->back);
 			else
 				__sna_dri2_copy_event(info, info->sync | DRI2_BO);
+
+			sna_dri2_cache_bo(info->sna, info->draw,
+					  get_private(info->back)->bo,
+					  info->back->name,
+					  get_private(info->back)->size,
+					  info->back->flags);
+
+			get_private(info->back)->bo = current_back.bo;
+			get_private(info->back)->size = current_back.size;
+			info->back->name = current_back.name;
+			info->back->pitch = current_back.bo->pitch;
+			info->back->flags = current_back.flags;
+
+			DBG(("%s: restored current back handle=%d [name=%d, active=%d], active=%d], front handle=%d [name=%d, active=%d]\n",
+			     __FUNCTION__,
+			     get_private(info->back)->bo->handle, info->back->name, get_private(info->back)->bo->active_scanout,
+			     get_private(info->front)->bo->handle, info->front->name, get_private(info->front)->bo->active_scanout));
 
 			assert(info->draw);
 			info->keepalive++;
@@ -3321,7 +3337,7 @@ sna_dri2_schedule_swap(ClientPtr client, DrawablePtr draw, DRI2BufferPtr front,
 		     __FUNCTION__,
 		     get_private(front)->pixmap->drawable.serialNumber,
 		     get_drawable_pixmap(draw)->drawable.serialNumber));
-		goto fake;
+		goto skip;
 	}
 
 	if (get_private(back)->stale) {
@@ -3465,7 +3481,7 @@ skip:
 		if (!sna_next_vblank(info))
 			goto fake;
 
-		swap_limit(draw, 2);
+		swap_limit(draw, 1);
 	} else {
 fake:
 		/* XXX Use a Timer to throttle the client? */
