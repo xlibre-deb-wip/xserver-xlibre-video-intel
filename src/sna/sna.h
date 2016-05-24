@@ -406,6 +406,7 @@ struct sna {
 		struct gen6_render_state gen6;
 		struct gen7_render_state gen7;
 		struct gen8_render_state gen8;
+		struct gen9_render_state gen9;
 	} render_state;
 
 	/* Broken-out options. */
@@ -467,6 +468,7 @@ extern bool sna_cursors_init(ScreenPtr screen, struct sna *sna);
 typedef void (*sna_flip_handler_t)(struct drm_event_vblank *e,
 				   void *data);
 
+extern bool sna_needs_page_flip(struct sna *sna, struct kgem_bo *bo);
 extern int sna_page_flip(struct sna *sna,
 			 struct kgem_bo *bo,
 			 sna_flip_handler_t handler,
@@ -615,6 +617,8 @@ extern bool sna_crtc_is_transformed(xf86CrtcPtr crtc);
 #define CRTC_VBLANK 0x3
 #define CRTC_ON 0x80000000
 
+uint32_t sna_crtc_id(xf86CrtcPtr crtc);
+
 static inline unsigned long *sna_crtc_flags(xf86CrtcPtr crtc)
 {
 	unsigned long *flags = crtc->driver_private;
@@ -625,11 +629,6 @@ static inline unsigned long *sna_crtc_flags(xf86CrtcPtr crtc)
 static inline unsigned sna_crtc_pipe(xf86CrtcPtr crtc)
 {
 	return *sna_crtc_flags(crtc) >> 8 & 0xff;
-}
-
-static inline unsigned sna_crtc_id(xf86CrtcPtr crtc)
-{
-	return *sna_crtc_flags(crtc) >> 16 & 0xff;
 }
 
 static inline bool sna_crtc_is_on(xf86CrtcPtr crtc)
