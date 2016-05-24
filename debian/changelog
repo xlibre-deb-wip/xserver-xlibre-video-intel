@@ -1,9 +1,10 @@
-xserver-xorg-video-intel (2:2.99.917+git20160325-2) UNRELEASED; urgency=medium
+xserver-xorg-video-intel (2:2.99.917+git20160522-1) unstable; urgency=medium
 
+  * New upstream snapshot. (Closes: #823116)
   * fix-fd-leak-when-intel-scrn-create-fails.diff: Fix a failure falling back
     on another driver when scrn create fails.
 
- -- Timo Aaltonen <tjaalton@debian.org>  Fri, 22 Apr 2016 15:58:10 +0300
+ -- Timo Aaltonen <tjaalton@debian.org>  Tue, 24 May 2016 11:40:02 +0300
 
 xserver-xorg-video-intel (2:2.99.917+git20160325-1) unstable; urgency=medium
 
