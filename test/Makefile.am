@@ -5,6 +5,7 @@ stress_TESTS = \
 	basic-rectangle \
 	basic-string \
 	basic-copyarea \
+	basic-copyplane \
 	basic-copyarea-size \
 	basic-putimage \
 	basic-lines \
@@ -12,8 +13,10 @@ stress_TESTS = \
 	DrawSegments \
 	cursor-test \
 	render-fill \
+	render-glyphs \
 	render-trapezoid \
 	render-trapezoid-image \
+	render-triangle \
 	render-fill-copy \
 	render-composite-solid \
 	render-composite-solid-mask \
@@ -25,9 +28,16 @@ stress_TESTS = \
 	shm-test \
 	$(NULL)
 
+if X11_VM
+stress_TESTS += \
+	xvidmode \
+	$(NULL)
+endif
+
 if DRI2
 stress_TESTS += \
 	dri2-race \
+	dri2-speed \
 	dri2-swap \
 	dri2-test \
 	$(NULL)
@@ -36,6 +46,8 @@ endif
 if X11_DRI3
 stress_TESTS += \
 	dri3-test \
+	present-race \
+	present-speed \
 	present-test \
 	$(NULL)
 endif

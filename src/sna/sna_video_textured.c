@@ -149,15 +149,16 @@ sna_video_textured_put_image(ddPutImage_ARGS)
 	BoxRec dstBox;
 	RegionRec clip;
 	xf86CrtcPtr crtc;
+	int16_t dx, dy;
 	bool flush = false;
 	bool ret;
 
-	clip.extents.x1 = draw->x + drw_x;
-	clip.extents.y1 = draw->y + drw_y;
-	clip.extents.x2 = clip.extents.x1 + drw_w;
-	clip.extents.y2 = clip.extents.y1 + drw_h;
-	clip.data = NULL;
+	if (wedged(sna))
+		return BadAlloc;
 
+	init_video_region(&clip, draw, drw_x, drw_y, drw_w, drw_h);
+
+	ValidateGC(draw, gc);
 	RegionIntersect(&clip, &clip, gc->pCompositeClip);
 	if (!RegionNotEmpty(&clip))
 		return Success;
@@ -180,6 +181,9 @@ sna_video_textured_put_image(ddPutImage_ARGS)
 				   src_w, src_h, drw_w, drw_h,
 				   &clip))
 		return Success;
+
+	if (get_drawable_deltas(draw, pixmap, &dx, &dy))
+		RegionTranslate(&clip, dx, dy);
 
 	flags = MOVE_WRITE | __MOVE_FORCE;
 	if (clip.data)
@@ -234,7 +238,7 @@ sna_video_textured_put_image(ddPutImage_ARGS)
 		DBG(("%s: failed to render video\n", __FUNCTION__));
 		ret = BadAlloc;
 	} else
-		DamageDamageRegion(draw, &clip);
+		DamageDamageRegion(&pixmap->drawable, &clip);
 
 	kgem_bo_destroy(&sna->kgem, frame.bo);
 
@@ -316,7 +320,7 @@ void sna_video_textured_setup(struct sna *sna, ScreenPtr screen)
 
 	if (!sna->render.video) {
 		xf86DrvMsg(sna->scrn->scrnIndex, X_INFO,
-			   "Textured video not supported on this hardware\n");
+			   "Textured video not supported on this hardware or backend\n");
 		return;
 	}
 

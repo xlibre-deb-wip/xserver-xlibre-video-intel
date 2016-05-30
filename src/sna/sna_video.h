@@ -193,6 +193,9 @@ bool
 sna_video_copy_data(struct sna_video *video,
 		    struct sna_video_frame *frame,
 		    const uint8_t *buf);
+void
+sna_video_fill_colorkey(struct sna_video *video,
+			const RegionRec *clip);
 
 void sna_video_buffer_fini(struct sna_video *video);
 
@@ -208,6 +211,28 @@ static inline void
 sna_window_set_port(WindowPtr window, XvPortPtr port)
 {
 	((void **)__get_private(window, sna_window_key))[2] = port;
+}
+
+static inline int offset_and_clip(int x, int dx)
+{
+	x += dx;
+	if (x <= 0)
+		return 0;
+	if (x >= MAXSHORT)
+		return MAXSHORT;
+	return x;
+}
+
+static inline void init_video_region(RegionRec *region,
+				     DrawablePtr draw,
+				     int drw_x, int drw_y,
+				     int drw_w, int drw_h)
+{
+	region->extents.x1 = offset_and_clip(draw->x, drw_x);
+	region->extents.y1 = offset_and_clip(draw->y, drw_y);
+	region->extents.x2 = offset_and_clip(draw->x, drw_x + drw_w);
+	region->extents.y2 = offset_and_clip(draw->y, drw_y + drw_h);
+	region->data = NULL;
 }
 
 #endif /* SNA_VIDEO_H */

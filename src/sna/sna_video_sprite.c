@@ -81,14 +81,12 @@ static int sna_video_sprite_stop(ddStopVideo_ARGS)
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(video->sna->scrn);
 	int i;
 
-	for (i = 0; i < config->num_crtc; i++) {
+	for (i = 0; i < video->sna->mode.num_real_crtc; i++) {
 		xf86CrtcPtr crtc = config->crtc[i];
 		int pipe;
 
-		if (sna_crtc_id(crtc) == 0)
-			break;
-
-		pipe = sna_crtc_to_pipe(crtc);
+		pipe = sna_crtc_pipe(crtc);
+		assert(pipe < ARRAY_SIZE(video->bo));
 		if (video->bo[pipe] == NULL)
 			continue;
 
@@ -153,7 +151,7 @@ static int sna_video_sprite_best_size(ddQueryBestSize_ARGS)
 	struct sna_video *video = port->devPriv.ptr;
 	struct sna *sna = video->sna;
 
-	if (sna->kgem.gen >= 075) {
+	if (sna->kgem.gen >= 075 && !sna->render.video) {
 		*p_w = vid_w;
 		*p_h = vid_h;
 	} else {
@@ -221,7 +219,7 @@ sna_video_sprite_show(struct sna *sna,
 		      BoxPtr dstBox)
 {
 	struct local_mode_set_plane s;
-	int pipe = sna_crtc_to_pipe(crtc);
+	int pipe = sna_crtc_pipe(crtc);
 
 	/* XXX handle video spanning multiple CRTC */
 
@@ -263,6 +261,7 @@ sna_video_sprite_show(struct sna *sna,
 		video->color_key_changed &= ~(1 << pipe);
 	}
 
+	assert(pipe < ARRAY_SIZE(video->bo));
 	if (video->bo[pipe] == frame->bo)
 		return true;
 
@@ -376,15 +375,13 @@ static int sna_video_sprite_put_image(ddPutImage_ARGS)
 	RegionRec clip;
 	int ret, i;
 
-	clip.extents.x1 = draw->x + drw_x;
-	clip.extents.y1 = draw->y + drw_y;
-	clip.extents.x2 = clip.extents.x1 + drw_w;
-	clip.extents.y2 = clip.extents.y1 + drw_h;
-	clip.data = NULL;
+	init_video_region(&clip, draw, drw_x, drw_y, drw_w, drw_h);
 
 	DBG(("%s: always_on_top=%d\n", __FUNCTION__, video->AlwaysOnTop));
-	if (!video->AlwaysOnTop)
+	if (!video->AlwaysOnTop) {
+		ValidateGC(draw, gc);
 		RegionIntersect(&clip, &clip, gc->pCompositeClip);
+	}
 
 	DBG(("%s: src=(%d, %d),(%d, %d), dst=(%d, %d),(%d, %d), id=%d, sizep=%dx%d, sync?=%d\n",
 	     __FUNCTION__,
@@ -402,7 +399,7 @@ static int sna_video_sprite_put_image(ddPutImage_ARGS)
 		goto err;
 	}
 
-	for (i = 0; i < config->num_crtc; i++) {
+	for (i = 0; i < video->sna->mode.num_real_crtc; i++) {
 		xf86CrtcPtr crtc = config->crtc[i];
 		struct sna_video_frame frame;
 		int pipe;
@@ -410,11 +407,9 @@ static int sna_video_sprite_put_image(ddPutImage_ARGS)
 		BoxRec dst;
 		RegionRec reg;
 		Rotation rotation;
+		bool cache_bo;
 
-		if (sna_crtc_id(crtc) == 0)
-			break;
-
-		pipe = sna_crtc_to_pipe(crtc);
+		pipe = sna_crtc_pipe(crtc);
 
 		sna_video_frame_init(video, format->id, width, height, &frame);
 
@@ -423,6 +418,7 @@ static int sna_video_sprite_put_image(ddPutImage_ARGS)
 		RegionIntersect(&reg, &reg, &clip);
 		if (RegionNil(&reg)) {
 off:
+			assert(pipe < ARRAY_SIZE(video->bo));
 			if (video->bo[pipe]) {
 				struct local_mode_set_plane s;
 				memset(&s, 0, sizeof(s));
@@ -496,6 +492,8 @@ off:
 			frame.image.y1 = 0;
 			frame.image.x2 = frame.width;
 			frame.image.y2 = frame.height;
+
+			cache_bo = false;
 		} else {
 			frame.bo = sna_video_buffer(video, &frame);
 			if (frame.bo == NULL) {
@@ -509,6 +507,60 @@ off:
 				ret = BadAlloc;
 				goto err;
 			}
+
+			cache_bo = true;
+		}
+
+		if (sna->kgem.gen >= 075 && sna->render.video &&
+		    !((frame.src.x2 - frame.src.x1) == (dst.x2 - dst.x1) &&
+		      (frame.src.y2 - frame.src.y1) == (dst.y2 - dst.y1))) {
+			ScreenPtr screen = to_screen_from_sna(sna);
+			PixmapPtr scaled;
+			RegionRec r;
+
+			r.extents.x1 = r.extents.y1 = 0;
+			r.extents.x2 = dst.x2 - dst.x1;
+			r.extents.y2 = dst.y2 - dst.y1;
+			r.data = NULL;
+
+			DBG(("%s: scaling from (%d, %d) to (%d, %d)\n",
+			     __FUNCTION__,
+			     frame.src.x2 - frame.src.x1,
+			     frame.src.y2 - frame.src.y1,
+			     r.extents.x2, r.extents.y2));
+
+			scaled = screen->CreatePixmap(screen,
+						      r.extents.x2,
+						      r.extents.y2,
+						      24,
+						      CREATE_PIXMAP_USAGE_SCRATCH);
+			if (scaled == NULL) {
+				ret = BadAlloc;
+				goto err;
+			}
+
+			if (!sna->render.video(sna, video, &frame, &r, scaled)) {
+				screen->DestroyPixmap(scaled);
+				ret = BadAlloc;
+				goto err;
+			}
+
+			if (cache_bo)
+				sna_video_buffer_fini(video);
+			else
+				kgem_bo_destroy(&sna->kgem, frame.bo);
+
+			frame.bo = kgem_bo_reference(__sna_pixmap_get_bo(scaled));
+			kgem_bo_submit(&sna->kgem, frame.bo);
+
+			frame.id = FOURCC_RGB888;
+			frame.src = frame.image = r.extents;
+			frame.width = frame.image.x2;
+			frame.height = frame.image.y2;
+			frame.pitch[0] = frame.bo->pitch;
+
+			screen->DestroyPixmap(scaled);
+			cache_bo = false;
 		}
 
 		ret = Success;
@@ -518,23 +570,16 @@ off:
 		}
 
 		frame.bo->domain = DOMAIN_NONE;
-		if (xvmc_passthrough(format->id))
-			kgem_bo_destroy(&sna->kgem, frame.bo);
-		else
+		if (cache_bo)
 			sna_video_buffer_fini(video);
+		else
+			kgem_bo_destroy(&sna->kgem, frame.bo);
 
 		if (ret != Success)
 			goto err;
 	}
 
-	if (!video->AlwaysOnTop && !RegionEqual(&video->clip, &clip) &&
-	    sna_blt_fill_boxes(sna, GXcopy,
-			       __sna_pixmap_get_bo(sna->front),
-			       sna->front->drawable.bitsPerPixel,
-			       video->color_key,
-			       region_rects(&clip),
-			       region_num_rects(&clip)))
-		RegionCopy(&video->clip, &clip);
+	sna_video_fill_colorkey(video, &clip);
 	sna_window_set_port((WindowPtr)draw, port);
 
 	return Success;
@@ -618,7 +663,7 @@ static bool sna_video_has_sprites(struct sna *sna)
 
 	for (i = 0; i < sna->mode.num_real_crtc; i++) {
 		if (!sna_crtc_to_sprite(config->crtc[i])) {
-			DBG(("%s: no sprite found on pipe %d\n", __FUNCTION__, sna_crtc_to_pipe(config->crtc[i])));
+			DBG(("%s: no sprite found on pipe %d\n", __FUNCTION__, sna_crtc_pipe(config->crtc[i])));
 			return false;
 		}
 	}

@@ -1,3 +1,2 @@
-fix-yuv-to-rgb-shared-on-intel-gen8.patch
-fix-sna-fstat-include.patch
-fix-uxa-fstat-include.patch
+fix-fd-leak-when-intel-scrn-create-fails.diff
+#sna-let-modesetting-handle-gen9+.diff
