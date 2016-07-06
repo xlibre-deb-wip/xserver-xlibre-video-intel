@@ -259,8 +259,9 @@ struct sna {
 #define SNA_NO_VSYNC		0x40
 #define SNA_TRIPLE_BUFFER	0x80
 #define SNA_TEAR_FREE		0x100
-#define SNA_FORCE_SHADOW	0x200
-#define SNA_FLUSH_GTT		0x400
+#define SNA_WANT_TEAR_FREE	0x200
+#define SNA_FORCE_SHADOW	0x400
+#define SNA_FLUSH_GTT		0x800
 #define SNA_PERFORMANCE		0x1000
 #define SNA_POWERSAVE		0x2000
 #define SNA_HAS_FLIP		0x10000
@@ -610,8 +611,9 @@ static inline void sna_present_vblank_handler(struct drm_event_vblank *event) { 
 static inline void sna_present_cancel_flip(struct sna *sna) { }
 #endif
 
-extern bool sna_crtc_set_sprite_rotation(xf86CrtcPtr crtc, uint32_t rotation);
-extern uint32_t sna_crtc_to_sprite(xf86CrtcPtr crtc);
+extern unsigned sna_crtc_count_sprites(xf86CrtcPtr crtc);
+extern bool sna_crtc_set_sprite_rotation(xf86CrtcPtr crtc, unsigned idx, uint32_t rotation);
+extern uint32_t sna_crtc_to_sprite(xf86CrtcPtr crtc, unsigned idx);
 extern bool sna_crtc_is_transformed(xf86CrtcPtr crtc);
 
 #define CRTC_VBLANK 0x3

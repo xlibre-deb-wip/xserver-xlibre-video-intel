@@ -1037,8 +1037,8 @@ static void set_bo(PixmapPtr pixmap, struct kgem_bo *bo)
 	assert(bo->flush);
 
 	if (APPLY_DAMAGE) {
-		DamageRegionProcessPending(&pixmap->drawable);
 		sna->ignore_copy_area = false;
+		DamageRegionProcessPending(&pixmap->drawable);
 	}
 }
 
@@ -1394,8 +1394,8 @@ __sna_dri2_copy_region(struct sna *sna, DrawablePtr draw, RegionPtr region,
 	}
 
 	if (APPLY_DAMAGE || flags & DRI2_DAMAGE) {
-		DamageRegionProcessPending(&pixmap->drawable);
 		sna->ignore_copy_area = false;
+		DamageRegionProcessPending(&pixmap->drawable);
 	}
 
 	if (clip.data)
@@ -2421,8 +2421,8 @@ static void sna_dri2_xchg_crtc(struct sna *sna, DrawablePtr draw, xf86CrtcPtr cr
 	}
 	sna_shadow_set_crtc(sna, crtc, get_private(back)->bo);
 	if (APPLY_DAMAGE) {
-		DamageRegionProcessPending(&win->drawable);
 		sna->ignore_copy_area = false;
+		DamageRegionProcessPending(&win->drawable);
 	}
 
 	if (priv->front == NULL) {
@@ -2513,7 +2513,7 @@ static void chain_swap(struct sna_dri2_event *chain)
 	switch (chain->type) {
 	case SWAP_COMPLETE:
 		DBG(("%s: emitting chained vsync'ed blit\n", __FUNCTION__));
-		if (chain->sna->mode.shadow && chain->sna->mode.shadow_wait) {
+		if (chain->sna->mode.shadow_wait) {
 			/* recursed from wait_for_shadow(), simply requeue */
 			DBG(("%s -- recursed from wait_for_shadow(), requeuing\n", __FUNCTION__));
 			if (sna_next_vblank(chain))
@@ -2608,7 +2608,7 @@ void sna_dri2_vblank_handler(struct drm_event_vblank *event)
 		/* else fall through to blit */
 	case SWAP:
 		assert(info->signal);
-		if (sna->mode.shadow && sna->mode.shadow_wait) {
+		if (sna->mode.shadow_wait) {
 			/* recursed from wait_for_shadow(), simply requeue */
 			DBG(("%s -- recursed from wait_for_shadow(), requeuing\n", __FUNCTION__));
 		} else if (can_xchg(info->sna, draw, info->front, info->back)) {
@@ -2654,7 +2654,7 @@ void sna_dri2_vblank_handler(struct drm_event_vblank *event)
 			     info->pending.bo->handle, info->pending.name, info->pending.bo->active_scanout,
 			     get_private(info->front)->bo->handle, info->front->name, get_private(info->front)->bo->active_scanout));
 
-			if (sna->mode.shadow && sna->mode.shadow_wait) {
+			if (sna->mode.shadow_wait) {
 				/* recursed from wait_for_shadow(), simply requeue */
 				DBG(("%s -- recursed from wait_for_shadow(), requeuing\n", __FUNCTION__));
 				if (sna_next_vblank(info))
@@ -2792,9 +2792,8 @@ sna_dri2_immediate_blit(struct sna *sna,
 	     get_private(chain->front)->bo->handle, chain->front->name, get_private(chain->front)->bo->active_scanout,
 	     get_private(chain->back)->bo->handle, chain->back->name, get_private(chain->back)->bo->active_scanout));
 
-	if (chain->type == SWAP_COMPLETE) {
+	if (chain->type == SWAP_COMPLETE && chain->front == info->front) {
 		assert(chain->draw == info->draw);
-		assert(chain->front == info->front);
 		assert(chain->client == info->client);
 		assert(chain->event_complete == info->event_complete);
 		assert(chain->event_data == info->event_data);

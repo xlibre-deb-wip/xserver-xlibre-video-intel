@@ -246,8 +246,8 @@ static inline void FreePixmap(PixmapPtr pixmap)
 #define isGPU(S) 0
 #endif
 
-#endif
-
 #if HAS_DIRTYTRACKING_ROTATION
 #define PixmapSyncDirtyHelper(d, dd) PixmapSyncDirtyHelper(d)
+#endif
+
 #endif

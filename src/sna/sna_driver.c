@@ -437,7 +437,7 @@ static void setup_dri(struct sna *sna)
 
 	level = intel_option_cast_to_unsigned(sna->Options, OPTION_DRI, DEFAULT_DRI_LEVEL);
 #if HAVE_DRI3
-	if (level >= 3)
+	if (level >= 3 && sna->kgem.gen >= 040)
 		sna->dri3.available = !!xf86LoadSubModule(sna->scrn, "dri3");
 #endif
 #if HAVE_DRI2
@@ -481,7 +481,7 @@ static bool setup_tear_free(struct sna *sna)
 		from = X_CONFIG;
 
 	if (enable)
-		sna->flags |= SNA_TEAR_FREE;
+		sna->flags |= SNA_WANT_TEAR_FREE | SNA_TEAR_FREE;
 
 done:
 	xf86DrvMsg(sna->scrn->scrnIndex, from, "TearFree %sabled\n",
