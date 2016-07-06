@@ -4,6 +4,7 @@ xserver-xorg-video-intel (2:2.99.917+git20160706-1) UNRELEASED; urgency=medium
   * fix-fd-leak-when-intel-scrn-create-fails.diff, sna-let-modesetting-
     handle-gen9+.diff: Dropped as the fallback to modesetting will be
     fully handled in the xserver.
+  * .docs: Include a minimal xorg.conf.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Wed, 06 Jul 2016 19:04:32 +0300
 
