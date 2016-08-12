@@ -6,3 +6,5 @@
 # ubuntu
 revert-dpms-fix.patch
 preserve-mouse-cursor-after-vt-switch.patch
+add-more-kbl-pciids.diff
+remove-invalid-kbl-pciids.diff
