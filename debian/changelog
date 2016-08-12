@@ -1,3 +1,10 @@
+xserver-xorg-video-intel (2:2.99.917+git20160325-1ubuntu1.1) xenial; urgency=medium
+
+  * preserve-mouse-cursor-after-vt-switch.patch: Fix lost mouse cursor after
+    unlocking (LP: #1568604)
+
+ -- Sean Davis <smd.seandavis@gmail.com>  Thu, 11 Aug 2016 19:22:17 -0400
+
 xserver-xorg-video-intel (2:2.99.917+git20160325-1ubuntu1) xenial; urgency=medium
 
   * Merge from Debian.
