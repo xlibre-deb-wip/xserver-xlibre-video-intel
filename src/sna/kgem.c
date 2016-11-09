@@ -443,6 +443,19 @@ static void kgem_sna_flush(struct kgem *kgem)
 		sna_render_flush_solid(sna);
 }
 
+static bool kgem_bo_rmfb(struct kgem *kgem, struct kgem_bo *bo)
+{
+	if (bo->scanout && bo->delta) {
+		DBG(("%s: releasing fb=%d for handle=%d\n",
+		     __FUNCTION__, bo->delta, bo->handle));
+		/* XXX will leak if we are not DRM_MASTER. *shrug* */
+		do_ioctl(kgem->fd, DRM_IOCTL_MODE_RMFB, &bo->delta);
+		bo->delta = 0;
+		return true;
+	} else
+		return false;
+}
+
 static bool kgem_set_tiling(struct kgem *kgem, struct kgem_bo *bo,
 			    int tiling, int stride)
 {
@@ -486,6 +499,9 @@ restart:
 		sched_yield();
 		goto restart;
 	}
+
+	if (err == EBUSY && kgem_bo_rmfb(kgem, bo))
+		goto restart;
 
 	ERR(("%s: failed to set-tiling(tiling=%d, pitch=%d) for handle=%d: %d\n",
 	     __FUNCTION__, tiling, stride, bo->handle, err));
@@ -2514,17 +2530,6 @@ static void kgem_bo_binding_free(struct kgem *kgem, struct kgem_bo *bo)
 		struct kgem_bo_binding *next = b->next;
 		free(b);
 		b = next;
-	}
-}
-
-static void kgem_bo_rmfb(struct kgem *kgem, struct kgem_bo *bo)
-{
-	if (bo->scanout && bo->delta) {
-		DBG(("%s: releasing fb=%d for handle=%d\n",
-		     __FUNCTION__, bo->delta, bo->handle));
-		/* XXX will leak if we are not DRM_MASTER. *shrug* */
-		do_ioctl(kgem->fd, DRM_IOCTL_MODE_RMFB, &bo->delta);
-		bo->delta = 0;
 	}
 }
 
@@ -5348,7 +5353,7 @@ bool kgem_bo_is_fenced(struct kgem *kgem, struct kgem_bo *bo)
 
 	VG_CLEAR(tiling);
 	tiling.handle = bo->handle;
-	tiling.tiling_mode = 0;
+	tiling.tiling_mode = bo->tiling;
 	(void)do_ioctl(kgem->fd, DRM_IOCTL_I915_GEM_GET_TILING, &tiling);
 	return tiling.tiling_mode == bo->tiling; /* assume pitch is fine! */
 }
@@ -6174,9 +6179,7 @@ void kgem_scanout_flush(struct kgem *kgem, struct kgem_bo *bo)
 	/* Whatever actually happens, we can regard the GTT write domain
 	 * as being flushed.
 	 */
-	bo->gtt_dirty = false;
-	bo->needs_flush = false;
-	bo->domain = DOMAIN_NONE;
+	__kgem_bo_clear_dirty(bo);
 }
 
 inline static bool nearly_idle(struct kgem *kgem)
@@ -7102,6 +7105,7 @@ void kgem_bo_sync__cpu(struct kgem *kgem, struct kgem_bo *bo)
 		bo->needs_flush = false;
 		kgem_bo_retire(kgem, bo);
 		bo->domain = DOMAIN_CPU;
+		bo->gtt_dirty = true;
 	}
 }
 
@@ -7142,10 +7146,11 @@ void kgem_bo_sync__cpu_full(struct kgem *kgem, struct kgem_bo *bo, bool write)
 			DBG(("%s: sync: GPU hang detected\n", __FUNCTION__));
 			kgem_throttle(kgem);
 		}
+		bo->needs_flush = false;
 		if (write) {
-			bo->needs_flush = false;
 			kgem_bo_retire(kgem, bo);
 			bo->domain = DOMAIN_CPU;
+			bo->gtt_dirty = true;
 		} else {
 			if (bo->exec == NULL)
 				kgem_bo_maybe_retire(kgem, bo);

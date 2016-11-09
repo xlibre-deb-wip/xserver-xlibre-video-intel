@@ -308,7 +308,7 @@ static void sna_dpms_set(ScrnInfoPtr scrn, int mode, int flags)
 	 * back on.
 	 */
 	if (mode != DPMSModeOn) {
-		if (sna->mode.hidden == 0) {
+		if (sna->mode.hidden == 0 && !(sna->flags & SNA_NO_DPMS)) {
 			DBG(("%s: hiding %d outputs\n",
 			     __FUNCTION__, config->num_output));
 			for (i = 0; i < config->num_output; i++) {
@@ -433,16 +433,24 @@ static void setup_dri(struct sna *sna)
 	unsigned level;
 
 	sna->dri2.available = false;
+	sna->dri2.enable = false;
 	sna->dri3.available = false;
+	sna->dri3.enable = false;
+	sna->dri3.override = false;
 
 	level = intel_option_cast_to_unsigned(sna->Options, OPTION_DRI, DEFAULT_DRI_LEVEL);
 #if HAVE_DRI3
+	sna->dri3.available = !!xf86LoadSubModule(sna->scrn, "dri3");
+	sna->dri3.override =
+		!sna->dri3.available ||
+		xf86IsOptionSet(sna->Options, OPTION_DRI);
 	if (level >= 3 && sna->kgem.gen >= 040)
-		sna->dri3.available = !!xf86LoadSubModule(sna->scrn, "dri3");
+		sna->dri3.enable = sna->dri3.available;
 #endif
 #if HAVE_DRI2
+	sna->dri2.available = !!xf86LoadSubModule(sna->scrn, "dri2");
 	if (level >= 2)
-		sna->dri2.available = !!xf86LoadSubModule(sna->scrn, "dri2");
+		sna->dri2.enable = sna->dri2.available;
 #endif
 }
 
@@ -681,6 +689,7 @@ cleanup:
 	return FALSE;
 }
 
+#if !HAVE_NOTIFY_FD
 static bool has_shadow(struct sna *sna)
 {
 	if (!sna->mode.shadow_enabled)
@@ -737,6 +746,31 @@ sna_wakeup_handler(WAKEUPHANDLER_ARGS_DECL)
 		FD_CLR(sna->kgem.fd, (fd_set*)read_mask);
 	}
 }
+#else
+static void
+sna_block_handler(void *data, void *_timeout)
+{
+	struct sna *sna = data;
+	int *timeout = _timeout;
+	struct timeval tv, *tvp;
+
+	DBG(("%s (timeout=%d)\n", __FUNCTION__, *timeout));
+	if (*timeout == 0)
+		return;
+
+	if (*timeout < 0) {
+		tvp = NULL;
+	} else {
+		tv.tv_sec = *timeout / 1000;
+		tv.tv_usec = (*timeout % 1000) * 1000;
+		tvp = &tv;
+	}
+
+	sna_accel_block(sna, &tvp);
+	if (tvp)
+		*timeout = tvp->tv_sec * 1000 + tvp->tv_usec / 1000;
+}
+#endif
 
 #if HAVE_UDEV
 #include <sys/stat.h>
@@ -770,8 +804,13 @@ sna_handle_uevents(int fd, void *closure)
 			const char *str;
 
 			str = udev_device_get_property_value(dev, "HOTPLUG");
-			if (str && atoi(str) == 1)
-				hotplug = true;
+			if (str && atoi(str) == 1) {
+				str = udev_device_get_property_value(dev, "CONNECTOR");
+				if (str)
+					hotplug |= sna_mode_find_hotplug_connector(sna, atoi(str));
+				else
+					hotplug = true;
+			}
 		}
 
 		udev_device_unref(dev);
@@ -923,6 +962,12 @@ static Bool sna_early_close_screen(CLOSE_SCREEN_ARGS_DECL)
 
 	/* XXX Note that we will leak kernel resources if !vtSema */
 
+#if HAVE_NOTIFY_FD
+	RemoveBlockAndWakeupHandlers(sna_block_handler,
+				     (ServerWakeupHandlerProcPtr)NoopDDA,
+				     sna);
+#endif
+
 	sna_uevent_fini(sna);
 	sna_mode_close(sna);
 
@@ -1022,12 +1067,13 @@ static void sna_dri_init(struct sna *sna, ScreenPtr screen)
 {
 	char str[128] = "";
 
-	if (sna->dri2.available)
+	if (sna->dri2.enable)
 		sna->dri2.open = sna_dri2_open(sna, screen);
 	if (sna->dri2.open)
 		strcat(str, "DRI2 ");
 
-	if (sna->dri3.available)
+	/* Load DRI3 in case DRI2 doesn't work, e.g. vgaarb */
+	if (sna->dri3.enable || (!sna->dri2.open && !sna->dri3.override))
 		sna->dri3.open = sna_dri3_open(sna, screen);
 	if (sna->dri3.open)
 		strcat(str, "DRI3 ");
@@ -1073,7 +1119,8 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
 	DBG(("%s\n", __FUNCTION__));
 
 	assert(sna->scrn == scrn);
-	assert(to_screen_from_sna(sna) == NULL); /* set afterwards */
+	assert(to_screen_from_sna(sna) == NULL || /* set afterwards */
+	       to_screen_from_sna(sna) == screen);
 
 	assert(sna->freed_pixmap == NULL);
 
@@ -1141,11 +1188,17 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
 	 * later memory should be bound when allocating, e.g rotate_mem */
 	scrn->vtSema = TRUE;
 
+#if !HAVE_NOTIFY_FD
 	sna->BlockHandler = screen->BlockHandler;
 	screen->BlockHandler = sna_block_handler;
 
 	sna->WakeupHandler = screen->WakeupHandler;
 	screen->WakeupHandler = sna_wakeup_handler;
+#else
+	RegisterBlockAndWakeupHandlers(sna_block_handler,
+				       (ServerWakeupHandlerProcPtr)NoopDDA,
+				       sna);
+#endif
 
 	screen->SaveScreen = sna_save_screen;
 	screen->CreateScreenResources = sna_create_screen_resources;
@@ -1165,6 +1218,8 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
 				 CMAP_PALETTED_TRUECOLOR))
 		return FALSE;
 
+	if (!xf86CheckBoolOption(scrn->options, "dpms", TRUE))
+		sna->flags |= SNA_NO_DPMS;
 	xf86DPMSInit(screen, sna_dpms_set, 0);
 
 	sna_uevent_init(sna);

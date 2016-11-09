@@ -264,6 +264,7 @@ struct sna {
 #define SNA_FLUSH_GTT		0x800
 #define SNA_PERFORMANCE		0x1000
 #define SNA_POWERSAVE		0x2000
+#define SNA_NO_DPMS		0x4000
 #define SNA_HAS_FLIP		0x10000
 #define SNA_HAS_ASYNC_FLIP	0x20000
 #define SNA_LINEAR_FB		0x40000
@@ -282,7 +283,11 @@ struct sna {
 
 	bool ignore_copy_area : 1;
 
-	unsigned watch_flush;
+	unsigned watch_shm_flush;
+	unsigned watch_dri_flush;
+	unsigned damage_event;
+	bool needs_shm_flush;
+	bool needs_dri_flush;
 
 	struct timeval timer_tv;
 	uint32_t timer_expire[NUM_TIMERS];
@@ -307,6 +312,10 @@ struct sna {
 		bool shadow_enabled;
 		bool shadow_wait;
 		bool dirty;
+
+		struct drm_event_vblank *shadow_events;
+		int shadow_nevent;
+		int shadow_size;
 
 		int max_crtc_width, max_crtc_height;
 		RegionRec shadow_region;
@@ -353,8 +362,9 @@ struct sna {
 	} cursor;
 
 	struct sna_dri2 {
-		bool available;
-		bool open;
+		bool available : 1;
+		bool enable : 1;
+		bool open : 1;
 
 #if HAVE_DRI2
 		void *flip_pending;
@@ -363,8 +373,11 @@ struct sna {
 	} dri2;
 
 	struct sna_dri3 {
-		bool available;
-		bool open;
+		bool available :1;
+		bool override : 1;
+		bool enable : 1;
+		bool open :1;
+
 #if HAVE_DRI3
 		SyncScreenCreateFenceFunc create_fence;
 		struct list pixmaps;
@@ -377,6 +390,7 @@ struct sna {
 #if HAVE_PRESENT
 		struct list vblank_queue;
 		uint64_t unflip;
+		void *freed_info;
 #endif
 	} present;
 
@@ -388,8 +402,10 @@ struct sna {
 	EntityInfoPtr pEnt;
 	const struct intel_device_info *info;
 
+#if !HAVE_NOTIFY_FD
 	ScreenBlockHandlerProcPtr BlockHandler;
 	ScreenWakeupHandlerProcPtr WakeupHandler;
+#endif
 	CloseScreenProcPtr CloseScreen;
 
 	PicturePtr clear;
@@ -459,6 +475,7 @@ extern void sna_shadow_unset_crtc(struct sna *sna, xf86CrtcPtr crtc);
 extern bool sna_pixmap_discard_shadow_damage(struct sna_pixmap *priv,
 					     const RegionRec *region);
 extern void sna_mode_set_primary(struct sna *sna);
+extern bool sna_mode_find_hotplug_connector(struct sna *sna, unsigned id);
 extern void sna_mode_close(struct sna *sna);
 extern void sna_mode_fini(struct sna *sna);
 
@@ -1073,13 +1090,13 @@ static inline uint32_t pixmap_size(PixmapPtr pixmap)
 bool sna_accel_init(ScreenPtr sreen, struct sna *sna);
 void sna_accel_create(struct sna *sna);
 void sna_accel_block(struct sna *sna, struct timeval **tv);
-void sna_accel_watch_flush(struct sna *sna, int enable);
 void sna_accel_flush(struct sna *sna);
 void sna_accel_enter(struct sna *sna);
 void sna_accel_leave(struct sna *sna);
 void sna_accel_close(struct sna *sna);
 void sna_accel_free(struct sna *sna);
 
+void sna_watch_flush(struct sna *sna, int enable);
 void sna_copy_fbcon(struct sna *sna);
 
 bool sna_composite_create(struct sna *sna);
@@ -1344,5 +1361,15 @@ static inline void sigtrap_put(void)
 #include <stdio.h>
 extern int getline(char **line, size_t *len, FILE *file);
 #endif
+
+static inline void add_shm_flush(struct sna *sna, struct sna_pixmap *priv)
+{
+	if (!priv->shm)
+		return;
+
+	assert(!priv->flush);
+	sna_add_flush_pixmap(sna, priv, priv->cpu_bo);
+	sna->needs_shm_flush = true;
+}
 
 #endif /* _SNA_H */
