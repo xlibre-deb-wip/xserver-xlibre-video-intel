@@ -1,0 +1,71 @@
+commit ebc066c1ece2db237963c7a3cd42684fa338c083
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Sep 2 14:13:31 2016 +0100
+
+    sna: Add missing GT info for bxt,kbl
+    
+    commit c446a7ccc783e3ca00b4b15d017c6e3af66dc646
+    Author: Wayne Boyer <wayne.boyer@intel.com>
+    Date:   Wed Nov 18 10:39:42 2015 -0800
+    
+        Add Kabylake PCI IDs
+    
+    missed adding the GT information, leaving bxt,kbl using only generic
+    acceleration.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+diff --git a/src/sna/gen9_render.c b/src/sna/gen9_render.c
+index 801d514..4e4172e 100644
+--- a/src/sna/gen9_render.c
++++ b/src/sna/gen9_render.c
+@@ -230,11 +230,32 @@ static const struct gt_info skl_gt_info = {
+ 	.urb = { .max_vs_entries = 960 },
+ };
+ 
++static const struct gt_info bxt_gt_info = {
++	.name = "Broxton (gen9)",
++	.urb = { .max_vs_entries = 320 },
++};
++
++static const struct gt_info kbl_gt_info = {
++	.name = "Kayblake (gen9)",
++	.urb = { .max_vs_entries = 960 },
++};
++
+ static bool is_skl(struct sna *sna)
+ {
+ 	return sna->kgem.gen == 0110;
+ }
+ 
++static bool is_bxt(struct sna *sna)
++{
++	return sna->kgem.gen == 0111;
++}
++
++static bool is_kbl(struct sna *sna)
++{
++	return sna->kgem.gen == 0112;
++}
++
++
+ static inline bool too_large(int width, int height)
+ {
+ 	return width > GEN9_MAX_SIZE || height > GEN9_MAX_SIZE;
+@@ -3982,11 +4003,13 @@ static bool gen9_render_setup(struct sna *sna)
+ 		state->gt = GEN9_GT_BIAS + ((devid >> 4) & 0xf) + 1;
+ 	DBG(("%s: gt=%d\n", __FUNCTION__, state->gt));
+ 
+-	state->info = &skl_gt_info;
++	state->info = &min_gt_info;
+ 	if (is_skl(sna))
+ 		state->info = &skl_gt_info;
+-	else
+-		return false;
++	if (is_bxt(sna))
++		state->info = &bxt_gt_info;
++	if (is_kbl(sna))
++		state->info = &kbl_gt_info;
+ 
+ 	sna_static_stream_init(&general);
+ 

@@ -1,0 +1,24 @@
+commit 0d38419cbeaae5f8b5260e4d4dd9cfa0d2694eae
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 15 14:58:57 2016 +0100
+
+    sna/gen9: Update mocs selection
+    
+    Since the choice is now boolean (use PTE or use WB), remove the third
+    uncached condition.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+diff --git a/src/sna/gen9_render.c b/src/sna/gen9_render.c
+index 889cded..3c1f07a 100644
+--- a/src/sna/gen9_render.c
++++ b/src/sna/gen9_render.c
+@@ -1427,7 +1427,7 @@ gen9_bind_bo(struct sna *sna,
+ 		domains = I915_GEM_DOMAIN_RENDER << 16 |I915_GEM_DOMAIN_RENDER;
+ 	} else
+ 		domains = I915_GEM_DOMAIN_SAMPLER << 16;
+-	ss[1] = (is_dst && is_uncached(sna, bo)) ? 0 : is_scanout ? MOCS_PTE << 24 : MOCS_WB << 24;
++	ss[1] = (is_scanout || (is_dst && is_uncached(sna, bo))) ? MOCS_PTE << 24 : MOCS_WB << 24;
+ 	ss[2] = ((width - 1)  << SURFACE_WIDTH_SHIFT |
+ 		 (height - 1) << SURFACE_HEIGHT_SHIFT);
+ 	ss[3] = (bo->pitch - 1) << SURFACE_PITCH_SHIFT;

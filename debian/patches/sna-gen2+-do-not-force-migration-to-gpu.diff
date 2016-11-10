@@ -1,0 +1,131 @@
+commit c28e62f94f15c9f5c4fb0744588f08ae18e4a9b5
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Tue Jun 21 21:19:46 2016 +0100
+
+    sna/gen2+: Do not force migration to GPU for very large objects
+    
+    If the target is larger than the maximum render size, allow us not to
+    migrate to the GPU if it is entirely damaged on the CPU.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+diff --git a/src/sna/gen2_render.c b/src/sna/gen2_render.c
+index 12b741c..37ded24 100644
+--- a/src/sna/gen2_render.c
++++ b/src/sna/gen2_render.c
+@@ -1619,7 +1619,9 @@ gen2_composite_set_target(struct sna *sna,
+ 	} else
+ 		sna_render_picture_extents(dst, &box);
+ 
+-	hint = PREFER_GPU | FORCE_GPU | RENDER_GPU;
++	hint = PREFER_GPU | RENDER_GPU;
++	if (!need_tiling(sna, op->dst.width, op->dst.height))
++		hint |= FORCE_GPU;
+ 	if (!partial) {
+ 		hint |= IGNORE_DAMAGE;
+ 		if (w == op->dst.width && h == op->dst.height)
+diff --git a/src/sna/gen3_render.c b/src/sna/gen3_render.c
+index eeea91f..4459a56 100644
+--- a/src/sna/gen3_render.c
++++ b/src/sna/gen3_render.c
+@@ -3228,7 +3228,9 @@ gen3_composite_set_target(struct sna *sna,
+ 	} else
+ 		sna_render_picture_extents(dst, &box);
+ 
+-	hint = PREFER_GPU | FORCE_GPU | RENDER_GPU;
++	hint = PREFER_GPU | RENDER_GPU;
++	if (!need_tiling(sna, op->dst.width, op->dst.height))
++		hint |= FORCE_GPU;
+ 	if (!partial) {
+ 		hint |= IGNORE_DAMAGE;
+ 		if (w == op->dst.width && h == op->dst.height)
+diff --git a/src/sna/gen4_render.c b/src/sna/gen4_render.c
+index 552da49..72a98ae 100644
+--- a/src/sna/gen4_render.c
++++ b/src/sna/gen4_render.c
+@@ -1647,7 +1647,9 @@ gen4_composite_set_target(struct sna *sna,
+ 	} else
+ 		sna_render_picture_extents(dst, &box);
+ 
+-	hint = PREFER_GPU | FORCE_GPU | RENDER_GPU;
++	hint = PREFER_GPU | RENDER_GPU;
++	if (!need_tiling(sna, op->dst.width, op->dst.height))
++		hint |= FORCE_GPU;
+ 	if (!partial) {
+ 		hint |= IGNORE_DAMAGE;
+ 		if (w == op->dst.width && h == op->dst.height)
+diff --git a/src/sna/gen5_render.c b/src/sna/gen5_render.c
+index e162f9f..fb3e79b 100644
+--- a/src/sna/gen5_render.c
++++ b/src/sna/gen5_render.c
+@@ -1599,7 +1599,9 @@ gen5_composite_set_target(struct sna *sna,
+ 	} else
+ 		sna_render_picture_extents(dst, &box);
+ 
+-	hint = PREFER_GPU | FORCE_GPU | RENDER_GPU;
++	hint = PREFER_GPU | RENDER_GPU;
++	if (!need_tiling(sna, op->dst.width, op->dst.height))
++		hint |= FORCE_GPU;
+ 	if (!partial) {
+ 		hint |= IGNORE_DAMAGE;
+ 		if (w == op->dst.width && h == op->dst.height)
+diff --git a/src/sna/gen6_render.c b/src/sna/gen6_render.c
+index ee17593..6b69f21 100644
+--- a/src/sna/gen6_render.c
++++ b/src/sna/gen6_render.c
+@@ -1908,7 +1908,9 @@ gen6_composite_set_target(struct sna *sna,
+ 	} else
+ 		sna_render_picture_extents(dst, &box);
+ 
+-	hint = PREFER_GPU | FORCE_GPU | RENDER_GPU;
++	hint = PREFER_GPU | RENDER_GPU;
++	if (!need_tiling(sna, op->dst.width, op->dst.height))
++		hint |= FORCE_GPU;
+ 	if (!partial) {
+ 		hint |= IGNORE_DAMAGE;
+ 		if (w == op->dst.width && h == op->dst.height)
+diff --git a/src/sna/gen7_render.c b/src/sna/gen7_render.c
+index f707d39..aabb869 100644
+--- a/src/sna/gen7_render.c
++++ b/src/sna/gen7_render.c
+@@ -2150,7 +2150,9 @@ gen7_composite_set_target(struct sna *sna,
+ 	} else
+ 		sna_render_picture_extents(dst, &box);
+ 
+-	hint = PREFER_GPU | FORCE_GPU | RENDER_GPU;
++	hint = PREFER_GPU | RENDER_GPU;
++	if (!need_tiling(sna, op->dst.width, op->dst.height))
++		hint |= FORCE_GPU;
+ 	if (!partial) {
+ 		hint |= IGNORE_DAMAGE;
+ 		if (w == op->dst.width && h == op->dst.height)
+diff --git a/src/sna/gen8_render.c b/src/sna/gen8_render.c
+index f979ba8..445983b 100644
+--- a/src/sna/gen8_render.c
++++ b/src/sna/gen8_render.c
+@@ -1996,7 +1996,9 @@ gen8_composite_set_target(struct sna *sna,
+ 	} else
+ 		sna_render_picture_extents(dst, &box);
+ 
+-	hint = PREFER_GPU | FORCE_GPU | RENDER_GPU;
++	hint = PREFER_GPU | RENDER_GPU;
++	if (!need_tiling(sna, op->dst.width, op->dst.height))
++		hint |= FORCE_GPU;
+ 	if (!partial) {
+ 		hint |= IGNORE_DAMAGE;
+ 		if (w == op->dst.width && h == op->dst.height)
+diff --git a/src/sna/gen9_render.c b/src/sna/gen9_render.c
+index 7b41cdb..801d514 100644
+--- a/src/sna/gen9_render.c
++++ b/src/sna/gen9_render.c
+@@ -2002,7 +2002,9 @@ gen9_composite_set_target(struct sna *sna,
+ 	} else
+ 		sna_render_picture_extents(dst, &box);
+ 
+-	hint = PREFER_GPU | FORCE_GPU | RENDER_GPU;
++	hint = PREFER_GPU | RENDER_GPU;
++	if (!need_tiling(sna, op->dst.width, op->dst.height))
++		hint |= FORCE_GPU;
+ 	if (!partial) {
+ 		hint |= IGNORE_DAMAGE;
+ 		if (w == op->dst.width && h == op->dst.height)

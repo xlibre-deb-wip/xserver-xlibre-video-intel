@@ -1,0 +1,89 @@
+commit 15c5ff12459a034b552c787047d1af6d61047cd6
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Thu Sep 8 08:30:02 2016 +0100
+
+    sna: Clear damage tracking when marking as all-clear
+    
+    In the middle of a composite op, we take the opportunity to note when a
+    fill clears the entire surface - and mark up the surface as clear. This
+    includes marking it as all damaged, to the surprise of the upper layer.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+diff --git a/src/sna/gen9_render.c b/src/sna/gen9_render.c
+index 0ad7ead..56c1b8d 100644
+--- a/src/sna/gen9_render.c
++++ b/src/sna/gen9_render.c
+@@ -2036,6 +2036,8 @@ gen9_composite_set_target(struct sna *sna,
+ 	if (op->dst.bo == NULL)
+ 		return false;
+ 
++	assert(!op->damage || !DAMAGE_IS_ALL(*op->damage));
++
+ 	if (unaligned(op->dst.bo, dst->pDrawable->bitsPerPixel))
+ 		return false;
+ 
+diff --git a/src/sna/sna_blt.c b/src/sna/sna_blt.c
+index 8b1bee1..ddd2586 100644
+--- a/src/sna/sna_blt.c
++++ b/src/sna/sna_blt.c
+@@ -1204,12 +1204,14 @@ static inline void _sna_blt_maybe_clear(const struct sna_composite_op *op, const
+ 		struct sna_pixmap *priv = sna_pixmap(op->dst.pixmap);
+ 		if (op->dst.bo == priv->gpu_bo) {
+ 			sna_damage_all(&priv->gpu_damage, op->dst.pixmap);
++			sna_damage_destroy(&priv->cpu_damage);
+ 			priv->clear = true;
+ 			priv->clear_color = op->u.blt.pixel;
+ 			DBG(("%s: pixmap=%ld marking clear [%08x]\n",
+ 			     __FUNCTION__,
+ 			     op->dst.pixmap->drawable.serialNumber,
+ 			     op->u.blt.pixel));
++			((struct sna_composite_op *)op)->damage = NULL;
+ 		}
+ 	}
+ }
+@@ -2614,6 +2616,7 @@ nop:
+ 		}
+ 		tmp->dst.bo = sna_drawable_use_bo(dst->pDrawable, hint,
+ 						  &dst_box, &tmp->damage);
++		assert(!tmp->damage || !DAMAGE_IS_ALL(*tmp->damage));
+ 		if (tmp->dst.bo) {
+ 			if (!kgem_bo_can_blt(&sna->kgem, tmp->dst.bo)) {
+ 				DBG(("%s: can not blit to dst, tiling? %d, pitch? %d\n",
+@@ -2714,6 +2717,7 @@ fill:
+ 		}
+ 		tmp->dst.bo = sna_drawable_use_bo(dst->pDrawable, hint,
+ 						  &dst_box, &tmp->damage);
++		assert(!tmp->damage || !DAMAGE_IS_ALL(*tmp->damage));
+ 		if (tmp->dst.bo) {
+ 			if (!kgem_bo_can_blt(&sna->kgem, tmp->dst.bo)) {
+ 				DBG(("%s: can not blit to dst, tiling? %d, pitch? %d\n",
+@@ -2884,6 +2888,7 @@ fill:
+ 	}
+ 	tmp->dst.bo = sna_drawable_use_bo(dst->pDrawable, hint,
+ 					  &dst_box, &tmp->damage);
++	assert(!tmp->damage || !DAMAGE_IS_ALL(*tmp->damage));
+ 
+ 	if (tmp->dst.bo && hint & REPLACES) {
+ 		struct sna_pixmap *priv = sna_pixmap(tmp->dst.pixmap);
+diff --git a/src/sna/sna_composite.c b/src/sna/sna_composite.c
+index c6de9d5..1da8c29 100644
+--- a/src/sna/sna_composite.c
++++ b/src/sna/sna_composite.c
+@@ -452,6 +452,8 @@ static void apply_damage(struct sna_composite_op *op, RegionPtr region)
+ 		op->damage = NULL;
+ 	} else
+ 		sna_damage_add(op->damage, region);
++
++	assert(!op->damage || !DAMAGE_IS_ALL(*op->damage));
+ }
+ 
+ static inline bool use_cpu(PixmapPtr pixmap, struct sna_pixmap *priv,
+@@ -757,6 +759,7 @@ sna_composite(CARD8 op,
+ 		DBG(("%s: fallback due unhandled composite op\n", __FUNCTION__));
+ 		goto fallback;
+ 	}
++	assert(!tmp.damage || !DAMAGE_IS_ALL(*tmp.damage));
+ 
+ 	if (region.data == NULL)
+ 		tmp.box(sna, &tmp, &region.extents);

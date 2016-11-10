@@ -1,0 +1,59 @@
+commit 81029be07380090195d165fab91d3e1fe1d84bb9
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Sun Apr 17 15:59:36 2016 +0100
+
+    sna/gen8+: Flush pipecontrols when forcing a pipeline stall
+    
+    In order to actually stall the pipeline completely and to wait for
+    earlier flushes to complete, we have to set a flag in the pipecontrol.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+diff --git a/src/sna/gen8_render.c b/src/sna/gen8_render.c
+index 0947576..f979ba8 100644
+--- a/src/sna/gen8_render.c
++++ b/src/sna/gen8_render.c
+@@ -1201,6 +1201,7 @@ gen8_emit_pipe_stall(struct sna *sna)
+ {
+ 	OUT_BATCH(GEN8_PIPE_CONTROL | (6 - 2));
+ 	OUT_BATCH(PIPE_CONTROL_CS_STALL |
++		  PIPE_CONTROL_FLUSH |
+ 		  PIPE_CONTROL_STALL_AT_SCOREBOARD);
+ 	OUT_BATCH64(0);
+ 	OUT_BATCH64(0);
+diff --git a/src/sna/gen8_render.h b/src/sna/gen8_render.h
+index eb4928e..e6a8dc5 100644
+--- a/src/sna/gen8_render.h
++++ b/src/sna/gen8_render.h
+@@ -335,6 +335,7 @@
+ #define PIPE_CONTROL_IS_FLUSH      (1 << 11)
+ #define PIPE_CONTROL_TC_FLUSH      (1 << 10)
+ #define PIPE_CONTROL_NOTIFY_ENABLE (1 << 8)
++#define PIPE_CONTROL_FLUSH         (1 << 7)
+ #define PIPE_CONTROL_GLOBAL_GTT    (1 << 2)
+ #define PIPE_CONTROL_LOCAL_PGTT    (0 << 2)
+ #define PIPE_CONTROL_STALL_AT_SCOREBOARD   (1 << 1)
+diff --git a/src/sna/gen9_render.c b/src/sna/gen9_render.c
+index 3c1f07a..7b41cdb 100644
+--- a/src/sna/gen9_render.c
++++ b/src/sna/gen9_render.c
+@@ -1211,6 +1211,7 @@ gen9_emit_pipe_stall(struct sna *sna)
+ {
+ 	OUT_BATCH(GEN9_PIPE_CONTROL | (6 - 2));
+ 	OUT_BATCH(PIPE_CONTROL_CS_STALL |
++		  PIPE_CONTROL_FLUSH |
+ 		  PIPE_CONTROL_STALL_AT_SCOREBOARD);
+ 	OUT_BATCH64(0);
+ 	OUT_BATCH64(0);
+diff --git a/src/sna/gen9_render.h b/src/sna/gen9_render.h
+index e8fafb5..e3cb3f9 100644
+--- a/src/sna/gen9_render.h
++++ b/src/sna/gen9_render.h
+@@ -344,6 +344,7 @@
+ #define PIPE_CONTROL_IS_FLUSH      (1 << 11)
+ #define PIPE_CONTROL_TC_FLUSH      (1 << 10)
+ #define PIPE_CONTROL_NOTIFY_ENABLE (1 << 8)
++#define PIPE_CONTROL_FLUSH         (1 << 7)
+ #define PIPE_CONTROL_GLOBAL_GTT    (1 << 2)
+ #define PIPE_CONTROL_LOCAL_PGTT    (0 << 2)
+ #define PIPE_CONTROL_STALL_AT_SCOREBOARD   (1 << 1)

@@ -8,3 +8,13 @@ revert-dpms-fix.patch
 preserve-mouse-cursor-after-vt-switch.patch
 add-more-kbl-pciids.diff
 remove-invalid-kbl-pciids.diff
+
+# sna gen9 backport
+sna-add-gen9.diff
+sna-gen9-bias-gt-for-pipeline-selection.diff
+sna-gen9-update-mocs-selection.diff
+sna-gen8+-flush-pipecontrols.diff
+sna-gen2+-do-not-force-migration-to-gpu.diff
+sna-gen9-add-missing-gt-info-for-bxt-kbl.diff
+sna-gen9-fix-kbl-typo.diff
+sna-clear-damage-tracking.diff

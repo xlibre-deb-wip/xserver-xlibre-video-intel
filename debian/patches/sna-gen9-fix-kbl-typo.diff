@@ -1,0 +1,22 @@
+commit 205146b0fdc8db016e5cfeeae5a6b25df3470ebc
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Mon Sep 5 10:05:30 2016 +0100
+
+    sna/gen9: Fix Kabylake typo
+    
+    Reported-by: Joseph Yasi
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+diff --git a/src/sna/gen9_render.c b/src/sna/gen9_render.c
+index 4e4172e..0ad7ead 100644
+--- a/src/sna/gen9_render.c
++++ b/src/sna/gen9_render.c
+@@ -236,7 +236,7 @@ static const struct gt_info bxt_gt_info = {
+ };
+ 
+ static const struct gt_info kbl_gt_info = {
+-	.name = "Kayblake (gen9)",
++	.name = "Kabylake (gen9)",
+ 	.urb = { .max_vs_entries = 960 },
+ };
+ 

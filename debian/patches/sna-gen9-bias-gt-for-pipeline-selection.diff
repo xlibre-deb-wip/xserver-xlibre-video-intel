@@ -1,0 +1,33 @@
+commit e783ffa4977ae63a7192a5905fe0d8ccd055ee8e
+Author: Chris Wilson <chris@chris-wilson.co.uk>
+Date:   Fri Apr 8 15:01:43 2016 +0100
+
+    sna/gen9: Bias GT for pipeline selection
+    
+    Each GT on Skylake is bigger than previous generations. For reusing the
+    placement logic, we then want to pretend that Skylake has a higher
+    GT-equivalence.
+    
+    Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+
+diff --git a/src/sna/gen9_render.c b/src/sna/gen9_render.c
+index 2a0c3d3..889cded 100644
+--- a/src/sna/gen9_render.c
++++ b/src/sna/gen9_render.c
+@@ -68,6 +68,7 @@
+ #endif
+ 
+ #define GEN9_MAX_SIZE 16384
++#define GEN9_GT_BIAS 1 /* Each GT is bigger than previous gen */
+ 
+ /* XXX Todo
+  *
+@@ -3975,7 +3976,7 @@ static bool gen9_render_setup(struct sna *sna)
+ 
+ 	devid = intel_get_device_id(sna->dev);
+ 	if (devid & 0xf)
+-		state->gt = ((devid >> 4) & 0xf) + 1;
++		state->gt = GEN9_GT_BIAS + ((devid >> 4) & 0xf) + 1;
+ 	DBG(("%s: gt=%d\n", __FUNCTION__, state->gt));
+ 
+ 	state->info = &skl_gt_info;
