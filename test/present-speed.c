@@ -145,10 +145,12 @@ struct buffer {
 	struct dri3_fence fence;
 	int fd;
 	int busy;
+	int id;
 };
 
 #define DRI3 1
 #define NOCOPY 2
+#define ASYNC 4
 static void run(Display *dpy, Window win, const char *name, unsigned options)
 {
 	xcb_connection_t *c = XGetXCBConnection(dpy);
@@ -160,12 +162,12 @@ static void run(Display *dpy, Window win, const char *name, unsigned options)
 	Window root;
 	unsigned int width, height;
 	unsigned border, depth;
-	unsigned present_flags = XCB_PRESENT_OPTION_ASYNC;
+	unsigned present_flags = 0;
 	xcb_xfixes_region_t update = 0;
 	int completed = 0;
 	int queued = 0;
-	uint32_t eid;
-	void *Q;
+	uint32_t eid = 0;
+	void *Q = NULL;
 	int i, n;
 
 	list_init(&mru);
@@ -176,10 +178,12 @@ static void run(Display *dpy, Window win, const char *name, unsigned options)
 	_x_error_occurred = 0;
 
 	for (n = 0; n < N_BACK; n++) {
-		buffer[n].pixmap =
-			XCreatePixmap(dpy, win, width, height, depth);
+		buffer[n].pixmap = xcb_generate_id(c);
+		xcb_create_pixmap(c, depth, buffer[n].pixmap, win,
+				  width, height);
 		buffer[n].fence.xid = 0;
 		buffer[n].fd = -1;
+		buffer[n].id = n;
 		if (options & DRI3) {
 			xcb_dri3_buffer_from_pixmap_reply_t *reply;
 			int *fds;
@@ -188,8 +192,8 @@ static void run(Display *dpy, Window win, const char *name, unsigned options)
 				return;
 
 			reply = xcb_dri3_buffer_from_pixmap_reply (c,
-					xcb_dri3_buffer_from_pixmap(c, buffer[n].pixmap),
-					NULL);
+								   xcb_dri3_buffer_from_pixmap(c, buffer[n].pixmap),
+								   NULL);
 			if (reply == NULL)
 				return;
 
@@ -203,29 +207,43 @@ static void run(Display *dpy, Window win, const char *name, unsigned options)
 		buffer[n].busy = 0;
 		list_add(&buffer[n].link, &mru);
 	}
+	if (options & ASYNC)
+		present_flags |= XCB_PRESENT_OPTION_ASYNC;
 	if (options & NOCOPY) {
 		update = xcb_generate_id(c);
 		xcb_xfixes_create_region(c, update, 0, NULL);
 		present_flags |= XCB_PRESENT_OPTION_COPY;
 	}
 
-	eid = xcb_generate_id(c);
-	xcb_present_select_input(c, eid, win,
-                                 (options & NOCOPY ? 0 : XCB_PRESENT_EVENT_MASK_IDLE_NOTIFY) |
-                                 XCB_PRESENT_EVENT_MASK_COMPLETE_NOTIFY);
-	Q = xcb_register_for_special_xge(c, &xcb_present_id, eid, &stamp);
+	if (!(options & DRI3)) {
+		eid = xcb_generate_id(c);
+		xcb_present_select_input(c, eid, win,
+					 (options & NOCOPY ? 0 : XCB_PRESENT_EVENT_MASK_IDLE_NOTIFY) |
+					 XCB_PRESENT_EVENT_MASK_COMPLETE_NOTIFY);
+		Q = xcb_register_for_special_xge(c, &xcb_present_id, eid, &stamp);
+	}
 
 	clock_gettime(CLOCK_MONOTONIC, &start);
 	do {
 		for (n = 0; n < 1000; n++) {
 			struct buffer *tmp, *b = NULL;
+retry:
 			list_for_each_entry(tmp, &mru, link) {
+				if (tmp->fence.xid)
+					tmp->busy = !xshmfence_query(tmp->fence.addr);
 				if (!tmp->busy) {
 					b = tmp;
 					break;
 				}
 			}
-			while (b == NULL) {
+			if (options & DRI3) {
+				if (b == NULL)
+					goto retry;
+
+				xshmfence_reset(b->fence.addr);
+				queued--;
+				completed++;
+			} else while (b == NULL) {
 				xcb_present_generic_event_t *ev;
 
 				ev = (xcb_present_generic_event_t *)
@@ -255,11 +273,7 @@ static void run(Display *dpy, Window win, const char *name, unsigned options)
 			}
 
 			b->busy = (options & NOCOPY) == 0;
-			if (b->fence.xid) {
-				xshmfence_await(b->fence.addr);
-				xshmfence_reset(b->fence.addr);
-			}
-			xcb_present_pixmap(c, win, b->pixmap, b - buffer,
+			xcb_present_pixmap(c, win, b->pixmap, b->id,
 					   0, /* valid */
 					   update, /* update */
 					   0, /* x_off */
@@ -279,7 +293,33 @@ static void run(Display *dpy, Window win, const char *name, unsigned options)
 		clock_gettime(CLOCK_MONOTONIC, &end);
 	} while (end.tv_sec < start.tv_sec + 10);
 
-	while (queued) {
+	if (options & DRI3) {
+		struct buffer *b;
+		XID pixmap;
+
+		pixmap = xcb_generate_id(c);
+		xcb_create_pixmap(c, depth, pixmap, win, width, height);
+		xcb_present_pixmap(c, win, pixmap, 0xdeadbeef,
+				   0, /* valid */
+				   None, /* update */
+				   0, /* x_off */
+				   0, /* y_off */
+				   None,
+				   None, /* wait fence */
+				   None,
+				   0,
+				   0, /* target msc */
+				   0, /* divisor */
+				   0, /* remainder */
+				   0, NULL);
+		xcb_flush(c);
+
+		list_for_each_entry(b, &mru, link)
+			xshmfence_await(b->fence.addr);
+
+		xcb_free_pixmap(c, pixmap);
+		completed += queued;
+	} else while (queued) {
 		xcb_present_generic_event_t *ev;
 
 		ev = (xcb_present_generic_event_t *)
@@ -309,26 +349,271 @@ static void run(Display *dpy, Window win, const char *name, unsigned options)
 			dri3_fence_free(dpy, &buffer[n].fence);
 		if (buffer[n].fd != -1)
 			close(buffer[n].fd);
-		XFreePixmap(dpy, buffer[n].pixmap);
+		xcb_free_pixmap(c, buffer[n].pixmap);
 	}
 
-	XSync(dpy, True);
-	if (_x_error_occurred)
-		abort();
-
-	_x_error_occurred = -1;
-	xcb_present_select_input(c, eid, win, 0);
-	XSync(dpy, True);
-	xcb_unregister_for_special_event(c, Q);
+	if (Q) {
+		xcb_discard_reply(c, xcb_present_select_input_checked(c, eid, win, 0).sequence);
+		XSync(dpy, True);
+		xcb_unregister_for_special_event(c, Q);
+	}
 
 	test_name[0] = '\0';
 	if (options) {
-		snprintf(test_name, sizeof(test_name), "(%s%s )",
+		snprintf(test_name, sizeof(test_name), "(%s%s%s )",
 			 options & NOCOPY ? " no-copy" : "",
-			 options & DRI3 ? " dri3" : "");
+			 options & DRI3 ? " dri3" : "",
+			 options & ASYNC ? " async" : "");
 	}
 	printf("%s%s: Completed %d presents in %.1fs, %.3fus each (%.1f FPS)\n",
 	       name, test_name,
+	       completed, elapsed(&start, &end) / 1000000,
+	       elapsed(&start, &end) / completed,
+	       completed / (elapsed(&start, &end) / 1000000));
+}
+
+struct perpixel {
+	Window win;
+	struct buffer buffer[N_BACK];
+	struct list mru;
+	uint32_t eid;
+	void *Q;
+	int queued;
+};
+
+static void perpixel(Display *dpy,
+		     int max_width, int max_height, unsigned options)
+{
+	//const int sz = max_width * max_height;
+	const int sz = 1048;
+	struct perpixel *pp;
+	xcb_connection_t *c = XGetXCBConnection(dpy);
+	struct timespec start, end;
+	char test_name[128];
+	unsigned present_flags = 0;
+	xcb_xfixes_region_t update = 0;
+	int completed = 0;
+	int i, n;
+
+	pp = calloc(sz, sizeof(*pp));
+	if (!pp)
+		return;
+
+	for (i = 0; i < sz; i++) {
+		XSetWindowAttributes attr = { .override_redirect = 1 };
+		int depth = DefaultDepth(dpy, DefaultScreen(dpy));
+		pp[i].win = XCreateWindow(dpy, DefaultRootWindow(dpy),
+					  i % max_width, i / max_width, 1, 1, 0, depth,
+					  InputOutput,
+					  DefaultVisual(dpy, DefaultScreen(dpy)),
+					  CWOverrideRedirect, &attr);
+		XMapWindow(dpy, pp[i].win);
+		list_init(&pp[i].mru);
+		for (n = 0; n < N_BACK; n++) {
+			pp[i].buffer[n].pixmap = xcb_generate_id(c);
+			xcb_create_pixmap(c, depth, pp[i].buffer[n].pixmap,
+					  pp[i].win, 1, 1);
+			pp[i].buffer[n].fence.xid = 0;
+			pp[i].buffer[n].fd = -1;
+			pp[i].buffer[n].id = n;
+			if (options & DRI3) {
+				xcb_dri3_buffer_from_pixmap_reply_t *reply;
+				int *fds;
+
+				if (dri3_create_fence(dpy, pp[i].win, &pp[i].buffer[n].fence))
+					return;
+
+				reply = xcb_dri3_buffer_from_pixmap_reply(c,
+									  xcb_dri3_buffer_from_pixmap(c, pp[i].buffer[n].pixmap),
+									  NULL);
+				if (reply == NULL)
+					return;
+
+				fds = xcb_dri3_buffer_from_pixmap_reply_fds(c, reply);
+				pp[i].buffer[n].fd = fds[0];
+				free(reply);
+
+				/* start idle */
+				xshmfence_trigger(pp[i].buffer[n].fence.addr);
+			}
+			pp[i].buffer[n].busy = 0;
+			list_add(&pp[i].buffer[n].link, &pp[i].mru);
+		}
+
+		if (!(options & DRI3)) {
+			pp[i].eid = xcb_generate_id(c);
+			xcb_present_select_input(c, pp[i].eid, pp[i].win,
+						 (options & NOCOPY ? 0 : XCB_PRESENT_EVENT_MASK_IDLE_NOTIFY) |
+						 XCB_PRESENT_EVENT_MASK_COMPLETE_NOTIFY);
+			pp[i].Q = xcb_register_for_special_xge(c, &xcb_present_id, pp[i].eid, &stamp);
+		}
+		pp[i].queued = 0;
+	}
+
+	XSync(dpy, True);
+	_x_error_occurred = 0;
+
+	if (options & ASYNC)
+		present_flags |= XCB_PRESENT_OPTION_ASYNC;
+	if (options & NOCOPY) {
+		update = xcb_generate_id(c);
+		xcb_xfixes_create_region(c, update, 0, NULL);
+		present_flags |= XCB_PRESENT_OPTION_COPY;
+	}
+
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	do {
+		for (i = 0; i < sz; i++) {
+			struct buffer *tmp, *b = NULL;
+retry:
+			list_for_each_entry(tmp, &pp[i].mru, link) {
+				if (tmp->fence.xid)
+					tmp->busy = !xshmfence_query(tmp->fence.addr);
+				if (!tmp->busy) {
+					b = tmp;
+					break;
+				}
+			}
+			if (options & DRI3) {
+				if (b == NULL)
+					goto retry;
+
+				xshmfence_reset(b->fence.addr);
+				pp[i].queued--;
+				completed++;
+			} else while (b == NULL) {
+				xcb_present_generic_event_t *ev;
+
+				ev = (xcb_present_generic_event_t *)
+					xcb_wait_for_special_event(c, pp[i].Q);
+				if (ev == NULL)
+					abort();
+
+				do {
+					switch (ev->evtype) {
+					case XCB_PRESENT_COMPLETE_NOTIFY:
+						completed++;
+						pp[i].queued--;
+						break;
+
+					case XCB_PRESENT_EVENT_IDLE_NOTIFY:
+						{
+							xcb_present_idle_notify_event_t *ie = (xcb_present_idle_notify_event_t *)ev;
+							assert(ie->serial < N_BACK);
+							pp[i].buffer[ie->serial].busy = 0;
+							if (b == NULL)
+								b = &pp[i].buffer[ie->serial];
+							break;
+						}
+					}
+					free(ev);
+				} while ((ev = (xcb_present_generic_event_t *)xcb_poll_for_special_event(c, pp[i].Q)));
+			}
+
+			b->busy = (options & NOCOPY) == 0;
+			xcb_present_pixmap(c, pp[i].win, b->pixmap, b->id,
+					   0, /* valid */
+					   update, /* update */
+					   0, /* x_off */
+					   0, /* y_off */
+					   None,
+					   None, /* wait fence */
+					   b->fence.xid,
+					   present_flags,
+					   0, /* target msc */
+					   0, /* divisor */
+					   0, /* remainder */
+					   0, NULL);
+			list_move(&b->link, &pp[i].mru);
+			pp[i].queued++;
+		}
+		xcb_flush(c);
+		clock_gettime(CLOCK_MONOTONIC, &end);
+	} while (end.tv_sec < start.tv_sec + 10);
+
+	for (i = 0; i < sz; i++) {
+		if (options & DRI3) {
+			int depth = DefaultDepth(dpy, DefaultScreen(dpy));
+			struct buffer *b;
+			XID pixmap;
+
+			pixmap = xcb_generate_id(c);
+			xcb_create_pixmap(c, depth, pixmap, pp[i].win, 1, 1);
+			xcb_present_pixmap(c, pp[i].win, pixmap, 0xdeadbeef,
+					   0, /* valid */
+					   None, /* update */
+					   0, /* x_off */
+					   0, /* y_off */
+					   None,
+					   None, /* wait fence */
+					   None,
+					   0,
+					   0, /* target msc */
+					   0, /* divisor */
+					   0, /* remainder */
+					   0, NULL);
+			xcb_flush(c);
+
+			list_for_each_entry(b, &pp[i].mru, link)
+				xshmfence_await(b->fence.addr);
+
+			xcb_free_pixmap(c, pixmap);
+			completed += pp[i].queued;
+		} else while (pp[i].queued) {
+			xcb_present_generic_event_t *ev;
+
+			ev = (xcb_present_generic_event_t *)
+				xcb_wait_for_special_event(c, pp[i].Q);
+			if (ev == NULL)
+				abort();
+
+			do {
+				switch (ev->evtype) {
+				case XCB_PRESENT_COMPLETE_NOTIFY:
+					completed++;
+					pp[i].queued--;
+					break;
+
+				case XCB_PRESENT_EVENT_IDLE_NOTIFY:
+					break;
+				}
+				free(ev);
+			} while ((ev = (xcb_present_generic_event_t *)xcb_poll_for_special_event(c, pp[i].Q)));
+		}
+	}
+	clock_gettime(CLOCK_MONOTONIC, &end);
+
+	if (update)
+		xcb_xfixes_destroy_region(c, update);
+
+	for (i = 0; i < sz; i++) {
+		for (n = 0; n < N_BACK; n++) {
+			if (pp[i].buffer[n].fence.xid)
+				dri3_fence_free(dpy, &pp[i].buffer[n].fence);
+			if (pp[i].buffer[n].fd != -1)
+				close(pp[i].buffer[n].fd);
+			xcb_free_pixmap(c, pp[i].buffer[n].pixmap);
+		}
+
+		if (pp[i].Q) {
+			xcb_discard_reply(c, xcb_present_select_input_checked(c, pp[i].eid, pp[i].win, 0).sequence);
+			XSync(dpy, True);
+			xcb_unregister_for_special_event(c, pp[i].Q);
+		}
+
+		XDestroyWindow(dpy, pp[i].win);
+	}
+	free(pp);
+
+	test_name[0] = '\0';
+	if (options) {
+		snprintf(test_name, sizeof(test_name), "(%s%s%s )",
+			 options & NOCOPY ? " no-copy" : "",
+			 options & DRI3 ? " dri3" : "",
+			 options & ASYNC ? " async" : "");
+	}
+	printf("%s%s: Completed %d presents in %.1fs, %.3fus each (%.1f FPS)\n",
+	       __func__, test_name,
 	       completed, elapsed(&start, &end) / 1000000,
 	       elapsed(&start, &end) / completed,
 	       completed / (elapsed(&start, &end) / 1000000));
@@ -343,7 +628,56 @@ static int isqrt(int x)
 	return i;
 }
 
-static void siblings(int max_width, int max_height, int ncpus, unsigned options)
+struct sibling {
+	pthread_t thread;
+	Display *dpy;
+	int x, y;
+	int width, height;
+	unsigned options;
+};
+
+static void *sibling(void *arg)
+{
+	struct sibling *s = arg;
+	XSetWindowAttributes attr = { .override_redirect = 1 };
+	Window win = XCreateWindow(s->dpy, DefaultRootWindow(s->dpy),
+				   s->x, s->y, s->width, s->height, 0,
+				   DefaultDepth(s->dpy, DefaultScreen(s->dpy)),
+				   InputOutput,
+				   DefaultVisual(s->dpy, DefaultScreen(s->dpy)),
+				   CWOverrideRedirect, &attr);
+	XMapWindow(s->dpy, win);
+	run(s->dpy, win, "sibling", s->options);
+	return NULL;
+}
+
+static void siblings(Display *dpy,
+		     int max_width, int max_height, int ncpus, unsigned options)
+{
+	int sq_ncpus = isqrt(ncpus);
+	int width = max_width / sq_ncpus;
+	int height = max_height/ sq_ncpus;
+	struct sibling s[ncpus];
+	int child;
+
+	if (ncpus <= 1)
+		return;
+
+	for (child = 0; child < ncpus; child++) {
+		s[child].dpy = dpy;
+		s[child].x = (child % sq_ncpus) * width;
+		s[child].y = (child / sq_ncpus) * height;
+		s[child].width = width;
+		s[child].height = height;
+		s[child].options = options;
+		pthread_create(&s[child].thread, NULL, sibling, &s[child]);
+	}
+
+	for (child = 0; child < ncpus; child++)
+		pthread_join(s[child].thread, NULL);
+}
+
+static void cousins(int max_width, int max_height, int ncpus, unsigned options)
 {
 	int sq_ncpus = isqrt(ncpus);
 	int width = max_width / sq_ncpus;
@@ -366,7 +700,7 @@ static void siblings(int max_width, int max_height, int ncpus, unsigned options)
 						   DefaultVisual(dpy, DefaultScreen(dpy)),
 						   CWOverrideRedirect, &attr);
 			XMapWindow(dpy, win);
-			run(dpy, win, "sibling", options);
+			run(dpy, win, "cousin", options);
 		}
 	}
 
@@ -580,7 +914,7 @@ static void loop(Display *dpy, XRRScreenResources *res, unsigned options)
 						    DefaultVisual(dpy, DefaultScreen(dpy)),
 						    CWOverrideRedirect, &attr);
 				XCompositeRedirectWindow(dpy, win, CompositeRedirectManual);
-				damage = XDamageCreate(dpy, win, XDamageReportRawRectangles);
+				damage = XDamageCreate(dpy, win, XDamageReportNonEmpty);
 				XMapWindow(dpy, win);
 				XSync(dpy, True);
 				if (!_x_error_occurred)
@@ -601,9 +935,15 @@ static void loop(Display *dpy, XRRScreenResources *res, unsigned options)
 			XDestroyWindow(dpy, win);
 			XSync(dpy, True);
 
-			siblings(mode->width, mode->height,
+			perpixel(dpy, mode->width, mode->height, options);
+
+			siblings(dpy, mode->width, mode->height,
 				 sysconf(_SC_NPROCESSORS_ONLN),
 				 options);
+
+			cousins(mode->width, mode->height,
+				sysconf(_SC_NPROCESSORS_ONLN),
+				options);
 
 			XRRSetCrtcConfig(dpy, res, output->crtcs[c], CurrentTime,
 					 0, 0, None, RR_Rotate_0, NULL, 0);
@@ -611,6 +951,7 @@ static void loop(Display *dpy, XRRScreenResources *res, unsigned options)
 
 		XRRFreeOutputInfo(output);
 	}
+
 }
 
 int main(void)
@@ -619,6 +960,8 @@ int main(void)
 	XRRScreenResources *res;
 	XRRCrtcInfo **original_crtc;
 	int i;
+
+	XInitThreads();
 
 	dpy = XOpenDisplay(NULL);
 	if (dpy == NULL)
@@ -649,10 +992,13 @@ int main(void)
 				 0, 0, None, RR_Rotate_0, NULL, 0);
 
 	loop(dpy, res, 0);
+	loop(dpy, res, ASYNC);
 	if (has_xfixes(dpy))
 		loop(dpy, res, NOCOPY);
-	if (has_dri3(dpy))
+	if (has_dri3(dpy)) {
 		loop(dpy, res, DRI3);
+		loop(dpy, res, DRI3 | ASYNC);
+	}
 
 	for (i = 0; i < res->ncrtc; i++)
 		XRRSetCrtcConfig(dpy, res, res->crtcs[i], CurrentTime,

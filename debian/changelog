@@ -1,3 +1,10 @@
+xserver-xorg-video-intel (2:2.99.917+git20161105-1) unstable; urgency=medium
+
+  * New upstream snapshot.
+  * control: Bump policy to 3.9.8, no changes.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Thu, 17 Nov 2016 12:44:07 +0200
+
 xserver-xorg-video-intel (2:2.99.917+git20160706-1~bpo8+1) jessie-backports; urgency=medium
 
   * Rebuild for jessie-backports.

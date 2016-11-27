@@ -52,7 +52,7 @@ Build-Depends:
 # tests, benchmarks:
 # libcairo2-dev,
 # libpng12-dev,
-Standards-Version: 3.9.6
+Standards-Version: 3.9.8
 Vcs-Git: git://anonscm.debian.org/pkg-xorg/driver/xserver-xorg-video-intel
 Vcs-Browser: http://anonscm.debian.org/cgit/pkg-xorg/driver/xserver-xorg-video-intel.git
 Homepage: http://www.x.org/
