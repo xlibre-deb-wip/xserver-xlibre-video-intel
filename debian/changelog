@@ -1,3 +1,9 @@
+xserver-xorg-video-intel (2:2.99.917+git20161105-1~bpo8+1) jessie-backports; urgency=medium
+
+  * Rebuild for jessie-backports.
+
+ -- Vincent Cheng <vcheng@debian.org>  Sat, 26 Nov 2016 22:04:53 -0800
+
 xserver-xorg-video-intel (2:2.99.917+git20161105-1) unstable; urgency=medium
 
   * New upstream snapshot.
