@@ -22,10 +22,6 @@ override_dh_auto_configure:
 	    --with-builderstring="$(SOURCE_NAME) $(SOURCE_VERSION) ($(BUILDER))" \
 	    $(valgrind)
 
-# Install in debian/tmp to retain control through dh_install:
-override_dh_auto_install:
-	dh_auto_install --destdir=debian/tmp
-
 # Kill *.la files, libxvmc symlinks, and forget no-one:
 override_dh_install:
 	find debian/tmp -name '*.la' -delete
