@@ -20,7 +20,6 @@ override_dh_auto_configure:
 	    --libdir=/usr/lib \
 	    --libexecdir=/usr/lib/xserver-xorg-video-intel \
 	    --with-builderstring="$(SOURCE_NAME) $(SOURCE_VERSION) ($(BUILDER))" \
-	    --disable-silent-rules \
 	    $(valgrind)
 
 # Install in debian/tmp to retain control through dh_install:
