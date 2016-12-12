@@ -1,6 +1,9 @@
 xserver-xorg-video-intel (2:2.99.917+git20161206-1) UNRELEASED; urgency=medium
 
   * New upstream snapshot.
+    - sna: Add missing NULL check for readdir result in
+      has_connector_backlight (Closes: #847073).  Thanks to James Clarke for
+      tracking this down.
 
  -- Andreas Boll <andreas.boll.dev@gmail.com>  Mon, 12 Dec 2016 15:22:52 +0100
 
