@@ -4,10 +4,6 @@ SOURCE_NAME    := $(shell dpkg-parsechangelog | awk -F': ' '/^Source: / {print $
 SOURCE_VERSION := $(shell dpkg-parsechangelog | awk -F': ' '/^Version: / {print $$2}')
 BUILDER        := $(shell dpkg-parsechangelog | awk -F': ' '/^Maintainer: / {print $$2}')
 
-export CPPFLAGS := $(shell dpkg-buildflags --get CPPFLAGS)
-export CFLAGS := $(shell dpkg-buildflags --get CFLAGS)
-export LDFLAGS := $(shell dpkg-buildflags --get LDFLAGS)
-
 DEB_HOST_ARCH_OS ?= $(shell dpkg-architecture -qDEB_HOST_ARCH_OS)
 
 ifeq ($(DEB_HOST_ARCH_OS), linux)
@@ -21,6 +17,8 @@ override_dh_auto_configure:
 	dh_auto_configure -- \
 	    --enable-sna \
 	    --enable-uxa \
+	    --libdir=/usr/lib \
+	    --libexecdir=/usr/lib/xserver-xorg-video-intel \
 	    --with-builderstring="$(SOURCE_NAME) $(SOURCE_VERSION) ($(BUILDER))" \
 	    --disable-silent-rules \
 	    $(valgrind)
@@ -51,7 +49,7 @@ override_dh_installchangelogs:
 	dh_installchangelogs debian/upstream.changelog
 
 %:
-	dh $@ --parallel --with quilt,autoreconf,xsf --builddirectory=build/
+	dh $@ --with quilt,xsf --builddirectory=build/
 
 # Snapshots should only target experimental:
 generate-snapshot: UPSTREAM_VERSION = $(shell echo $(SOURCE_VERSION) | sed 's/^[0-9]*://;s/-.*$$//')
