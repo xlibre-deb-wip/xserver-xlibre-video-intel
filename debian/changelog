@@ -8,6 +8,7 @@ xserver-xorg-video-intel (2:2.99.917+git20161206-1) UNRELEASED; urgency=medium
   * Stop passing --disable-silent-rules to configure, debhelper does
     that for a while.
   * debhelper installs to debian/tmp by default, no need to specify it.
+  * Update a bunch of URLs in packaging to https.
 
  -- Andreas Boll <andreas.boll.dev@gmail.com>  Mon, 12 Dec 2016 15:22:52 +0100
 
