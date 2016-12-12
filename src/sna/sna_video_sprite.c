@@ -261,10 +261,6 @@ sna_video_sprite_show(struct sna *sna,
 		video->color_key_changed &= ~(1 << pipe);
 	}
 
-	assert(pipe < ARRAY_SIZE(video->bo));
-	if (video->bo[pipe] == frame->bo)
-		return true;
-
 	update_dst_box_to_crtc_coords(sna, crtc, dstBox);
 	if (frame->rotation & (RR_Rotate_90 | RR_Rotate_270)) {
 		int tmp = frame->width;
@@ -282,14 +278,29 @@ sna_video_sprite_show(struct sna *sna,
 			uint32_t handles[4];
 			uint32_t pitches[4]; /* pitch for each plane */
 			uint32_t offsets[4]; /* offset of each plane */
+			uint64_t modifiers[4];
 		} f;
 		bool purged = true;
 
 		memset(&f, 0, sizeof(f));
 		f.width = frame->width;
 		f.height = frame->height;
+		f.flags = 1 << 1; /* +modifiers */
 		f.handles[0] = frame->bo->handle;
 		f.pitches[0] = frame->pitch[0];
+
+		switch (frame->bo->tiling) {
+		case I915_TILING_NONE:
+			break;
+		case I915_TILING_X:
+			/* I915_FORMAT_MOD_X_TILED */
+			f.modifiers[0] = (uint64_t)1 << 56 | 1;
+			break;
+		case I915_TILING_Y:
+			/* I915_FORMAT_MOD_X_TILED */
+			f.modifiers[0] = (uint64_t)1 << 56 | 2;
+			break;
+		}
 
 		switch (frame->id) {
 		case FOURCC_RGB565:
@@ -359,7 +370,7 @@ sna_video_sprite_show(struct sna *sna,
 		return false;
 	}
 
-	frame->bo->domain = DOMAIN_NONE;
+	__kgem_bo_clear_dirty(frame->bo);
 
 	if (video->bo[pipe])
 		kgem_bo_destroy(&sna->kgem, video->bo[pipe]);
@@ -373,9 +384,11 @@ static int sna_video_sprite_put_image(ddPutImage_ARGS)
 	struct sna *sna = video->sna;
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(sna->scrn);
 	RegionRec clip;
+	BoxRec draw_extents;
 	int ret, i;
 
 	init_video_region(&clip, draw, drw_x, drw_y, drw_w, drw_h);
+	draw_extents = clip.extents;
 
 	DBG(("%s: always_on_top=%d\n", __FUNCTION__, video->AlwaysOnTop));
 	if (!video->AlwaysOnTop) {
@@ -402,9 +415,9 @@ static int sna_video_sprite_put_image(ddPutImage_ARGS)
 	for (i = 0; i < video->sna->mode.num_real_crtc; i++) {
 		xf86CrtcPtr crtc = config->crtc[i];
 		struct sna_video_frame frame;
+		BoxRec dst = draw_extents;
 		int pipe;
 		INT32 x1, x2, y1, y2;
-		BoxRec dst;
 		RegionRec reg;
 		Rotation rotation;
 		bool cache_bo;
@@ -435,8 +448,6 @@ off:
 		x2 = src_x + src_w;
 		y1 = src_y;
 		y2 = src_y + src_h;
-
-		dst = clip.extents;
 
 		ret = xf86XVClipVideoHelper(&dst, &x1, &x2, &y1, &y2,
 					    &reg, frame.width, frame.height);
@@ -569,7 +580,6 @@ off:
 			ret = BadAlloc;
 		}
 
-		frame.bo->domain = DOMAIN_NONE;
 		if (cache_bo)
 			sna_video_buffer_fini(video);
 		else

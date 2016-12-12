@@ -1033,6 +1033,9 @@ static char *has_connector_backlight(xf86OutputPtr output)
 	DBG(("%s: lookup %s\n", __FUNCTION__, path));
 
 	dir = opendir(path);
+	if (dir == NULL)
+		return NULL;
+
 	while ((de = readdir(dir))) {
 		struct stat st;
 
@@ -2878,6 +2881,13 @@ static void sna_crtc_randr(xf86CrtcPtr crtc)
 	} else
 		crtc->transform_in_use = sna_crtc->rotation != RR_Rotate_0;
 
+	/* Recompute the cursor after a potential change in transform */
+	if (sna_crtc->cursor) {
+		assert(sna_crtc->cursor->ref > 0);
+		sna_crtc->cursor->ref--;
+		sna_crtc->cursor = NULL;
+	}
+
 	if (needs_transform) {
 		sna_crtc->hwcursor = is_affine(&f_fb_to_crtc);
 		sna_crtc->cursor_transform =
@@ -3004,6 +3014,21 @@ static const char *reflection_to_str(Rotation rotation)
 	}
 }
 
+static void reprobe_connectors(xf86CrtcPtr crtc)
+{
+	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(crtc->scrn);
+	struct sna *sna = to_sna(crtc->scrn);
+	int i;
+
+	for (i = 0; i < sna->mode.num_real_output; i++) {
+		xf86OutputPtr output = config->output[i];
+		if (output->crtc == crtc)
+			to_sna_output(output)->reprobe = true;
+	}
+
+	sna_mode_discover(sna, true);
+}
+
 static Bool
 __sna_crtc_set_mode(xf86CrtcPtr crtc)
 {
@@ -3098,7 +3123,8 @@ error:
 	sna_crtc->cursor_transform = saved_cursor_transform;
 	sna_crtc->hwcursor = saved_hwcursor;
 	sna_crtc->bo = saved_bo;
-	sna_mode_discover(sna, true);
+
+	reprobe_connectors(crtc);
 	return FALSE;
 }
 
@@ -5346,6 +5372,7 @@ void sna_mode_discover(struct sna *sna, bool tell)
 {
 	ScreenPtr screen = xf86ScrnToScreen(sna->scrn);
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(sna->scrn);
+	bool force = sna->flags & SNA_REPROBE;
 	struct drm_mode_card_res res;
 	uint32_t connectors[32], now;
 	unsigned changed = 0;
@@ -5379,7 +5406,11 @@ void sna_mode_discover(struct sna *sna, bool tell)
 	if (serial == 0)
 		serial = ++sna->mode.serial;
 
-	now = GetTimeInMillis();
+	if (force) {
+		changed = 4;
+		now = 0;
+	} else
+		now = GetTimeInMillis();
 	for (i = 0; i < res.count_connectors; i++) {
 		DBG(("%s: connector[%d] = %d\n", __FUNCTION__, i, connectors[i]));
 		for (j = 0; j < sna->mode.num_real_output; j++) {
@@ -5648,6 +5679,14 @@ sna_mode_resize(ScrnInfoPtr scrn, int width, int height)
 	assert(sna->mode.shadow_damage == NULL);
 	assert(sna->mode.shadow == NULL);
 
+	/* Flush pending shadow updates */
+	if (sna->mode.flip_active) {
+		DBG(("%s: waiting for %d outstanding TearFree flips\n",
+		     __FUNCTION__, sna->mode.flip_active));
+		while (sna->mode.flip_active && sna_mode_wait_for_event(sna))
+			sna_mode_wakeup(sna);
+	}
+
 	/* Cancel a pending [un]flip (as the pixmaps no longer match) */
 	sna_present_cancel_flip(sna);
 	copy_front(sna, sna->front, new_front);
@@ -5660,14 +5699,6 @@ sna_mode_resize(ScrnInfoPtr scrn, int width, int height)
 	scrn->virtualX = width;
 	scrn->virtualY = height;
 	scrn->displayWidth = width;
-
-	/* Flush pending shadow updates */
-	if (sna->mode.flip_active) {
-		DBG(("%s: waiting for %d outstanding TearFree flips\n",
-		     __FUNCTION__, sna->mode.flip_active));
-		while (sna->mode.flip_active && sna_mode_wait_for_event(sna))
-			sna_mode_wakeup(sna);
-	}
 
 	/* Only update the CRTCs if we are in control */
 	if (!scrn->vtSema)
@@ -5832,20 +5863,6 @@ static struct sna_cursor *__sna_get_cursor(struct sna *sna, xf86CrtcPtr crtc)
 	transformed = to_sna_crtc(crtc)->cursor_transform;
 	rotation = (!transformed && crtc->transform_in_use) ? crtc->rotation : RR_Rotate_0;
 
-	/* Don't allow phys cursor sharing */
-	if (sna->cursor.use_gtt && !transformed) {
-		for (cursor = sna->cursor.cursors; cursor; cursor = cursor->next) {
-			if (cursor->serial == sna->cursor.serial &&
-			    cursor->rotation == rotation &&
-			    !cursor->transformed) {
-				__DBG(("%s: reusing handle=%d, serial=%d, rotation=%d, size=%d\n",
-				       __FUNCTION__, cursor->handle, cursor->serial, cursor->rotation, cursor->size));
-				assert(cursor->size == sna->cursor.size);
-				return cursor;
-			}
-		}
-	}
-
 	if (transformed) {
 		struct pixman_box16 box;
 
@@ -5901,6 +5918,20 @@ static struct sna_cursor *__sna_get_cursor(struct sna *sna, xf86CrtcPtr crtc)
 		       to_sna_crtc(crtc)->cursor_to_fb.m[2][0],
 		       to_sna_crtc(crtc)->cursor_to_fb.m[2][1],
 		       to_sna_crtc(crtc)->cursor_to_fb.m[2][2]));
+	}
+
+	/* Don't allow phys cursor sharing */
+	if (sna->cursor.use_gtt && !transformed) {
+		for (cursor = sna->cursor.cursors; cursor; cursor = cursor->next) {
+			if (cursor->serial == sna->cursor.serial &&
+			    cursor->rotation == rotation &&
+			    !cursor->transformed) {
+				__DBG(("%s: reusing handle=%d, serial=%d, rotation=%d, size=%d\n",
+				       __FUNCTION__, cursor->handle, cursor->serial, cursor->rotation, cursor->size));
+				assert(cursor->size == sna->cursor.size);
+				return cursor;
+			}
+		}
 	}
 
 	cursor = to_sna_crtc(crtc)->cursor;
@@ -6289,6 +6320,14 @@ sna_set_cursor_position(ScrnInfoPtr scrn, int x, int y)
 		if (sna_crtc->bo == NULL)
 			goto disable;
 
+		cursor = __sna_get_cursor(sna, crtc);
+		if (cursor == NULL)
+			cursor = sna_crtc->cursor;
+		if (cursor == NULL) {
+			__DBG(("%s: failed to grab cursor, disabling\n", __FUNCTION__));
+			goto disable;
+		}
+
 		if (crtc->transform_in_use) {
 			int xhot = sna->cursor.ref->bits->xhot;
 			int yhot = sna->cursor.ref->bits->yhot;
@@ -6313,15 +6352,6 @@ sna_set_cursor_position(ScrnInfoPtr scrn, int x, int y)
 
 		if (arg.x < crtc->mode.HDisplay && arg.x > -sna->cursor.size &&
 		    arg.y < crtc->mode.VDisplay && arg.y > -sna->cursor.size) {
-			cursor = __sna_get_cursor(sna, crtc);
-			if (cursor == NULL)
-				cursor = sna_crtc->cursor;
-			if (cursor == NULL) {
-				__DBG(("%s: failed to grab cursor, disabling\n",
-				       __FUNCTION__));
-				goto disable;
-			}
-
 			if (sna_crtc->cursor != cursor || sna_crtc->last_cursor_size != cursor->size) {
 				arg.flags |= DRM_MODE_CURSOR_BO;
 				arg.handle = cursor->handle;
