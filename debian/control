@@ -8,7 +8,8 @@ Uploaders:
  maximilian attems <maks@debian.org>,
  Vincent Cheng <vcheng@debian.org>,
 Build-Depends:
- debhelper (>= 10),
+ debhelper (>= 8),
+ dh-autoreconf,
  pkg-config,
  xserver-xorg-dev (>= 2:1.11.99.901),
  x11proto-core-dev,
