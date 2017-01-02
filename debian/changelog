@@ -1,3 +1,18 @@
+xserver-xorg-video-intel (2:2.99.917+git20161206-1) unstable; urgency=medium
+
+  [ Andreas Boll ]
+  * New upstream snapshot.
+    - sna: Add missing NULL check for readdir result in
+      has_connector_backlight (Closes: #847073).  Thanks to James Clarke for
+      tracking this down.
+  * Bump debhelper compat to 10.
+  * Stop passing --disable-silent-rules to configure, debhelper does
+    that for a while.
+  * debhelper installs to debian/tmp by default, no need to specify it.
+  * Update a bunch of URLs in packaging to https.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Wed, 14 Dec 2016 11:33:01 +0200
+
 xserver-xorg-video-intel (2:2.99.917+git20161105-1~bpo8+1) jessie-backports; urgency=medium
 
   * Rebuild for jessie-backports.
