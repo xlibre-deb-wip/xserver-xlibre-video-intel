@@ -49,6 +49,7 @@
 
 #define MAX_3D_SIZE 2048
 #define MAX_3D_PITCH 8192
+#define MAX_INLINE (1 << 18)
 
 #define BATCH(v) batch_emit(sna, v)
 #define BATCH_F(v) batch_emit_float(sna, v)
@@ -1199,7 +1200,13 @@ inline static int gen2_get_rectangles(struct sna *sna,
 			sna->render.vertex_offset = sna->kgem.nbatch;
 			BATCH(PRIM3D_INLINE | PRIM3D_RECTLIST);
 		}
-	}
+
+		need = 0;
+	} else
+		need = sna->kgem.nbatch - sna->render.vertex_offset;
+
+	if (rem > MAX_INLINE - need)
+		rem = MAX_INLINE -need;
 
 	if (want > 1 && want * size > rem)
 		want = rem / size;
@@ -3229,6 +3236,9 @@ gen2_get_inline_rectangles(struct sna *sna, int want, int floats_per_vertex)
 {
 	int size = floats_per_vertex * 3;
 	int rem = batch_space(sna) - 1;
+
+	if (rem > MAX_INLINE)
+		rem = MAX_INLINE;
 
 	if (size * want > rem)
 		want = rem / size;
