@@ -52,6 +52,7 @@
 #define MAX_INLINE (1 << 18)
 
 #define BATCH(v) batch_emit(sna, v)
+#define BATCH_ALIGNED(v, a) batch_emit_aligned(sna, v, a)
 #define BATCH_F(v) batch_emit_float(sna, v)
 #define VERTEX(v) batch_emit_float(sna, v)
 
@@ -568,7 +569,8 @@ gen2_get_batch(struct sna *sna, const struct sna_composite_op *op)
 {
 	kgem_set_mode(&sna->kgem, KGEM_RENDER, op->dst.bo);
 
-	if (!kgem_check_batch(&sna->kgem, INVARIANT_SIZE+40)) {
+	/* +7 for i830 3DSTATE_BUFFER_INFO w/a */
+	if (!kgem_check_batch(&sna->kgem, INVARIANT_SIZE+40+7)) {
 		DBG(("%s: flushing batch: size %d > %d\n",
 		     __FUNCTION__, INVARIANT_SIZE+40,
 		     sna->kgem.surface-sna->kgem.nbatch));
@@ -614,7 +616,14 @@ static void gen2_emit_target(struct sna *sna,
 		return;
 	}
 
-	BATCH(_3DSTATE_BUF_INFO_CMD);
+	/*
+	 * i830 w/a: 3DSTATE_BUFFER_INFO
+	 * must not straddle two cachelines.
+	 */
+	if (intel_get_device_id(sna->dev) == 0x3577)
+		BATCH_ALIGNED(_3DSTATE_BUF_INFO_CMD, 8);
+	else
+		BATCH(_3DSTATE_BUF_INFO_CMD);
 	BATCH(BUF_3D_ID_COLOR_BACK |
 	      gen2_buf_tiling(bo->tiling) |
 	      BUF_3D_PITCH(bo->pitch));

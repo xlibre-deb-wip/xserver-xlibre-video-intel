@@ -1216,10 +1216,25 @@ sna_set_shared_pixmap_backing(PixmapPtr pixmap, void *fd_handle)
 	if (priv == NULL)
 		return FALSE;
 
+	if (priv->pinned & ~PIN_PRIME)
+		return FALSE;
+
+	assert(!priv->flush);
+
+	if (priv->gpu_bo) {
+		priv->clear = false;
+		sna_damage_destroy(&priv->gpu_damage);
+		kgem_bo_destroy(&sna->kgem, priv->gpu_bo);
+		priv->gpu_bo = NULL;
+		priv->pinned = 0;
+	}
+
 	assert(!priv->pinned);
-	assert(priv->gpu_bo == NULL);
+
 	assert(priv->cpu_bo == NULL);
 	assert(priv->cpu_damage == NULL);
+
+	assert(priv->gpu_bo == NULL);
 	assert(priv->gpu_damage == NULL);
 
 	bo = kgem_create_for_prime(&sna->kgem,
@@ -10164,7 +10179,7 @@ out:
 	RegionUninit(&data.region);
 }
 
-static inline void box_from_seg(BoxPtr b, const xSegment *seg, GCPtr gc)
+static inline bool box_from_seg(BoxPtr b, const xSegment *seg, GCPtr gc)
 {
 	if (seg->x1 == seg->x2) {
 		if (seg->y1 > seg->y2) {
@@ -10178,6 +10193,9 @@ static inline void box_from_seg(BoxPtr b, const xSegment *seg, GCPtr gc)
 			if (gc->capStyle != CapNotLast)
 				b->y2++;
 		}
+		if (b->y1 >= b->y2)
+			return false;
+
 		b->x1 = seg->x1;
 		b->x2 = seg->x1 + 1;
 	} else {
@@ -10192,6 +10210,9 @@ static inline void box_from_seg(BoxPtr b, const xSegment *seg, GCPtr gc)
 			if (gc->capStyle != CapNotLast)
 				b->x2++;
 		}
+		if (b->x1 >= b->x2)
+			return false;
+
 		b->y1 = seg->y1;
 		b->y2 = seg->y1 + 1;
 	}
@@ -10200,6 +10221,7 @@ static inline void box_from_seg(BoxPtr b, const xSegment *seg, GCPtr gc)
 	     __FUNCTION__,
 	     seg->x1, seg->y1, seg->x2, seg->y2,
 	     b->x1, b->y1, b->x2, b->y2));
+	return true;
 }
 
 static bool
@@ -10234,12 +10256,13 @@ sna_poly_segment_blt(DrawablePtr drawable,
 					nbox = ARRAY_SIZE(boxes);
 				n -= nbox;
 				do {
-					box_from_seg(b, seg++, gc);
-					if (b->y2 > b->y1 && b->x2 > b->x1) {
+					if (box_from_seg(b, seg++, gc)) {
+						assert(!box_empty(b));
 						b->x1 += dx;
 						b->x2 += dx;
 						b->y1 += dy;
 						b->y2 += dy;
+						assert(!box_empty(b));
 						b++;
 					}
 				} while (--nbox);
@@ -10258,7 +10281,10 @@ sna_poly_segment_blt(DrawablePtr drawable,
 					nbox = ARRAY_SIZE(boxes);
 				n -= nbox;
 				do {
-					box_from_seg(b++, seg++, gc);
+					if (box_from_seg(b, seg++, gc)) {
+						assert(!box_empty(b));
+						b++;
+					}
 				} while (--nbox);
 
 				if (b != boxes) {
@@ -10283,7 +10309,10 @@ sna_poly_segment_blt(DrawablePtr drawable,
 			do {
 				BoxRec box;
 
-				box_from_seg(&box, seg++, gc);
+				if (!box_from_seg(&box, seg++, gc))
+					continue;
+
+				assert(!box_empty(&box));
 				box.x1 += drawable->x;
 				box.x2 += drawable->x;
 				box.y1 += drawable->y;
@@ -10301,6 +10330,7 @@ sna_poly_segment_blt(DrawablePtr drawable,
 						b->x2 += dx;
 						b->y1 += dy;
 						b->y2 += dy;
+						assert(!box_empty(b));
 						if (++b == last_box) {
 							fill.boxes(sna, &fill, boxes, last_box-boxes);
 							if (damage)
@@ -10312,7 +10342,10 @@ sna_poly_segment_blt(DrawablePtr drawable,
 			} while (--n);
 		} else {
 			do {
-				box_from_seg(b, seg++, gc);
+				if (!box_from_seg(b, seg++, gc))
+					continue;
+
+				assert(!box_empty(b));
 				b->x1 += drawable->x;
 				b->x2 += drawable->x;
 				b->y1 += drawable->y;
@@ -10322,6 +10355,7 @@ sna_poly_segment_blt(DrawablePtr drawable,
 					b->x2 += dx;
 					b->y1 += dy;
 					b->y2 += dy;
+					assert(!box_empty(b));
 					if (++b == last_box) {
 						fill.boxes(sna, &fill, boxes, last_box-boxes);
 						if (damage)
@@ -10446,8 +10480,11 @@ sna_poly_zero_segment_blt(DrawablePtr drawable,
 				}
 				b->x2++;
 				b->y2++;
-				if (oc1 | oc2)
-					box_intersect(b, extents);
+
+				if ((oc1 | oc2) && !box_intersect(b, extents))
+					continue;
+
+				assert(!box_empty(b));
 				if (++b == last_box) {
 					ret = &&rectangle_continue;
 					goto *jump;
@@ -10510,6 +10547,7 @@ rectangle_continue:
 						     __FUNCTION__, x1, y1,
 						     b->x1, b->y1, b->x2, b->y2));
 
+						assert(!box_empty(b));
 						if (++b == last_box) {
 							ret = &&X_continue;
 							goto *jump;
@@ -10534,6 +10572,7 @@ X_continue:
 						b->x2 = x1 + 1;
 					b->y2 = b->y1 + 1;
 
+					assert(!box_empty(b));
 					if (++b == last_box) {
 						ret = &&X2_continue;
 						goto *jump;
@@ -10595,6 +10634,7 @@ X2_continue:
 							b->y2 = y1 + 1;
 						b->x2 = x1 + 1;
 
+						assert(!box_empty(b));
 						if (++b == last_box) {
 							ret = &&Y_continue;
 							goto *jump;
@@ -10618,6 +10658,7 @@ Y_continue:
 						b->y2 = y1 + 1;
 					b->x2 = x1 + 1;
 
+					assert(!box_empty(b));
 					if (++b == last_box) {
 						ret = &&Y2_continue;
 						goto *jump;
@@ -16936,7 +16977,9 @@ static int sna_create_gc(GCPtr gc)
 
 	gc->freeCompClip = 0;
 	gc->pCompositeClip = 0;
+#if XORG_VERSION_CURRENT < XORG_VERSION_NUMERIC(1,19,99,1,0)
 	gc->pRotatedPixmap = 0;
+#endif
 
 	fb_gc(gc)->bpp = bits_per_pixel(gc->depth);
 
@@ -17617,8 +17660,6 @@ static void sna_accel_post_damage(struct sna *sna)
 		const BoxRec *box;
 		int16_t dx, dy;
 		int n;
-
-		assert(dirty->src == sna->front);
 
 		damage = DamageRegion(dirty->damage);
 		if (RegionNil(damage))

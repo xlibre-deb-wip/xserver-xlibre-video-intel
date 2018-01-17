@@ -138,6 +138,10 @@ static const struct intel_device_info intel_geminilake_info = {
 	.gen = 0113,
 };
 
+static const struct intel_device_info intel_coffeelake_info = {
+	.gen = 0114,
+};
+
 static const SymTabRec intel_chipsets[] = {
 	{PCI_CHIP_I810,				"i810"},
 	{PCI_CHIP_I810_DC100,			"i810-dc100"},
@@ -303,6 +307,13 @@ static const SymTabRec intel_chipsets[] = {
 	{0x5916, "HD Graphics 620"},
 	{0x591E, "HD Graphics 615"},
 
+	/*Coffeelake*/
+	{0x3E90, "HD Graphics"},
+	{0x3E93, "HD Graphics"},
+	{0x3E91, "HD Graphics"},
+	{0x3E92, "HD Graphics"},
+	{0x3E96, "HD Graphics"},
+
 	/* When adding new identifiers, also update:
 	 * 1. intel_identify()
 	 * 2. man/intel.man
@@ -357,6 +368,8 @@ static const struct pci_id_match intel_device_match[] = {
 	INTEL_BXT_IDS(&intel_broxton_info),
 	INTEL_KBL_IDS(&intel_kabylake_info),
 	INTEL_GLK_IDS(&intel_geminilake_info),
+
+	INTEL_CFL_S_IDS(&intel_coffeelake_info),
 
 	INTEL_VGA_DEVICE(PCI_MATCH_ANY, &intel_generic_info),
 #endif

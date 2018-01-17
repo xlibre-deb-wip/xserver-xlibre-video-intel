@@ -554,12 +554,12 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int probe)
 		probe = (uintptr_t)scrn->driverPrivate & 1;
 		sna->info = (void *)((uintptr_t)scrn->driverPrivate & ~3);
 		scrn->driverPrivate = sna;
+		sna->scrn = scrn;
 
 		sna->cpu_features = sna_cpu_detect();
 		sna->acpi.fd = sna_acpi_open();
 	}
 	sna = to_sna(scrn);
-	sna->scrn = scrn;
 	sna->pEnt = pEnt;
 	sna->flags = probe;
 
@@ -945,14 +945,16 @@ static void sna_leave_vt(VT_FUNC_ARGS_DECL)
 	SCRN_INFO_PTR(arg);
 	struct sna *sna = to_sna(scrn);
 
-	DBG(("%s\n", __FUNCTION__));
+	DBG(("%s(vtSema=%d)\n", __FUNCTION__, scrn->vtSema));
 
 	sna_mode_reset(sna);
 	sna_accel_leave(sna);
 
-	if (intel_put_master(sna->dev))
+	if (scrn->vtSema && intel_put_master(sna->dev))
 		xf86DrvMsg(scrn->scrnIndex, X_WARNING,
 			   "drmDropMaster failed: %s\n", strerror(errno));
+
+	scrn->vtSema = FALSE;
 }
 
 static Bool sna_early_close_screen(CLOSE_SCREEN_ARGS_DECL)
@@ -1272,10 +1274,11 @@ static Bool sna_enter_vt(VT_FUNC_ARGS_DECL)
 	SCRN_INFO_PTR(arg);
 	struct sna *sna = to_sna(scrn);
 
-	DBG(("%s\n", __FUNCTION__));
+	DBG(("%s(vtSema=%d)\n", __FUNCTION__, scrn->vtSema));
 	if (intel_get_master(sna->dev))
 		return FALSE;
 
+	scrn->vtSema = TRUE;
 	sna_accel_enter(sna);
 
 	if (sna->flags & SNA_REPROBE) {

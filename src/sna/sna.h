@@ -495,7 +495,9 @@ extern int sna_page_flip(struct sna *sna,
 pure static inline struct sna *
 to_sna(ScrnInfoPtr scrn)
 {
-	return (struct sna *)(scrn->driverPrivate);
+	struct sna *sna = scrn->driverPrivate;
+	assert(sna->scrn == scrn);
+	return sna;
 }
 
 pure static inline struct sna *
@@ -506,7 +508,9 @@ to_sna_from_screen(ScreenPtr screen)
 
 pure static inline ScreenPtr to_screen_from_sna(struct sna *sna)
 {
-	return xf86ScrnToScreen(sna->scrn);
+	ScreenPtr screen = xf86ScrnToScreen(sna->scrn);
+	assert(sna == to_sna_from_screen(screen));
+	return screen;
 }
 
 pure static inline struct sna *
@@ -633,16 +637,28 @@ extern bool sna_crtc_set_sprite_rotation(xf86CrtcPtr crtc, unsigned idx, uint32_
 extern uint32_t sna_crtc_to_sprite(xf86CrtcPtr crtc, unsigned idx);
 extern bool sna_crtc_is_transformed(xf86CrtcPtr crtc);
 
-#define CRTC_VBLANK 0x3
+#define CRTC_VBLANK 0x7
 #define CRTC_ON 0x80000000
 
 uint32_t sna_crtc_id(xf86CrtcPtr crtc);
 
+struct sna_crtc_public {
+	unsigned long flags;
+	struct list vblank_queue;
+};
+
 static inline unsigned long *sna_crtc_flags(xf86CrtcPtr crtc)
 {
-	unsigned long *flags = crtc->driver_private;
-	assert(flags);
-	return flags;
+	struct sna_crtc_public *pub = crtc->driver_private;
+	assert(pub);
+	return &pub->flags;
+}
+
+static inline struct list *sna_crtc_vblank_queue(xf86CrtcPtr crtc)
+{
+	struct sna_crtc_public *pub = crtc->driver_private;
+	assert(pub);
+	return &pub->vblank_queue;
 }
 
 static inline unsigned sna_crtc_pipe(xf86CrtcPtr crtc)
@@ -657,12 +673,14 @@ static inline bool sna_crtc_is_on(xf86CrtcPtr crtc)
 
 static inline void sna_crtc_set_vblank(xf86CrtcPtr crtc)
 {
-	assert((*sna_crtc_flags(crtc) & CRTC_VBLANK) < 3);
+	DBG(("%s: current vblank count: %d\n", __FUNCTION__, *sna_crtc_flags(crtc) & CRTC_VBLANK));
+	assert((*sna_crtc_flags(crtc) & CRTC_VBLANK) < CRTC_VBLANK);
 	++*sna_crtc_flags(crtc);
 }
 
 static inline void sna_crtc_clear_vblank(xf86CrtcPtr crtc)
 {
+	DBG(("%s: current vblank count: %d\n", __FUNCTION__, *sna_crtc_flags(crtc) & CRTC_VBLANK));
 	assert(*sna_crtc_flags(crtc) & CRTC_VBLANK);
 	--*sna_crtc_flags(crtc);
 }

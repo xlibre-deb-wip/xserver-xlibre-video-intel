@@ -197,6 +197,16 @@ static uint32_t msc_to_delay(xf86CrtcPtr crtc, uint64_t target)
 	return MIN(delay, INT32_MAX);
 }
 
+static void add_to_crtc_vblank(struct sna_present_event *info,
+				int delta)
+{
+	info->queued = true;
+	if (delta == 1 && info->crtc) {
+		sna_crtc_set_vblank(info->crtc);
+		info->crtc = mark_crtc(info->crtc);
+	}
+}
+
 static CARD32 sna_fake_vblank_handler(OsTimerPtr timer, CARD32 now, void *data)
 {
 	struct sna_present_event *info = data;
@@ -225,11 +235,7 @@ static CARD32 sna_fake_vblank_handler(OsTimerPtr timer, CARD32 now, void *data)
 				vbl.request.signal = (uintptr_t)MARK_PRESENT(info);
 				if (sna_wait_vblank(info->sna, &vbl, sna_crtc_pipe(info->crtc)) == 0) {
 					DBG(("%s: scheduled new vblank event for %lld\n", __FUNCTION__, (long long)info->target_msc));
-					info->queued = true;
-					if (delta == 1) {
-						sna_crtc_set_vblank(info->crtc);
-						info->crtc = mark_crtc(info->crtc);
-					}
+					add_to_crtc_vblank(info, delta);
 					free(timer);
 					return 0;
 				}
@@ -326,11 +332,7 @@ static bool sna_present_queue(struct sna_present_event *info,
 		if (!sna_fake_vblank(info))
 			return false;
 	} else {
-		info->queued = true;
-		if (delta == 1) {
-			sna_crtc_set_vblank(info->crtc);
-			info->crtc = mark_crtc(info->crtc);
-		}
+		add_to_crtc_vblank(info, delta);
 	}
 
 	return true;
@@ -360,6 +362,47 @@ sna_present_get_crtc(WindowPtr window)
 	return NULL;
 }
 
+static void add_keepalive(struct sna *sna, xf86CrtcPtr crtc, uint64_t msc)
+{
+	struct sna_present_event *info, *tmp;
+	union drm_wait_vblank vbl;
+
+	list_for_each_entry(tmp, sna_crtc_vblank_queue(crtc), link) {
+		if (tmp->target_msc == msc) {
+			DBG(("%s: vblank already queued for target_msc=%lld\n",
+			     __FUNCTION__, (long long)msc));
+			return;
+		}
+
+		if ((int64_t)(tmp->target_msc - msc) > 0)
+			break;
+	}
+
+	DBG(("%s: adding keepalive for target_msc=%lld\n",
+	     __FUNCTION__, (long long)msc));
+
+	info = info_alloc(sna);
+	if (!info)
+		return;
+
+	info->crtc = crtc;
+	info->sna = sna;
+	info->target_msc = msc;
+	info->event_id = (uint64_t *)(info + 1);
+	info->n_event_id = 0;
+
+	VG_CLEAR(vbl);
+	vbl.request.type = DRM_VBLANK_ABSOLUTE | DRM_VBLANK_EVENT;
+	vbl.request.sequence = msc;
+	vbl.request.signal = (uintptr_t)MARK_PRESENT(info);
+
+	if (sna_wait_vblank(info->sna, &vbl, sna_crtc_pipe(info->crtc)) == 0) {
+		list_add_tail(&info->link, &tmp->link);
+		add_to_crtc_vblank(info, 1);
+	} else
+		info_free(info);
+}
+
 static int
 sna_present_get_ust_msc(RRCrtcPtr crtc, CARD64 *ust, CARD64 *msc)
 {
@@ -377,34 +420,10 @@ sna_present_get_ust_msc(RRCrtcPtr crtc, CARD64 *ust, CARD64 *msc)
 	vbl.request.type = DRM_VBLANK_RELATIVE;
 	vbl.request.sequence = 0;
 	if (sna_wait_vblank(sna, &vbl, sna_crtc_pipe(crtc->devPrivate)) == 0) {
-		struct sna_present_event *info;
-
 		*ust = ust64(vbl.reply.tval_sec, vbl.reply.tval_usec);
 		*msc = sna_crtc_record_vblank(crtc->devPrivate, &vbl);
 
-		info = info_alloc(sna);
-		if (info) {
-			info->crtc = crtc->devPrivate;
-			info->sna = sna;
-			info->target_msc = *msc + 1;
-			info->event_id = (uint64_t *)(info + 1);
-			info->n_event_id = 0;
-
-			vbl.request.type =
-				DRM_VBLANK_ABSOLUTE | DRM_VBLANK_EVENT;
-			vbl.request.sequence = info->target_msc;
-			vbl.request.signal = (uintptr_t)MARK_PRESENT(info);
-
-			if (sna_wait_vblank(info->sna, &vbl,
-					    sna_crtc_pipe(info->crtc)) == 0) {
-				list_add(&info->link,
-					 &sna->present.vblank_queue);
-				info->queued = true;
-				sna_crtc_set_vblank(info->crtc);
-				info->crtc = mark_crtc(info->crtc);
-			} else
-				info_free(info);
-		}
+		add_keepalive(sna, crtc->devPrivate, *msc + 1);
 	} else {
 		const struct ust_msc *swap;
 last:
@@ -477,9 +496,8 @@ sna_present_queue_vblank(RRCrtcPtr crtc, uint64_t event_id, uint64_t msc)
 	if (warn_unless(msc - swap->msc < 1ull<<31))
 		return BadValue;
 
-	list_for_each_entry(tmp, &sna->present.vblank_queue, link) {
-		if (tmp->target_msc == msc &&
-		    unmask_crtc(tmp->crtc) == crtc->devPrivate) {
+	list_for_each_entry(tmp, sna_crtc_vblank_queue(crtc->devPrivate), link) {
+		if (tmp->target_msc == msc) {
 			uint64_t *events = tmp->event_id;
 
 			if (tmp->n_event_id &&
@@ -692,8 +710,10 @@ present_flip_handler(struct drm_event_vblank *event, void *data)
 		swap.tv_sec = event->tv_sec;
 		swap.tv_usec = event->tv_usec;
 		swap.msc = event->sequence;
-	} else
+	} else {
+		info->crtc = unmask_crtc(info->crtc);
 		swap = *sna_crtc_last_swap(info->crtc);
+	}
 
 	DBG(("%s: pipe=%d, tv=%d.%06d msc=%lld (target %lld), event=%lld complete%s\n", __FUNCTION__,
 	     info->crtc ? sna_crtc_pipe(info->crtc) : -1,
@@ -702,8 +722,11 @@ present_flip_handler(struct drm_event_vblank *event, void *data)
 	     (long long)info->event_id[0],
 	     info->target_msc && info->target_msc == swap.msc ? "" : ": MISS"));
 	present_event_notify(info->event_id[0], swap_ust(&swap), swap.msc);
-	if (info->crtc)
+	if (info->crtc) {
 		sna_crtc_clear_vblank(info->crtc);
+		if (!sna_crtc_has_vblank(info->crtc))
+			add_keepalive(info->sna, info->crtc, swap.msc + 1);
+	}
 
 	if (info->sna->present.unflip) {
 		DBG(("%s: executing queued unflip (event=%lld)\n", __FUNCTION__, (long long)info->sna->present.unflip));
@@ -747,9 +770,7 @@ flip(struct sna *sna,
 		return FALSE;
 	}
 
-	info->queued = true;
-	if (info->crtc)
-		sna_crtc_set_vblank(info->crtc);
+	add_to_crtc_vblank(info, 1);
 	return TRUE;
 }
 
@@ -862,12 +883,10 @@ sna_present_flip(RRCrtcPtr crtc,
 		DBG(("%s: flips still pending, stalling\n", __FUNCTION__));
 		pfd.fd = sna->kgem.fd;
 		pfd.events = POLLIN;
-		do {
-			if (poll(&pfd, 1, -1) != 1)
-				return FALSE;
-
+		while (poll(&pfd, 1, 0) == 1)
 			sna_mode_wakeup(sna);
-		} while (sna->mode.flip_active);
+		if (sna->mode.flip_active)
+			return FALSE;
 	}
 
 	bo = get_flip_bo(pixmap);
@@ -904,7 +923,6 @@ notify:
 		return;
 	}
 
-	assert(!sna->mode.shadow_enabled);
 	if (sna->mode.flip_active) {
 		DBG(("%s: %d outstanding flips, queueing unflip\n", __FUNCTION__, sna->mode.flip_active));
 		assert(sna->present.unflip == 0);
@@ -912,23 +930,25 @@ notify:
 		return;
 	}
 
+	bo = get_flip_bo(screen->GetScreenPixmap(screen));
+
+	/* Are we unflipping after a failure that left our ScreenP in place? */
+	if (!sna_needs_page_flip(sna, bo))
+		goto notify;
+
+	assert(!sna->mode.shadow_enabled);
 	if (sna->flags & SNA_TEAR_FREE) {
 		DBG(("%s: %s TearFree after Present flips\n",
 		     __FUNCTION__, sna->mode.shadow_damage != NULL ? "enabling" : "disabling"));
 		sna->mode.shadow_enabled = sna->mode.shadow_damage != NULL;
 	}
 
-	bo = get_flip_bo(screen->GetScreenPixmap(screen));
 	if (bo == NULL) {
 reset_mode:
 		DBG(("%s: failed, trying to restore original mode\n", __FUNCTION__));
 		xf86SetDesiredModes(sna->scrn);
 		goto notify;
 	}
-
-	/* Are we unflipping after a failure that left our ScreenP in place? */
-	if (!sna_needs_page_flip(sna, bo))
-		goto notify;
 
 	assert(sna_pixmap(screen->GetScreenPixmap(screen))->pinned & PIN_SCANOUT);
 
