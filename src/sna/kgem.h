@@ -190,6 +190,7 @@ struct kgem {
 	uint32_t has_secure_batches :1;
 	uint32_t has_pinned_batches :1;
 	uint32_t has_caching :1;
+	uint32_t has_coherent_mmap_gtt :1;
 	uint32_t has_llc :1;
 	uint32_t has_wt :1;
 	uint32_t has_no_reloc :1;

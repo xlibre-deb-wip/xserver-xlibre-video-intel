@@ -101,24 +101,45 @@ static const struct gt_info gt2_info = {
 	.gt = 2,
 };
 
-static const uint32_t ps_kernel_packed[][4] = {
+static const uint32_t ps_kernel_packed_bt601[][4] = {
 #include "exa_wm_src_affine.g6b"
 #include "exa_wm_src_sample_argb.g6b"
-#include "exa_wm_yuv_rgb.g6b"
+#include "exa_wm_yuv_rgb_bt601.g6b"
 #include "exa_wm_write.g6b"
 };
 
-static const uint32_t ps_kernel_planar[][4] = {
+static const uint32_t ps_kernel_planar_bt601[][4] = {
 #include "exa_wm_src_affine.g6b"
 #include "exa_wm_src_sample_planar.g6b"
-#include "exa_wm_yuv_rgb.g6b"
+#include "exa_wm_yuv_rgb_bt601.g6b"
 #include "exa_wm_write.g6b"
 };
 
-static const uint32_t ps_kernel_nv12[][4] = {
+static const uint32_t ps_kernel_nv12_bt601[][4] = {
 #include "exa_wm_src_affine.g6b"
 #include "exa_wm_src_sample_nv12.g6b"
-#include "exa_wm_yuv_rgb.g6b"
+#include "exa_wm_yuv_rgb_bt601.g6b"
+#include "exa_wm_write.g6b"
+};
+
+static const uint32_t ps_kernel_packed_bt709[][4] = {
+#include "exa_wm_src_affine.g6b"
+#include "exa_wm_src_sample_argb.g6b"
+#include "exa_wm_yuv_rgb_bt709.g6b"
+#include "exa_wm_write.g6b"
+};
+
+static const uint32_t ps_kernel_planar_bt709[][4] = {
+#include "exa_wm_src_affine.g6b"
+#include "exa_wm_src_sample_planar.g6b"
+#include "exa_wm_yuv_rgb_bt709.g6b"
+#include "exa_wm_write.g6b"
+};
+
+static const uint32_t ps_kernel_nv12_bt709[][4] = {
+#include "exa_wm_src_affine.g6b"
+#include "exa_wm_src_sample_nv12.g6b"
+#include "exa_wm_yuv_rgb_bt709.g6b"
 #include "exa_wm_write.g6b"
 };
 
@@ -148,9 +169,14 @@ static const struct wm_kernel_info {
 	NOKERNEL(OPACITY, brw_wm_kernel__affine_opacity, 2),
 	NOKERNEL(OPACITY_P, brw_wm_kernel__projective_opacity, 2),
 
-	KERNEL(VIDEO_PLANAR, ps_kernel_planar, 7),
-	KERNEL(VIDEO_NV12, ps_kernel_nv12, 7),
-	KERNEL(VIDEO_PACKED, ps_kernel_packed, 2),
+
+	KERNEL(VIDEO_PLANAR_BT601, ps_kernel_planar_bt601, 7),
+	KERNEL(VIDEO_NV12_BT601, ps_kernel_nv12_bt601, 7),
+	KERNEL(VIDEO_PACKED_BT601, ps_kernel_packed_bt601, 2),
+
+	KERNEL(VIDEO_PLANAR_BT709, ps_kernel_planar_bt709, 7),
+	KERNEL(VIDEO_NV12_BT709, ps_kernel_nv12_bt709, 7),
+	KERNEL(VIDEO_PACKED_BT709, ps_kernel_packed_bt709, 2),
 };
 #undef KERNEL
 
@@ -269,7 +295,7 @@ static uint32_t gen6_get_card_format(PictFormat format)
 		return GEN6_SURFACEFORMAT_R8G8B8A8_UNORM;
 	case PICT_x8b8g8r8:
 		return GEN6_SURFACEFORMAT_R8G8B8X8_UNORM;
-#ifdef PICT_a2r10g10b10
+#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,6,99,900,0)
 	case PICT_a2r10g10b10:
 		return GEN6_SURFACEFORMAT_B10G10R10A2_UNORM;
 	case PICT_x2r10g10b10:
@@ -299,7 +325,7 @@ static uint32_t gen6_get_dest_format(PictFormat format)
 	case PICT_a8b8g8r8:
 	case PICT_x8b8g8r8:
 		return GEN6_SURFACEFORMAT_R8G8B8A8_UNORM;
-#ifdef PICT_a2r10g10b10
+#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,6,99,900,0)
 	case PICT_a2r10g10b10:
 	case PICT_x2r10g10b10:
 		return GEN6_SURFACEFORMAT_B10G10R10A2_UNORM;
@@ -1631,6 +1657,29 @@ static void gen6_emit_video_state(struct sna *sna,
 	gen6_emit_state(sna, op, offset | dirty);
 }
 
+static unsigned select_video_kernel(const struct sna_video *video,
+				    const struct sna_video_frame *frame)
+{
+	switch (frame->id) {
+	case FOURCC_YV12:
+	case FOURCC_I420:
+	case FOURCC_XVMC:
+		return video->colorspace ?
+			GEN6_WM_KERNEL_VIDEO_PLANAR_BT709 :
+			GEN6_WM_KERNEL_VIDEO_PLANAR_BT601;
+
+	case FOURCC_NV12:
+		return video->colorspace ?
+			GEN6_WM_KERNEL_VIDEO_NV12_BT709 :
+			GEN6_WM_KERNEL_VIDEO_NV12_BT601;
+
+	default:
+		return video->colorspace ?
+			GEN6_WM_KERNEL_VIDEO_PACKED_BT709 :
+			GEN6_WM_KERNEL_VIDEO_PACKED_BT601;
+	}
+}
+
 static bool
 gen6_render_video(struct sna *sna,
 		  struct sna_video *video,
@@ -1683,11 +1732,7 @@ gen6_render_video(struct sna *sna,
 		GEN6_SET_FLAGS(SAMPLER_OFFSET(filter, SAMPLER_EXTEND_PAD,
 					       SAMPLER_FILTER_NEAREST, SAMPLER_EXTEND_NONE),
 			       NO_BLEND,
-			       is_nv12_fourcc(frame->id) ?
-			       GEN6_WM_KERNEL_VIDEO_NV12 :
-			       is_planar_fourcc(frame->id) ?
-			       GEN6_WM_KERNEL_VIDEO_PLANAR :
-			       GEN6_WM_KERNEL_VIDEO_PACKED,
+			       select_video_kernel(video, frame),
 			       2);
 	tmp.priv = frame;
 

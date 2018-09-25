@@ -70,6 +70,7 @@ search_snoop_cache(struct kgem *kgem, unsigned int num_pages, unsigned flags);
 #define DBG_NO_CREATE2 0
 #define DBG_NO_USERPTR 0
 #define DBG_NO_UNSYNCHRONIZED_USERPTR 0
+#define DBG_NO_COHERENT_MMAP_GTT 0
 #define DBG_NO_LLC 0
 #define DBG_NO_SEMAPHORES 0
 #define DBG_NO_MADV 0
@@ -140,6 +141,7 @@ search_snoop_cache(struct kgem *kgem, unsigned int num_pages, unsigned flags);
 #define LOCAL_I915_PARAM_HAS_HANDLE_LUT		26
 #define LOCAL_I915_PARAM_HAS_WT			27
 #define LOCAL_I915_PARAM_MMAP_VERSION		30
+#define LOCAL_I915_PARAM_MMAP_GTT_COHERENT	52
 
 #define LOCAL_I915_EXEC_IS_PINNED		(1<<10)
 #define LOCAL_I915_EXEC_NO_RELOC		(1<<11)
@@ -1283,6 +1285,14 @@ static bool test_has_relaxed_fencing(struct kgem *kgem)
 		return true;
 }
 
+static bool test_has_coherent_mmap_gtt(struct kgem *kgem)
+{
+	if (DBG_NO_COHERENT_MMAP_GTT)
+		return false;
+
+	return gem_param(kgem, LOCAL_I915_PARAM_MMAP_GTT_COHERENT) > 0;
+}
+
 static bool test_has_llc(struct kgem *kgem)
 {
 	int has_llc = -1;
@@ -1528,8 +1538,8 @@ static bool test_has_dirtyfb(struct kgem *kgem)
 	create.width = 32;
 	create.height = 32;
 	create.pitch = 4*32;
-	create.bpp = 32;
-	create.depth = 32;
+	create.bpp = 24;
+	create.depth = 32; /* {bpp:24, depth:32} -> x8r8g8b8 */
 	create.handle = gem_create(kgem->fd, 1);
 	if (create.handle == 0)
 		return false;
@@ -1986,6 +1996,10 @@ void kgem_init(struct kgem *kgem, int fd, struct pci_device *dev, unsigned gen)
 	kgem->has_relaxed_fencing = test_has_relaxed_fencing(kgem);
 	DBG(("%s: has relaxed fencing? %d\n", __FUNCTION__,
 	     kgem->has_relaxed_fencing));
+
+	kgem->has_coherent_mmap_gtt = test_has_coherent_mmap_gtt(kgem);
+	DBG(("%s: has coherent writes into GTT maps? %d\n", __FUNCTION__,
+	     kgem->has_coherent_mmap_gtt));
 
 	kgem->has_llc = test_has_llc(kgem);
 	DBG(("%s: has shared last-level-cache? %d\n", __FUNCTION__,
@@ -7177,7 +7191,9 @@ void kgem_bo_sync__gtt(struct kgem *kgem, struct kgem_bo *bo)
 
 	kgem_bo_submit(kgem, bo);
 
-	if (bo->domain != DOMAIN_GTT || FORCE_MMAP_SYNC & (1 << DOMAIN_GTT)) {
+	if (bo->domain != DOMAIN_GTT ||
+	    !kgem->has_coherent_mmap_gtt ||
+	    FORCE_MMAP_SYNC & (1 << DOMAIN_GTT)) {
 		struct drm_i915_gem_set_domain set_domain;
 
 		DBG(("%s: SYNC: handle=%d, needs_flush? %d, domain? %d, busy? %d\n",

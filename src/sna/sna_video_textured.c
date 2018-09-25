@@ -36,7 +36,7 @@
 
 #define MAKE_ATOM(a) MakeAtom(a, sizeof(a) - 1, true)
 
-static Atom xvBrightness, xvContrast, xvSyncToVblank;
+static Atom xvBrightness, xvContrast, xvSyncToVblank, xvColorspace;
 
 static XvFormatRec Formats[] = {
 	{15}, {16}, {24}
@@ -44,6 +44,7 @@ static XvFormatRec Formats[] = {
 
 static const XvAttributeRec Attributes[] = {
 	{XvSettable | XvGettable, -1, 1, (char *)"XV_SYNC_TO_VBLANK"},
+	{XvSettable | XvGettable, 0, 1, (char *)"XV_COLORSPACE"}, /* BT.601, BT.709 */
 	//{XvSettable | XvGettable, -128, 127, (char *)"XV_BRIGHTNESS"},
 	//{XvSettable | XvGettable, 0, 255, (char *)"XV_CONTRAST"},
 };
@@ -102,6 +103,11 @@ sna_video_textured_set_attribute(ddSetPortAttribute_ARGS)
 			return BadValue;
 
 		video->SyncToVblank = value;
+	} else if (attribute == xvColorspace) {
+		if (value < 0 || value > 1)
+			return BadValue;
+
+		video->colorspace = value;
 	} else
 		return BadMatch;
 
@@ -119,6 +125,8 @@ sna_video_textured_get_attribute(ddGetPortAttribute_ARGS)
 		*value = video->contrast;
 	else if (attribute == xvSyncToVblank)
 		*value = video->SyncToVblank;
+	else if (attribute == xvColorspace)
+		*value = video->colorspace;
 	else
 		return BadMatch;
 
@@ -426,6 +434,7 @@ void sna_video_textured_setup(struct sna *sna, ScreenPtr screen)
 		v->sna = sna;
 		v->textured = true;
 		v->alignment = 4;
+		v->colorspace = 1; /* BT.709 */
 		v->SyncToVblank = (sna->flags & SNA_NO_WAIT) == 0;
 
 		RegionNull(&v->clip);
@@ -446,6 +455,7 @@ void sna_video_textured_setup(struct sna *sna, ScreenPtr screen)
 
 	xvBrightness = MAKE_ATOM("XV_BRIGHTNESS");
 	xvContrast = MAKE_ATOM("XV_CONTRAST");
+	xvColorspace = MAKE_ATOM("XV_COLORSPACE");
 	xvSyncToVblank = MAKE_ATOM("XV_SYNC_TO_VBLANK");
 
 	DBG(("%s: '%s' initialized %d ports\n", __FUNCTION__, adaptor->name, adaptor->nPorts));

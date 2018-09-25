@@ -222,6 +222,10 @@ struct sna_crtc {
 			uint32_t supported;
 			uint32_t current;
 		} rotation;
+		struct {
+			uint32_t prop;
+			uint64_t values[2];
+		} color_encoding;
 		struct list link;
 	} primary;
 	struct list sprites;
@@ -263,7 +267,6 @@ struct sna_output {
 	uint32_t edid_blob_id;
 	uint32_t edid_len;
 	void *edid_raw;
-	xf86MonPtr fake_edid_mon;
 	void *fake_edid_raw;
 
 	bool has_panel_limits;
@@ -1700,8 +1703,8 @@ static bool wait_for_shadow(struct sna *sna,
 	int flip_active;
 	bool ret = true;
 
-	DBG(("%s: enabled? %d waiting? %d, flags=%x, flips=%d, pixmap=%ld [front?=%d], handle=%d, shadow=%d\n",
-	     __FUNCTION__, sna->mode.shadow_enabled, sna->mode.shadow_wait,
+	DBG(("%s: enabled? %d flags=%x, flips=%d, pixmap=%ld [front?=%d], handle=%d, shadow=%d\n",
+	     __FUNCTION__, sna->mode.shadow_enabled,
 	     flags, sna->mode.flip_active,
 	     pixmap->drawable.serialNumber, pixmap == sna->front,
 	     priv->gpu_bo->handle, sna->mode.shadow->handle));
@@ -1713,7 +1716,6 @@ static bool wait_for_shadow(struct sna *sna,
 		goto done;
 
 	assert(sna->mode.shadow_damage);
-	assert(!sna->mode.shadow_wait);
 
 	if ((flags & MOVE_WRITE) == 0) {
 		if ((flags & __MOVE_SCANOUT) == 0) {
@@ -1755,7 +1757,6 @@ static bool wait_for_shadow(struct sna *sna,
 	}
 
 	assert(sna->mode.shadow_active);
-	sna->mode.shadow_wait = true;
 
 	flip_active = sna->mode.flip_active;
 	if (flip_active) {
@@ -1763,21 +1764,6 @@ static bool wait_for_shadow(struct sna *sna,
 		list_for_each_entry(crtc, &sna->mode.shadow_crtc, shadow_link)
 			flip_active -= crtc->flip_pending;
 		DBG(("%s: %d flips still pending, shadow flip_active=%d\n",
-		     __FUNCTION__, sna->mode.flip_active, flip_active));
-	}
-	if (flip_active) {
-		/* raw cmd to avoid setting wedged in the middle of an op */
-		drmIoctl(sna->kgem.fd, DRM_IOCTL_I915_GEM_THROTTLE, 0);
-		sna->kgem.need_throttle = false;
-
-		while (flip_active && sna_mode_wakeup(sna)) {
-			struct sna_crtc *crtc;
-
-			flip_active = sna->mode.flip_active;
-			list_for_each_entry(crtc, &sna->mode.shadow_crtc, shadow_link)
-				flip_active -= crtc->flip_pending;
-		}
-		DBG(("%s: after waiting %d flips outstanding, flip_active=%d\n",
 		     __FUNCTION__, sna->mode.flip_active, flip_active));
 	}
 
@@ -1789,26 +1775,19 @@ static bool wait_for_shadow(struct sna *sna,
 				    pixmap->drawable.bitsPerPixel,
 				    priv->gpu_bo->tiling,
 				    CREATE_EXACT | CREATE_SCANOUT);
-		if (bo != NULL) {
-			DBG(("%s: replacing still-attached GPU bo handle=%d, flips=%d\n",
-			     __FUNCTION__, priv->gpu_bo->tiling, sna->mode.flip_active));
+		if (bo == NULL)
+			return false;
 
-			RegionUninit(&sna->mode.shadow_region);
-			sna->mode.shadow_region.extents.x1 = 0;
-			sna->mode.shadow_region.extents.y1 = 0;
-			sna->mode.shadow_region.extents.x2 = pixmap->drawable.width;
-			sna->mode.shadow_region.extents.y2 = pixmap->drawable.height;
-			sna->mode.shadow_region.data = NULL;
-		} else {
-			while (sna->mode.flip_active &&
-			       sna_mode_wait_for_event(sna))
-				sna_mode_wakeup(sna);
+		DBG(("%s: replacing still-attached GPU bo handle=%d, flips=%d\n",
+		     __FUNCTION__, priv->gpu_bo->tiling, sna->mode.flip_active));
 
-			bo = sna->mode.shadow;
-		}
+		RegionUninit(&sna->mode.shadow_region);
+		sna->mode.shadow_region.extents.x1 = 0;
+		sna->mode.shadow_region.extents.y1 = 0;
+		sna->mode.shadow_region.extents.x2 = pixmap->drawable.width;
+		sna->mode.shadow_region.extents.y2 = pixmap->drawable.height;
+		sna->mode.shadow_region.data = NULL;
 	}
-	assert(sna->mode.shadow_wait);
-	sna->mode.shadow_wait = false;
 
 	if (bo->refcnt > 1) {
 		bo = kgem_create_2d(&sna->kgem,
@@ -1915,9 +1894,6 @@ done:
 
 	priv->move_to_gpu_data = NULL;
 	priv->move_to_gpu = NULL;
-
-	assert(!sna->mode.shadow_wait);
-	flush_events(sna);
 
 	assert(sna->mode.shadow->active_scanout);
 	return ret;
@@ -2610,6 +2586,11 @@ static struct kgem_bo *sna_crtc_attach(xf86CrtcPtr crtc)
 	}
 	sna_crtc->rotation = RR_Rotate_0;
 
+	if (sna_crtc->cache_bo) {
+		kgem_bo_destroy(&sna->kgem, sna_crtc->cache_bo);
+		sna_crtc->cache_bo = NULL;
+	}
+
 	if (use_shadow(sna, crtc)) {
 		PixmapPtr front;
 		unsigned long tiled_limit;
@@ -3293,15 +3274,123 @@ static const xf86CrtcFuncsRec sna_crtc_funcs = {
 #endif
 };
 
-inline static bool prop_is_rotation(struct drm_mode_get_property *prop)
+inline static bool prop_has_type_and_name(const struct drm_mode_get_property *prop,
+					  unsigned int type, const char *name)
 {
-	if ((prop->flags & (1 << 5)) == 0)
+	if ((prop->flags & (1 << type)) == 0)
 		return false;
 
-	if (strcmp(prop->name, "rotation"))
+	if (strcmp(prop->name, name))
 		return false;
 
 	return true;
+}
+
+inline static bool prop_is_rotation(const struct drm_mode_get_property *prop)
+{
+	return prop_has_type_and_name(prop, 5, "rotation");
+}
+
+static void parse_rotation_prop(struct sna *sna, struct plane *p,
+				struct drm_mode_get_property *prop,
+				uint64_t value)
+{
+	struct drm_mode_property_enum *enums;
+	int j;
+
+	p->rotation.prop = prop->prop_id;
+	p->rotation.current = value;
+
+	DBG(("%s: found rotation property .id=%d, value=%ld, num_enums=%d\n",
+	     __FUNCTION__, prop->prop_id, value, prop->count_enum_blobs));
+
+	enums = malloc(prop->count_enum_blobs * sizeof(struct drm_mode_property_enum));
+	if (!enums)
+		return;
+
+	prop->count_values = 0;
+	prop->enum_blob_ptr = (uintptr_t)enums;
+
+	if (drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_GETPROPERTY, prop)) {
+		free(enums);
+		return;
+	}
+
+	/* XXX we assume that the mapping between kernel enum and
+	 * RandR remains fixed for our lifetimes.
+	 */
+	VG(VALGRIND_MAKE_MEM_DEFINED(enums, sizeof(*enums)*prop->count_enum_blobs));
+	for (j = 0; j < prop->count_enum_blobs; j++) {
+		DBG(("%s: rotation[%d] = %s [%lx]\n", __FUNCTION__,
+		     j, enums[j].name, (long)enums[j].value));
+		p->rotation.supported |= 1 << enums[j].value;
+	}
+
+	free(enums);
+}
+
+inline static bool prop_is_color_encoding(const struct drm_mode_get_property *prop)
+{
+	return prop_has_type_and_name(prop, 3, "COLOR_ENCODING");
+}
+
+static void parse_color_encoding_prop(struct sna *sna, struct plane *p,
+				      struct drm_mode_get_property *prop,
+				      uint64_t value)
+{
+	struct drm_mode_property_enum *enums;
+	unsigned int supported = 0;
+	int j;
+
+	DBG(("%s: found color encoding property .id=%d, value=%ld, num_enums=%d\n",
+	     __FUNCTION__, prop->prop_id, (long)value, prop->count_enum_blobs));
+
+	enums = malloc(prop->count_enum_blobs * sizeof(struct drm_mode_property_enum));
+	if (!enums)
+		return;
+
+	prop->count_values = 0;
+	prop->enum_blob_ptr = (uintptr_t)enums;
+
+	if (drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_GETPROPERTY, prop)) {
+		free(enums);
+		return;
+	}
+
+	VG(VALGRIND_MAKE_MEM_DEFINED(enums, sizeof(*enums)*prop->count_enum_blobs));
+	for (j = 0; j < prop->count_enum_blobs; j++) {
+		if (!strcmp(enums[j].name, "ITU-R BT.601 YCbCr")) {
+			p->color_encoding.values[0] = enums[j].value;
+			supported |= 1 << 0;
+		} else if (!strcmp(enums[j].name, "ITU-R BT.709 YCbCr")) {
+			p->color_encoding.values[1] = enums[j].value;
+			supported |= 1 << 1;
+		}
+	}
+
+	free(enums);
+
+	if (supported == 3)
+		p->color_encoding.prop = prop->prop_id;
+}
+
+void sna_crtc_set_sprite_colorspace(xf86CrtcPtr crtc,
+				    unsigned idx, int colorspace)
+{
+	struct plane *p;
+
+	assert(to_sna_crtc(crtc));
+	assert(colorspace < ARRAY_SIZE(p->color_encoding.values));
+
+	p = lookup_sprite(to_sna_crtc(crtc), idx);
+
+	if (!p->color_encoding.prop)
+		return;
+
+	drmModeObjectSetProperty(to_sna(crtc->scrn)->kgem.fd,
+				 p->id, DRM_MODE_OBJECT_PLANE,
+				 p->color_encoding.prop,
+				 p->color_encoding.values[colorspace]);
 }
 
 static int plane_details(struct sna *sna, struct plane *p)
@@ -3360,34 +3449,9 @@ static int plane_details(struct sna *sna, struct plane *p)
 		if (strcmp(prop.name, "type") == 0) {
 			type = values[i];
 		} else if (prop_is_rotation(&prop)) {
-			struct drm_mode_property_enum *enums;
-
-			p->rotation.prop = props[i];
-			p->rotation.current = values[i];
-
-			DBG(("%s: found rotation property .id=%d, value=%ld, num_enums=%d\n",
-			     __FUNCTION__, prop.prop_id, (long)values[i], prop.count_enum_blobs));
-			enums = malloc(prop.count_enum_blobs * sizeof(struct drm_mode_property_enum));
-			if (enums != NULL) {
-				prop.count_values = 0;
-				prop.enum_blob_ptr = (uintptr_t)enums;
-
-				if (drmIoctl(sna->kgem.fd, DRM_IOCTL_MODE_GETPROPERTY, &prop) == 0) {
-					int j;
-
-					/* XXX we assume that the mapping between kernel enum and
-					 * RandR remains fixed for our lifetimes.
-					 */
-					VG(VALGRIND_MAKE_MEM_DEFINED(enums, sizeof(*enums)*prop.count_enum_blobs));
-					for (j = 0; j < prop.count_enum_blobs; j++) {
-						DBG(("%s: rotation[%d] = %s [%lx]\n", __FUNCTION__,
-						     j, enums[j].name, (long)enums[j].value));
-						p->rotation.supported |= 1 << enums[j].value;
-					}
-				}
-
-				free(enums);
-			}
+			parse_rotation_prop(sna, p, &prop, values[i]);
+		} else if (prop_is_color_encoding(&prop)) {
+			parse_color_encoding_prop(sna, p, &prop, values[i]);
 		}
 	}
 
@@ -3411,7 +3475,7 @@ static void add_sprite_plane(struct sna_crtc *crtc,
 		return;
 
 	memcpy(sprite, details, sizeof(*sprite));
-	list_add(&sprite->link, &crtc->sprites);
+	list_add_tail(&sprite->link, &crtc->sprites);
 }
 
 static void
@@ -3494,6 +3558,82 @@ sna_crtc_find_planes(struct sna *sna, struct sna_crtc *crtc)
 
 	if (planes != stack_planes)
 		free(planes);
+}
+
+static bool plane_has_format(const uint32_t formats[],
+			     int count_formats,
+			     uint32_t format)
+{
+	int i;
+
+	for (i = 0; i < count_formats; i++) {
+		if (formats[i] == format)
+			return true;
+	}
+
+	return false;
+}
+
+bool sna_has_sprite_format(struct sna *sna, uint32_t format)
+{
+	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(sna->scrn);
+	int i;
+
+	if (sna->mode.num_real_crtc == 0)
+		return false;
+
+	for (i = 0; i < sna->mode.num_real_crtc; i++) {
+		struct sna_crtc *sna_crtc = to_sna_crtc(config->crtc[i]);
+		struct plane *plane;
+
+		list_for_each_entry(plane, &sna_crtc->sprites, link) {
+			struct local_mode_get_plane p;
+			uint32_t *formats;
+			int count_formats;
+			bool has_format;
+
+			VG_CLEAR(p);
+			p.plane_id = plane->id;
+			p.count_format_types = 0;
+			if (drmIoctl(sna->kgem.fd,
+				     LOCAL_IOCTL_MODE_GETPLANE,
+				     &p))
+				continue;
+			count_formats = p.count_format_types;
+
+			formats = calloc(count_formats, sizeof(formats[0]));
+			if (!formats)
+				continue;
+
+			p.count_format_types = count_formats;
+			p.format_type_ptr = (uintptr_t)formats;
+			if (drmIoctl(sna->kgem.fd,
+				     LOCAL_IOCTL_MODE_GETPLANE,
+				     &p)) {
+				free(formats);
+				continue;
+			}
+
+			assert(p.count_format_types == count_formats);
+
+			has_format = plane_has_format(formats,
+						      count_formats,
+						      format);
+
+			free(formats);
+
+			/*
+			 * As long as one plane supports the
+			 * format we declare it as supported.
+			 * Not all planes may support it, but
+			 * then the GPU fallback will kick in.
+			 */
+			if (has_format)
+				return true;
+		}
+	}
+
+	return false;
 }
 
 static void
@@ -4102,13 +4242,21 @@ static DisplayModePtr
 sna_output_override_edid(xf86OutputPtr output)
 {
 	struct sna_output *sna_output = output->driver_private;
+	xf86MonPtr mon = NULL;
 
-	if (sna_output->fake_edid_mon == NULL)
+	if (sna_output->fake_edid_raw == NULL)
 		return NULL;
 
-	xf86OutputSetEDID(output, sna_output->fake_edid_mon);
-	return xf86DDCGetModes(output->scrn->scrnIndex,
-			       sna_output->fake_edid_mon);
+	mon = xf86InterpretEDID(output->scrn->scrnIndex, sna_output->fake_edid_raw);
+	if (mon == NULL) {
+		return NULL;
+	}
+
+	mon->flags |= MONITOR_EDID_COMPLETE_RAWDATA;
+
+	xf86OutputSetEDID(output, mon);
+
+	return xf86DDCGetModes(output->scrn->scrnIndex, mon);
 }
 
 static DisplayModePtr
@@ -4896,7 +5044,6 @@ sna_output_load_fake_edid(xf86OutputPtr output)
 	FILE *file;
 	void *raw;
 	int size;
-	xf86MonPtr mon;
 
 	filename = fake_edid_name(output);
 	if (filename == NULL)
@@ -4928,16 +5075,6 @@ sna_output_load_fake_edid(xf86OutputPtr output)
 	}
 	fclose(file);
 
-	mon = xf86InterpretEDID(output->scrn->scrnIndex, raw);
-	if (mon == NULL) {
-		free(raw);
-		goto err;
-	}
-
-	if (mon && size > 128)
-		mon->flags |= MONITOR_EDID_COMPLETE_RAWDATA;
-
-	sna_output->fake_edid_mon = mon;
 	sna_output->fake_edid_raw = raw;
 
 	xf86DrvMsg(output->scrn->scrnIndex, X_CONFIG,
@@ -8755,7 +8892,8 @@ sna_crtc_redisplay(xf86CrtcPtr crtc, RegionPtr region, struct kgem_bo *bo)
 	     region->extents.x2, region->extents.y2,
 	     region_num_rects(region)));
 
-	assert(!wedged(sna));
+	if (wedged(sna))
+		goto fallback;
 
 	if (priv->clear) {
 		RegionRec whole;
@@ -8800,10 +8938,13 @@ sna_crtc_redisplay(xf86CrtcPtr crtc, RegionPtr region, struct kgem_bo *bo)
 			return;
 	}
 
-	if (can_render(sna))
+	if (can_render(sna)) {
 		sna_crtc_redisplay__composite(crtc, region, bo);
-	else
-		sna_crtc_redisplay__fallback(crtc, region, bo);
+		return;
+	}
+
+fallback:
+	sna_crtc_redisplay__fallback(crtc, region, bo);
 }
 
 static void shadow_flip_handler(struct drm_event_vblank *e,
@@ -8811,8 +8952,10 @@ static void shadow_flip_handler(struct drm_event_vblank *e,
 {
 	struct sna *sna = data;
 
-	if (!sna->mode.shadow_wait)
-		sna_mode_redisplay(sna);
+	sna->timer_active |= 1 << FLUSH_TIMER;
+	sna->timer_expire[FLUSH_TIMER] =
+		e->tv_sec * 1000 + e->tv_usec / 1000 +
+		sna->vblank_interval / 2;
 }
 
 void sna_shadow_set_crtc(struct sna *sna,
@@ -8965,6 +9108,12 @@ void sna_mode_redisplay(struct sna *sna)
 	if (sna->mode.dirty)
 		return;
 
+	if (sna->mode.flip_active) {
+		DBG(("%s: %d outstanding flips\n",
+		     __FUNCTION__, sna->mode.flip_active));
+		return;
+	}
+
 	region = DamageRegion(sna->mode.shadow_damage);
 	if (RegionNil(region))
 		return;
@@ -8973,23 +9122,6 @@ void sna_mode_redisplay(struct sna *sna)
 	     __FUNCTION__, region_num_rects(region),
 	     region->extents.x1, region->extents.y1,
 	     region->extents.x2, region->extents.y2));
-
-	if (sna->mode.flip_active) {
-		DBG(("%s: checking for %d outstanding flip completions\n",
-		     __FUNCTION__, sna->mode.flip_active));
-
-		sna->mode.dirty = true;
-		while (sna->mode.flip_active && sna_mode_wakeup(sna))
-			;
-		sna->mode.dirty = false;
-
-		DBG(("%s: now %d outstanding flip completions (enabled? %d)\n",
-		     __FUNCTION__,
-		     sna->mode.flip_active,
-		     sna->mode.shadow_enabled));
-		if (sna->mode.flip_active || !sna->mode.shadow_enabled)
-			return;
-	}
 
 	if (!move_crtc_to_gpu(sna)) {
 		DBG(("%s: forcing scanout update using the CPU\n", __FUNCTION__));
@@ -9378,6 +9510,7 @@ fixup_flip:
 
 int sna_mode_wakeup(struct sna *sna)
 {
+	bool defer_vblanks = sna->mode.flip_active && sna->mode.shadow_enabled;
 	char buffer[1024];
 	int len, i;
 	int ret = 0;
@@ -9388,14 +9521,14 @@ again:
 	 * event from drm.
 	 */
 	if (!event_pending(sna->kgem.fd))
-		return ret;
+		goto done;
 
 	/* The DRM read semantics guarantees that we always get only
 	 * complete events.
 	 */
 	len = read(sna->kgem.fd, buffer, sizeof (buffer));
 	if (len < (int)sizeof(struct drm_event))
-		return ret;
+		goto done;
 
 	/* Note that we cannot rely on the passed in struct sna matching
 	 * the struct sna used for the vblank event (in case it was submitted
@@ -9410,7 +9543,7 @@ again:
 		struct drm_event *e = (struct drm_event *)&buffer[i];
 		switch (e->type) {
 		case DRM_EVENT_VBLANK:
-			if (sna->mode.shadow_wait)
+			if (defer_vblanks)
 				defer_event(sna, e);
 			else if (((uintptr_t)((struct drm_event_vblank *)e)->user_data) & 2)
 				sna_present_vblank_handler((struct drm_event_vblank *)e);
@@ -9481,4 +9614,8 @@ again:
 	}
 
 	goto again;
+
+done:
+	flush_events(sna);
+	return ret;
 }

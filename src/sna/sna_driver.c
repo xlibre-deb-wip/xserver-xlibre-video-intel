@@ -689,7 +689,6 @@ cleanup:
 	return FALSE;
 }
 
-#if !HAVE_NOTIFY_FD
 static bool has_shadow(struct sna *sna)
 {
 	if (!sna->mode.shadow_enabled)
@@ -702,6 +701,7 @@ static bool has_shadow(struct sna *sna)
 	return sna->mode.flip_active == 0;
 }
 
+#if !HAVE_NOTIFY_FD
 static void
 sna_block_handler(BLOCKHANDLER_ARGS_DECL)
 {
@@ -712,8 +712,9 @@ sna_block_handler(BLOCKHANDLER_ARGS_DECL)
 #endif
 	struct timeval **tv = timeout;
 
-	DBG(("%s (tv=%ld.%06ld)\n", __FUNCTION__,
-	     *tv ? (*tv)->tv_sec : -1, *tv ? (*tv)->tv_usec : 0));
+	DBG(("%s (tv=%ld.%06ld), has_shadow?=%d\n", __FUNCTION__,
+	     *tv ? (*tv)->tv_sec : -1, *tv ? (*tv)->tv_usec : 0,
+	     has_shadow(sna)));
 
 	sna->BlockHandler(BLOCKHANDLER_ARGS);
 
@@ -754,12 +755,18 @@ sna_block_handler(void *data, void *_timeout)
 	int *timeout = _timeout;
 	struct timeval tv, *tvp;
 
-	DBG(("%s (timeout=%d)\n", __FUNCTION__, *timeout));
-	if (*timeout == 0)
-		return;
+	DBG(("%s (timeout=%d, has_shadow=%d)\n", __FUNCTION__,
+	     *timeout, has_shadow(sna)));
 
 	if (*timeout < 0) {
 		tvp = NULL;
+	} else if (*timeout == 0) {
+		if (!has_shadow(sna))
+			return;
+
+		tv.tv_sec = 0;
+		tv.tv_usec = 0;
+		tvp = &tv;
 	} else {
 		tv.tv_sec = *timeout / 1000;
 		tv.tv_usec = (*timeout % 1000) * 1000;

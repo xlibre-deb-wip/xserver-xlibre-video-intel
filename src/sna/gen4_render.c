@@ -99,27 +99,51 @@
 #define GEN4_MAX_WM_THREADS 32
 #define G4X_MAX_WM_THREADS 50
 
-static const uint32_t ps_kernel_packed_static[][4] = {
+static const uint32_t ps_kernel_packed_bt601_static[][4] = {
 #include "exa_wm_xy.g4b"
 #include "exa_wm_src_affine.g4b"
 #include "exa_wm_src_sample_argb.g4b"
-#include "exa_wm_yuv_rgb.g4b"
+#include "exa_wm_yuv_rgb_bt601.g4b"
 #include "exa_wm_write.g4b"
 };
 
-static const uint32_t ps_kernel_planar_static[][4] = {
+static const uint32_t ps_kernel_planar_bt601_static[][4] = {
 #include "exa_wm_xy.g4b"
 #include "exa_wm_src_affine.g4b"
 #include "exa_wm_src_sample_planar.g4b"
-#include "exa_wm_yuv_rgb.g4b"
+#include "exa_wm_yuv_rgb_bt601.g4b"
 #include "exa_wm_write.g4b"
 };
 
-static const uint32_t ps_kernel_nv12_static[][4] = {
+static const uint32_t ps_kernel_nv12_bt601_static[][4] = {
 #include "exa_wm_xy.g4b"
 #include "exa_wm_src_affine.g4b"
 #include "exa_wm_src_sample_nv12.g4b"
-#include "exa_wm_yuv_rgb.g4b"
+#include "exa_wm_yuv_rgb_bt601.g4b"
+#include "exa_wm_write.g4b"
+};
+
+static const uint32_t ps_kernel_packed_bt709_static[][4] = {
+#include "exa_wm_xy.g4b"
+#include "exa_wm_src_affine.g4b"
+#include "exa_wm_src_sample_argb.g4b"
+#include "exa_wm_yuv_rgb_bt709.g4b"
+#include "exa_wm_write.g4b"
+};
+
+static const uint32_t ps_kernel_planar_bt709_static[][4] = {
+#include "exa_wm_xy.g4b"
+#include "exa_wm_src_affine.g4b"
+#include "exa_wm_src_sample_planar.g4b"
+#include "exa_wm_yuv_rgb_bt709.g4b"
+#include "exa_wm_write.g4b"
+};
+
+static const uint32_t ps_kernel_nv12_bt709_static[][4] = {
+#include "exa_wm_xy.g4b"
+#include "exa_wm_src_affine.g4b"
+#include "exa_wm_src_sample_nv12.g4b"
+#include "exa_wm_yuv_rgb_bt709.g4b"
 #include "exa_wm_write.g4b"
 };
 
@@ -147,9 +171,13 @@ static const struct wm_kernel_info {
 	NOKERNEL(WM_KERNEL_OPACITY, brw_wm_kernel__affine_opacity, true),
 	NOKERNEL(WM_KERNEL_OPACITY_P, brw_wm_kernel__projective_opacity, true),
 
-	KERNEL(WM_KERNEL_VIDEO_PLANAR, ps_kernel_planar_static, false),
-	KERNEL(WM_KERNEL_VIDEO_NV12, ps_kernel_nv12_static, false),
-	KERNEL(WM_KERNEL_VIDEO_PACKED, ps_kernel_packed_static, false),
+	KERNEL(WM_KERNEL_VIDEO_PLANAR_BT601, ps_kernel_planar_bt601_static, false),
+	KERNEL(WM_KERNEL_VIDEO_NV12_BT601, ps_kernel_nv12_bt601_static, false),
+	KERNEL(WM_KERNEL_VIDEO_PACKED_BT601, ps_kernel_packed_bt601_static, false),
+
+	KERNEL(WM_KERNEL_VIDEO_PLANAR_BT709, ps_kernel_planar_bt709_static, false),
+	KERNEL(WM_KERNEL_VIDEO_NV12_BT709, ps_kernel_nv12_bt709_static, false),
+	KERNEL(WM_KERNEL_VIDEO_PACKED_BT709, ps_kernel_packed_bt709_static, false),
 };
 #undef KERNEL
 
@@ -305,7 +333,7 @@ static uint32_t gen4_get_card_format(PictFormat format)
 		return GEN4_SURFACEFORMAT_R8G8B8A8_UNORM;
 	case PICT_x8b8g8r8:
 		return GEN4_SURFACEFORMAT_R8G8B8X8_UNORM;
-#ifdef PICT_a2r10g10b10
+#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,6,99,900,0)
 	case PICT_a2r10g10b10:
 		return GEN4_SURFACEFORMAT_B10G10R10A2_UNORM;
 	case PICT_x2r10g10b10:
@@ -335,7 +363,7 @@ static uint32_t gen4_get_dest_format(PictFormat format)
 	case PICT_a8b8g8r8:
 	case PICT_x8b8g8r8:
 		return GEN4_SURFACEFORMAT_R8G8B8A8_UNORM;
-#ifdef PICT_a2r10g10b10
+#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,6,99,900,0)
 	case PICT_a2r10g10b10:
 	case PICT_x2r10g10b10:
 		return GEN4_SURFACEFORMAT_B10G10R10A2_UNORM;
@@ -1404,6 +1432,29 @@ static void gen4_video_bind_surfaces(struct sna *sna,
 	gen4_emit_state(sna, op, offset | dirty);
 }
 
+static unsigned select_video_kernel(const struct sna_video *video,
+				    const struct sna_video_frame *frame)
+{
+	switch (frame->id) {
+	case FOURCC_YV12:
+	case FOURCC_I420:
+	case FOURCC_XVMC:
+		return video->colorspace ?
+			WM_KERNEL_VIDEO_PLANAR_BT709 :
+			WM_KERNEL_VIDEO_PLANAR_BT601;
+
+	case FOURCC_NV12:
+		return video->colorspace ?
+			WM_KERNEL_VIDEO_NV12_BT709 :
+			WM_KERNEL_VIDEO_NV12_BT601;
+
+	default:
+		return video->colorspace ?
+			WM_KERNEL_VIDEO_PACKED_BT709 :
+			WM_KERNEL_VIDEO_PACKED_BT601;
+	}
+}
+
 static bool
 gen4_render_video(struct sna *sna,
 		  struct sna_video *video,
@@ -1442,9 +1493,7 @@ gen4_render_video(struct sna *sna,
 	tmp.src.repeat = SAMPLER_EXTEND_PAD;
 	tmp.src.bo = frame->bo;
 	tmp.mask.bo = NULL;
-	tmp.u.gen4.wm_kernel =
-		is_nv12_fourcc(frame->id) ? WM_KERNEL_VIDEO_NV12 :
-		is_planar_fourcc(frame->id) ? WM_KERNEL_VIDEO_PLANAR : WM_KERNEL_VIDEO_PACKED;
+	tmp.u.gen4.wm_kernel = select_video_kernel(video, frame);
 	tmp.u.gen4.ve_id = 2;
 	tmp.is_affine = true;
 	tmp.floats_per_vertex = 3;

@@ -1303,7 +1303,7 @@ __sna_dri2_copy_region(struct sna *sna, DrawablePtr draw, RegionPtr region,
 		assert(region == NULL || region == &clip);
 		priv = sna_pixmap_move_area_to_gpu(pixmap, &clip.extents, hint);
 		if (priv) {
-			damage(pixmap, priv, region);
+			damage(pixmap, priv, region ?: &clip);
 			dst_bo = priv->gpu_bo;
 		}
 		DBG(("%s: updated FrontLeft dst_bo from handle=%d to handle=%d\n",

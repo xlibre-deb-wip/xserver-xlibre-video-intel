@@ -45,7 +45,8 @@ struct sna_present_event {
 	uint64_t *event_id;
 	uint64_t target_msc;
 	int n_event_id;
-	bool queued;
+	bool queued:1;
+	bool active:1;
 };
 
 static void sna_present_unflip(ScreenPtr screen, uint64_t event_id);
@@ -140,31 +141,39 @@ static uint64_t gettime_ust64(void)
 static void vblank_complete(struct sna_present_event *info,
 			    uint64_t ust, uint64_t msc)
 {
+	struct list * const q = sna_crtc_vblank_queue(info->crtc);
 	int n;
 
-	if (msc_before(msc, info->target_msc)) {
-		DBG(("%s: event=%d too early, now %lld, expected %lld\n",
-		     __FUNCTION__,
-		     info->event_id[0],
-		     (long long)msc, (long long)info->target_msc));
-		if (sna_present_queue(info, msc))
-			return;
-	}
+	do {
+		assert(sna_crtc_vblank_queue(info->crtc) == q);
 
-	DBG(("%s: %d events complete\n", __FUNCTION__, info->n_event_id));
-	for (n = 0; n < info->n_event_id; n++) {
-		DBG(("%s: pipe=%d tv=%d.%06d msc=%lld (target=%lld), event=%lld complete%s\n", __FUNCTION__,
-		     sna_crtc_pipe(info->crtc),
-		     (int)(ust / 1000000), (int)(ust % 1000000),
-		     (long long)msc, (long long)info->target_msc,
-		     (long long)info->event_id[n],
-		     info->target_msc && msc == (uint32_t)info->target_msc ? "" : ": MISS"));
-		present_event_notify(info->event_id[n], ust, msc);
-	}
-	if (info->n_event_id > 1)
-		free(info->event_id);
-	list_del(&info->link);
-	info_free(info);
+		if (msc_before(msc, info->target_msc)) {
+			DBG(("%s: event=%d too early, now %lld, expected %lld\n",
+			     __FUNCTION__,
+			     info->event_id[0],
+			     (long long)msc, (long long)info->target_msc));
+			if (sna_present_queue(info, msc))
+				return;
+		}
+
+		DBG(("%s: %d events complete\n", __FUNCTION__, info->n_event_id));
+		for (n = 0; n < info->n_event_id; n++) {
+			DBG(("%s: pipe=%d tv=%d.%06d msc=%lld (target=%lld), event=%lld complete%s\n", __FUNCTION__,
+			     sna_crtc_pipe(info->crtc),
+			     (int)(ust / 1000000), (int)(ust % 1000000),
+			     (long long)msc, (long long)info->target_msc,
+			     (long long)info->event_id[n],
+			     info->target_msc && msc == (uint32_t)info->target_msc ? "" : ": MISS"));
+			present_event_notify(info->event_id[n], ust, msc);
+		}
+		if (info->n_event_id > 1)
+			free(info->event_id);
+
+		_list_del(&info->link);
+		info_free(info);
+
+		info = list_entry(info->link.next, typeof(*info), link);
+	} while (q != &info->link && !info->queued);
 }
 
 static uint32_t msc_to_delay(xf86CrtcPtr crtc, uint64_t target)
@@ -200,7 +209,7 @@ static uint32_t msc_to_delay(xf86CrtcPtr crtc, uint64_t target)
 static void add_to_crtc_vblank(struct sna_present_event *info,
 				int delta)
 {
-	info->queued = true;
+	info->active = true;
 	if (delta == 1 && info->crtc) {
 		sna_crtc_set_vblank(info->crtc);
 		info->crtc = mark_crtc(info->crtc);
@@ -214,6 +223,7 @@ static CARD32 sna_fake_vblank_handler(OsTimerPtr timer, CARD32 now, void *data)
 	uint64_t msc, ust;
 
 	DBG(("%s(event=%lldx%d, now=%d)\n", __FUNCTION__, (long long)info->event_id[0], info->n_event_id, now));
+	assert(info->queued);
 
 	VG_CLEAR(vbl);
 	vbl.request.type = DRM_VBLANK_RELATIVE;
@@ -335,6 +345,7 @@ static bool sna_present_queue(struct sna_present_event *info,
 		add_to_crtc_vblank(info, delta);
 	}
 
+	info->queued = true;
 	return true;
 }
 
@@ -364,10 +375,11 @@ sna_present_get_crtc(WindowPtr window)
 
 static void add_keepalive(struct sna *sna, xf86CrtcPtr crtc, uint64_t msc)
 {
+	struct list *q = sna_crtc_vblank_queue(crtc);
 	struct sna_present_event *info, *tmp;
 	union drm_wait_vblank vbl;
 
-	list_for_each_entry(tmp, sna_crtc_vblank_queue(crtc), link) {
+	list_for_each_entry(tmp, q, link) {
 		if (tmp->target_msc == msc) {
 			DBG(("%s: vblank already queued for target_msc=%lld\n",
 			     __FUNCTION__, (long long)msc));
@@ -396,9 +408,10 @@ static void add_keepalive(struct sna *sna, xf86CrtcPtr crtc, uint64_t msc)
 	vbl.request.sequence = msc;
 	vbl.request.signal = (uintptr_t)MARK_PRESENT(info);
 
-	if (sna_wait_vblank(info->sna, &vbl, sna_crtc_pipe(info->crtc)) == 0) {
+	if (sna_wait_vblank(info->sna, &vbl, sna_crtc_pipe(crtc)) == 0) {
 		list_add_tail(&info->link, &tmp->link);
 		add_to_crtc_vblank(info, 1);
+		info->queued = true;
 	} else
 		info_free(info);
 }
@@ -446,8 +459,8 @@ sna_present_vblank_handler(struct drm_event_vblank *event)
 	struct sna_present_event *info = to_present_event(event->user_data);
 	uint64_t msc;
 
-	if (!info->queued) {
-		DBG(("%s: arrived unexpectedly early (not queued)\n", __FUNCTION__));
+	if (!info->active) {
+		DBG(("%s: arrived unexpectedly early (not active)\n", __FUNCTION__));
 		assert(!has_vblank(info->crtc));
 		return;
 	}
@@ -460,12 +473,6 @@ sna_present_vblank_handler(struct drm_event_vblank *event)
 
 	msc = sna_crtc_record_event(info->crtc, event);
 
-	if (info->sna->mode.shadow_wait) {
-		DBG(("%s: recursed from TearFree\n", __FUNCTION__));
-		if (TimerSet(NULL, 0, 1, sna_fake_vblank_handler, info))
-			return;
-	}
-
 	vblank_complete(info, ust64(event->tv_sec, event->tv_usec), msc);
 }
 
@@ -475,6 +482,7 @@ sna_present_queue_vblank(RRCrtcPtr crtc, uint64_t event_id, uint64_t msc)
 	struct sna *sna = to_sna_from_screen(crtc->pScreen);
 	struct sna_present_event *info, *tmp;
 	const struct ust_msc *swap;
+	struct list *q;
 
 	if (!sna_crtc_is_on(crtc->devPrivate))
 		return BadAlloc;
@@ -496,7 +504,8 @@ sna_present_queue_vblank(RRCrtcPtr crtc, uint64_t event_id, uint64_t msc)
 	if (warn_unless(msc - swap->msc < 1ull<<31))
 		return BadValue;
 
-	list_for_each_entry(tmp, sna_crtc_vblank_queue(crtc->devPrivate), link) {
+	q = sna_crtc_vblank_queue(crtc->devPrivate);
+	list_for_each_entry(tmp, q, link) {
 		if (tmp->target_msc == msc) {
 			uint64_t *events = tmp->event_id;
 
@@ -538,8 +547,9 @@ sna_present_queue_vblank(RRCrtcPtr crtc, uint64_t event_id, uint64_t msc)
 	info->n_event_id = 1;
 	list_add_tail(&info->link, &tmp->link);
 	info->queued = false;
+	info->active = false;
 
-	if (!sna_present_queue(info, swap->msc)) {
+	if (info->link.prev == q && !sna_present_queue(info, swap->msc)) {
 		list_del(&info->link);
 		info_free(info);
 		return BadAlloc;
@@ -701,8 +711,8 @@ present_flip_handler(struct drm_event_vblank *event, void *data)
 
 	DBG(("%s(sequence=%d): event=%lld\n", __FUNCTION__, event->sequence, (long long)info->event_id[0]));
 	assert(info->n_event_id == 1);
-	if (!info->queued) {
-		DBG(("%s: arrived unexpectedly early (not queued)\n", __FUNCTION__));
+	if (!info->active) {
+		DBG(("%s: arrived unexpectedly early (not active)\n", __FUNCTION__));
 		return;
 	}
 
@@ -762,7 +772,7 @@ flip(struct sna *sna,
 	info->event_id[0] = event_id;
 	info->n_event_id = 1;
 	info->target_msc = target_msc;
-	info->queued = false;
+	info->active = false;
 
 	if (!sna_page_flip(sna, bo, present_flip_handler, info)) {
 		DBG(("%s: pageflip failed\n", __FUNCTION__));

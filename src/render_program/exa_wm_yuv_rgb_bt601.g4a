@@ -55,14 +55,24 @@ define(`Cbn_01',	`mask_sample_b_01')
 define(`Cbn_23',	`mask_sample_b_23')
 
     /* color space conversion function:
-     * R = Clamp ( 1.164(Y-16/255) + 1.596(Cr-128/255), 0, 1)
-     * G = Clamp ( 1.164(Y-16/255) - 0.813(Cr-128/255) - 0.392(Cb-128/255), 0, 1)
-     * B = Clamp ( 1.164(Y-16/255) + 2.017(Cb-128/255), 0, 1)
+     * Cy = 255/(235-16)
+     * R = Clamp ( 255/(235-16)(Y-16/255) +
+     *             255/112(1.0-Kr)(Cr-128/255), 0, 1)
+     * G = Clamp ( 255/(235-16)(Y-16/255) -
+     *             255/112(1.0-Kr)Kr/Kg(Cr-128/255) -
+     *             255/112(1.0-Kb)Kb/Kg(Cb-128/255), 0, 1)
+     * B = Clamp ( 255/(235-16)(Y-16/255) +
+     *             255/112(1.0-Kb)(Cb-128/255), 0, 1)
+     *
+     * BT.601:
+     * Kr = 0.299
+     * Kb = 0.114
+     * Kg = (1.0 - Kr - Kb) = 0.587
      */
 
     /* Normalize Y, Cb and Cr:
      *
-     * Yn = (Y - 16/255) * 1.164
+     * Yn = (Y - 16/255) * 255/(235-16)
      * Crn = Cr - 128 / 255
      * Cbn = Cb - 128 / 255
      */
@@ -73,21 +83,25 @@ add (16)    Crn<1>F		Cr<8,8,1>F	-0.501961F  { compr align1 };
 
 add (16)    Cbn<1>F		Cb<8,8,1>F	-0.501961F  { compr align1 };
 
-    /* 
-     * R = Y + Cr * 1.596
+    /*
+     * R = Yn +
+     *     Crn * 255/112 * (1.0 - Kr)
      */
 mov (16)    acc0<1>F		Yn<8,8,1>F		    { compr align1 };
 mac.sat(16) src_sample_r<1>F	Crn<8,8,1>F	1.596F	    { compr align1 };
-     
+
     /*
-     * G = Crn * -0.813 + Cbn * -0.392 + Y
+     * G = Yn -
+     *     Crn * 255/112 * (1.0 - Kr) * Kr / Kg -
+     *     Cbn * 255/112 * (1.0 - Kb) * Kb / Kg
      */
 mov (16)    acc0<1>F		Yn<8,8,1>F		    { compr align1 };
 mac (16)    acc0<1>F		Crn<8,8,1>F    	-0.813F	    { compr align1 };
 mac.sat(16) src_sample_g<1>F	Cbn<8,8,1>F    	-0.392F	    { compr align1 };
 
     /*
-     * B = Cbn * 2.017 + Y
+     * B = Yn +
+     *     Cbn * 255/112 * (1.0 - Kb)
      */
 mov (16)    acc0<1>F	        Yn<8,8,1>F		    { compr align1 };
 mac.sat(16) src_sample_b<1>F	Cbn<8,8,1>F     2.017F	    { compr align1 };

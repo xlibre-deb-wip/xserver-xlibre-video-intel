@@ -55,14 +55,23 @@ define(`Cbn_01',	`mask_sample_b_01')
 define(`Cbn_23',	`mask_sample_b_23')
 
     /* color space conversion function:
-     * R = Clamp ( 1.164(Y-16/255) + 1.596(Cr-128/255), 0, 1)
-     * G = Clamp ( 1.164(Y-16/255) - 0.813(Cr-128/255) - 0.392(Cb-128/255), 0, 1)
-     * B = Clamp ( 1.164(Y-16/255) + 2.017(Cb-128/255), 0, 1)
+     * R = Clamp ( 255/(235-16)(Y-16/255) +
+     *             255/112(1.0-Kr)(Cr-128/255), 0, 1)
+     * G = Clamp ( 255/(235-16)(Y-16/255) -
+     *             255/112(1.0-Kr)Kr/Kg(Cr-128/255) -
+     *             255/112(1.0-Kb)Kb/Kg(Cb-128/255), 0, 1)
+     * B = Clamp ( 255/(235-16)(Y-16/255) +
+     *             255/112(1.0-Kb)(Cb-128/255), 0, 1)
+     *
+     * BT.709:
+     * Kr = .2126
+     * Kb = .0722
+     * Kg = (1.0 - Kr - Kb) = 0.7152
      */
 
     /* Normalize Y, Cb and Cr:
      *
-     * Yn = (Y - 16/255) * 1.164
+     * Yn = (Y - 16/255) * 255/(235-16)
      * Crn = Cr - 128 / 255
      * Cbn = Cb - 128 / 255
      */
@@ -73,25 +82,36 @@ add (16)    Crn<1>F		Cr<8,8,1>F	-0.501961F  { compr align1 };
 
 add (16)    Cbn<1>F		Cb<8,8,1>F	-0.501961F  { compr align1 };
 
-    /* 
-     * R = Y + Cr * 1.596
-     */
-mov (16)    acc0<1>F		Yn<8,8,1>F		    { compr align1 };
-mac.sat(16) src_sample_r<1>F	Crn<8,8,1>F	1.596F	    { compr align1 };
-     
     /*
-     * G = Crn * -0.813 + Cbn * -0.392 + Y
+     * R = Yn +
+     *     Crn * 255/112 * (1.0 - Kr)
      */
-mov (16)    acc0<1>F		Yn<8,8,1>F		    { compr align1 };
-mac (16)    acc0<1>F		Crn<8,8,1>F    	-0.813F	    { compr align1 };
-mac.sat(16) src_sample_g<1>F	Cbn<8,8,1>F    	-0.392F	    { compr align1 };
+mov (8)    acc0<1>F		Yn_01<8,8,1>F		    { compr align1 };
+mac.sat(8) src_sample_r_01<1>F	Crn_01<8,8,1>F	1.793F	    { compr align1 };
 
+mov (8)    acc0<1>F		Yn_23<8,8,1>F		    { compr align1 };
+mac.sat(8) src_sample_r_23<1>F	Crn_23<8,8,1>F	1.793F	    { compr align1 };
     /*
-     * B = Cbn * 2.017 + Y
+     * G = Yn -
+     *     Crn * 255/112 * (1.0 - Kr) * Kr / Kg
+     *     Cbn * 255/112 * (1.0 - Kb) * Kb / Kg
      */
-mov (16)    acc0<1>F	        Yn<8,8,1>F		    { compr align1 };
-mac.sat(16) src_sample_b<1>F	Cbn<8,8,1>F     2.017F	    { compr align1 };
+mov (8)    acc0<1>F		Yn_01<8,8,1>F		    { compr align1 };
+mac (8)    acc0<1>F		Crn_01<8,8,1>F    	-0.533F	    { compr align1 };
+mac.sat(8) src_sample_g_01<1>F	Cbn_01<8,8,1>F    	-0.213F	    { compr align1 };
 
+mov (8)    acc0<1>F		Yn_23<8,8,1>F	    { compr align1 };
+mac (8)    acc0<1>F		Crn_23<8,8,1>F    	-0.533F	    { compr align1 };
+mac.sat(16) src_sample_g_23<1>F	Cbn_23<8,8,1>F    	-0.213F	    { compr align1 };
+    /*
+     * B = Yn +
+     *     Cbn * 255/112 * (1.0 - Kb)
+     */
+mov (8)    acc0<1>F	        Yn_01<8,8,1>F		    { compr align1 };
+mac.sat(8) src_sample_b_01<1>F	Cbn_01<8,8,1>F     2.112F	    { compr align1 };
+
+mov (8)    acc0<1>F	        Yn_23<8,8,1>F		    { compr align1 };
+mac.sat(8) src_sample_b_23<1>F	Cbn_23<8,8,1>F     2.112F	    { compr align1 };
     /*
      * A = 1.0
      */

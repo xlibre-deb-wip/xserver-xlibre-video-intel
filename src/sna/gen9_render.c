@@ -94,24 +94,45 @@
  */
 
 #if !NO_VIDEO
-static const uint32_t ps_kernel_packed[][4] = {
+static const uint32_t ps_kernel_packed_bt601[][4] = {
 #include "exa_wm_src_affine.g8b"
 #include "exa_wm_src_sample_argb.g8b"
-#include "exa_wm_yuv_rgb.g8b"
+#include "exa_wm_yuv_rgb_bt601.g8b"
 #include "exa_wm_write.g8b"
 };
 
-static const uint32_t ps_kernel_planar[][4] = {
+static const uint32_t ps_kernel_planar_bt601[][4] = {
 #include "exa_wm_src_affine.g8b"
 #include "exa_wm_src_sample_planar.g8b"
-#include "exa_wm_yuv_rgb.g8b"
+#include "exa_wm_yuv_rgb_bt601.g8b"
 #include "exa_wm_write.g8b"
 };
 
-static const uint32_t ps_kernel_nv12[][4] = {
+static const uint32_t ps_kernel_nv12_bt601[][4] = {
 #include "exa_wm_src_affine.g8b"
 #include "exa_wm_src_sample_nv12.g8b"
-#include "exa_wm_yuv_rgb.g8b"
+#include "exa_wm_yuv_rgb_bt601.g8b"
+#include "exa_wm_write.g8b"
+};
+
+static const uint32_t ps_kernel_packed_bt709[][4] = {
+#include "exa_wm_src_affine.g8b"
+#include "exa_wm_src_sample_argb.g8b"
+#include "exa_wm_yuv_rgb_bt709.g8b"
+#include "exa_wm_write.g8b"
+};
+
+static const uint32_t ps_kernel_planar_bt709[][4] = {
+#include "exa_wm_src_affine.g8b"
+#include "exa_wm_src_sample_planar.g8b"
+#include "exa_wm_yuv_rgb_bt709.g8b"
+#include "exa_wm_write.g8b"
+};
+
+static const uint32_t ps_kernel_nv12_bt709[][4] = {
+#include "exa_wm_src_affine.g8b"
+#include "exa_wm_src_sample_nv12.g8b"
+#include "exa_wm_yuv_rgb_bt709.g8b"
 #include "exa_wm_write.g8b"
 };
 
@@ -150,9 +171,12 @@ static const struct wm_kernel_info {
 	NOKERNEL(OPACITY_P, gen8_wm_kernel__projective_opacity, 2),
 
 #if !NO_VIDEO
-	KERNEL(VIDEO_PLANAR, ps_kernel_planar, 7),
-	KERNEL(VIDEO_NV12, ps_kernel_nv12, 7),
-	KERNEL(VIDEO_PACKED, ps_kernel_packed, 2),
+	KERNEL(VIDEO_PLANAR_BT601, ps_kernel_planar_bt601, 7),
+	KERNEL(VIDEO_NV12_BT601, ps_kernel_nv12_bt601, 7),
+	KERNEL(VIDEO_PACKED_BT601, ps_kernel_packed_bt601, 2),
+	KERNEL(VIDEO_PLANAR_BT709, ps_kernel_planar_bt709, 7),
+	KERNEL(VIDEO_NV12_BT709, ps_kernel_nv12_bt709, 7),
+	KERNEL(VIDEO_PACKED_BT709, ps_kernel_packed_bt709, 2),
 	KERNEL(VIDEO_RGB, ps_kernel_rgb, 2),
 #endif
 };
@@ -374,7 +398,7 @@ static uint32_t gen9_get_card_format(PictFormat format)
 		return SURFACEFORMAT_R8G8B8A8_UNORM;
 	case PICT_x8b8g8r8:
 		return SURFACEFORMAT_R8G8B8X8_UNORM;
-#ifdef PICT_a2r10g10b10
+#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,6,99,900,0)
 	case PICT_a2r10g10b10:
 		return SURFACEFORMAT_B10G10R10A2_UNORM;
 	case PICT_x2r10g10b10:
@@ -404,7 +428,7 @@ static uint32_t gen9_get_dest_format(PictFormat format)
 	case PICT_a8b8g8r8:
 	case PICT_x8b8g8r8:
 		return SURFACEFORMAT_R8G8B8A8_UNORM;
-#ifdef PICT_a2r10g10b10
+#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,6,99,900,0)
 	case PICT_a2r10g10b10:
 	case PICT_x2r10g10b10:
 		return SURFACEFORMAT_B10G10R10A2_UNORM;
@@ -3853,23 +3877,30 @@ static void gen9_emit_video_state(struct sna *sna,
 	gen9_emit_state(sna, op, offset);
 }
 
-static unsigned select_video_kernel(const struct sna_video_frame *frame)
+static unsigned select_video_kernel(const struct sna_video *video,
+				    const struct sna_video_frame *frame)
 {
 	switch (frame->id) {
 	case FOURCC_YV12:
 	case FOURCC_I420:
 	case FOURCC_XVMC:
-		return GEN9_WM_KERNEL_VIDEO_PLANAR;
+		return video->colorspace ?
+			GEN9_WM_KERNEL_VIDEO_PLANAR_BT709 :
+			GEN9_WM_KERNEL_VIDEO_PLANAR_BT601;
 
 	case FOURCC_NV12:
-		return GEN9_WM_KERNEL_VIDEO_NV12;
+		return video->colorspace ?
+			GEN9_WM_KERNEL_VIDEO_NV12_BT709 :
+			GEN9_WM_KERNEL_VIDEO_NV12_BT601;
 
 	case FOURCC_RGB888:
 	case FOURCC_RGB565:
 		return GEN9_WM_KERNEL_VIDEO_RGB;
 
 	default:
-		return GEN9_WM_KERNEL_VIDEO_PACKED;
+		return video->colorspace ?
+			GEN9_WM_KERNEL_VIDEO_PACKED_BT709 :
+			GEN9_WM_KERNEL_VIDEO_PACKED_BT601;
 	}
 }
 
@@ -3933,7 +3964,7 @@ gen9_render_video(struct sna *sna,
 		GEN9_SET_FLAGS(SAMPLER_OFFSET(filter, SAMPLER_EXTEND_PAD,
 					      SAMPLER_FILTER_NEAREST, SAMPLER_EXTEND_NONE),
 			       NO_BLEND,
-			       select_video_kernel(frame),
+			       select_video_kernel(video, frame),
 			       2);
 	tmp.priv = frame;
 
