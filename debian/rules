@@ -22,6 +22,9 @@ override_dh_auto_configure:
 	    --with-builderstring="$(SOURCE_NAME) $(SOURCE_VERSION) ($(BUILDER))" \
 	    $(valgrind)
 
+override_dh_auto_install:
+	dh_auto_install --destdir debian/tmp
+
 # Kill *.la files, libxvmc symlinks, and forget no-one:
 override_dh_install:
 	find debian/tmp -name '*.la' -delete
@@ -30,7 +33,10 @@ override_dh_install:
 	mkdir -p debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)
 	mv debian/tmp/usr/lib/libI810XvMC.so.* debian/tmp/usr/lib/libIntelXvMC.so.* \
 		debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/.
-	dh_install --fail-missing
+	dh_install
+
+override_dh_missing:
+	dh_missing --fail-missing
 
 # Debug package:
 override_dh_strip:
