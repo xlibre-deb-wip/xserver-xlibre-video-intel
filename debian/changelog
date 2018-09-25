@@ -1,11 +1,11 @@
-xserver-xorg-video-intel (2:2.99.917+git20180925-1) UNRELEASED; urgency=medium
+xserver-xorg-video-intel (2:2.99.917+git20180925-1) unstable; urgency=medium
 
   * New upstream snapshot
   * Switch to dbgsym package.
   * control: Update VCS urls.
   * rules: Fix destdir, use dh_missing.
 
- -- Timo Aaltonen <tjaalton@debian.org>  Wed, 27 Jun 2018 12:53:19 +0300
+ -- Timo Aaltonen <tjaalton@debian.org>  Tue, 25 Sep 2018 15:28:52 +0300
 
 xserver-xorg-video-intel (2:2.99.917+git20171229-1) unstable; urgency=medium
 
