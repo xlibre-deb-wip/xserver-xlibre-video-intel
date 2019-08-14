@@ -76,4 +76,4 @@ Description: X.Org X server -- Intel i8xx, i9xx display driver
  .
  The use of this driver is discouraged if your hw is new enough (ca.
  2007 and newer). You can try uninstalling this driver and let the
- server use it's builtin modesetting driver instead.
+ server use its builtin modesetting driver instead.
