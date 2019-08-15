@@ -1,10 +1,10 @@
-xserver-xorg-video-intel (2:2.99.917+git20190815-1) UNRELEASED; urgency=medium
+xserver-xorg-video-intel (2:2.99.917+git20190815-1) unstable; urgency=medium
 
   * New upstream snapshot.
   * control: Fix a typo in the description. (Closes: #934776)
   * 01_Fix-build-on-i686.diff: Dropped, upstream.
 
- -- Timo Aaltonen <tjaalton@debian.org>  Wed, 14 Aug 2019 23:37:08 +0300
+ -- Timo Aaltonen <tjaalton@debian.org>  Thu, 15 Aug 2019 13:32:33 +0300
 
 xserver-xorg-video-intel (2:2.99.917+git20180925-2) unstable; urgency=medium
 
