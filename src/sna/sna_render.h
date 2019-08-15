@@ -151,6 +151,7 @@ struct sna_composite_op {
 
 		struct {
 			uint32_t flags;
+			uint8_t wm_kernel;
 		} gen9;
 	} u;
 
@@ -615,6 +616,9 @@ enum {
 	GEN9_WM_KERNEL_VIDEO_PLANAR_BT709,
 	GEN9_WM_KERNEL_VIDEO_NV12_BT709,
 	GEN9_WM_KERNEL_VIDEO_PACKED_BT709,
+
+	GEN9_WM_KERNEL_VIDEO_AYUV_BT601,
+	GEN9_WM_KERNEL_VIDEO_AYUV_BT709,
 
 	GEN9_WM_KERNEL_VIDEO_RGB,
 	GEN9_WM_KERNEL_COUNT

@@ -59,6 +59,17 @@
 #include "intel_options.h"
 
 #include <xf86xv.h>
+#if defined(__OpenBSD__) || defined(__FreeBSD__) || defined(__NetBSD__)
+#include <sys/types.h>
+#include <sys/endian.h>
+#ifdef __OpenBSD__
+#define bswap_32 swap32
+#else
+#define bswap_32 bswap32
+#endif
+#else
+#include <byteswap.h>
+#endif
 
 #ifdef SNA_XVMC
 #define _SNA_XVMC_SERVER_
@@ -281,6 +292,7 @@ sna_video_frame_set_rotation(struct sna_video *video,
 	} else {
 		switch (frame->id) {
 		case FOURCC_RGB888:
+		case FOURCC_AYUV:
 			if (rotation & (RR_Rotate_90 | RR_Rotate_270)) {
 				frame->pitch[0] = ALIGN((height << 2), align);
 				frame->size = (int)frame->pitch[0] * width;
@@ -584,6 +596,72 @@ sna_copy_packed_data(struct sna_video *video,
 	}
 }
 
+static void
+sna_copy_ayuv_data(struct sna_video *video,
+		   const struct sna_video_frame *frame,
+		   const uint8_t *buf,
+		   uint8_t *dst)
+{
+	int pitch = frame->width << 2;
+	const uint32_t *src_dw;
+	const uint8_t *src;
+	uint32_t *dst_dw = (uint32_t *)dst;
+	int x, y, w, h;
+	int i, j;
+
+	if (video->textured) {
+		/* XXX support copying cropped extents */
+		x = y = 0;
+		w = frame->width;
+		h = frame->height;
+	} else {
+		x = frame->image.x1;
+		y = frame->image.y1;
+		w = frame->image.x2 - frame->image.x1;
+		h = frame->image.y2 - frame->image.y1;
+	}
+
+	src = buf + (y * pitch) + (x << 2);
+	src_dw = (uint32_t *)src;
+
+	switch (frame->rotation) {
+	case RR_Rotate_0:
+		for (i = 0; i < h; i++) {
+			for (j = 0; j < w; j++) {
+				/*
+				 * Have to reverse bytes order, because the only
+				 * player which supports AYUV format currently is
+				 * Gstreamer and it supports in bad way, even though
+				 * spec says MSB:AYUV, we get the bytes opposite way.
+				 */
+				dst_dw[i * w + j] = bswap_32(src_dw[i * w + j]);
+			}
+		}
+		break;
+	case RR_Rotate_90:
+		for (i = 0; i < h; i++) {
+			for (j = 0; j < w; j++) {
+				dst_dw[(w - j - 1) * h + i] = bswap_32(src_dw[i * w + j]);
+			}
+		}
+		break;
+	case RR_Rotate_180:
+		for (i = 0; i < h; i++) {
+			for (j = 0; j < w; j++) {
+				dst_dw[(h - i - 1) * w + w - j - 1] = bswap_32(src_dw[i * w + j]);
+			}
+		}
+		break;
+	case RR_Rotate_270:
+		for (i = 0; i < h; i++) {
+			for (j = 0; j < w; j++) {
+				dst_dw[(w - j - 1) * h + i] = bswap_32(src_dw[i * w + j]);
+			}
+		}
+		break;
+	}
+}
+
 bool
 sna_video_copy_data(struct sna_video *video,
 		    struct sna_video_frame *frame,
@@ -604,7 +682,7 @@ sna_video_copy_data(struct sna_video *video,
 	assert(frame->size);
 
 	/* In the common case, we can simply the upload in a single pwrite */
-	if (frame->rotation == RR_Rotate_0 && !video->tiled) {
+	if (frame->rotation == RR_Rotate_0 && !video->tiled && !is_ayuv_fourcc(frame->id)) {
 		DBG(("%s: unrotated, untiled fast paths: is-planar?=%d\n",
 		     __FUNCTION__, is_planar_fourcc(frame->id)));
 		if (is_nv12_fourcc(frame->id)) {
@@ -709,6 +787,8 @@ use_gtt: /* copy data, must use GTT so that we keep the overlay uncached */
 		sna_copy_nv12_data(video, frame, buf, dst);
 	else if (is_planar_fourcc(frame->id))
 		sna_copy_planar_data(video, frame, buf, dst);
+	else if (is_ayuv_fourcc(frame->id))
+		sna_copy_ayuv_data(video, frame, buf, dst);
 	else
 		sna_copy_packed_data(video, frame, buf, dst);
 

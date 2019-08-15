@@ -261,7 +261,7 @@ noinline static void __sna_blt_fill_begin(struct sna *sna,
 		b[1] = blt->br13;
 		b[2] = 0;
 		b[3] = 0;
-		*(uint32_t *)(b+4) =
+		*(uint64_t *)(b+4) =
 			kgem_add_reloc64(kgem, kgem->nbatch + 4, blt->bo[0],
 					 I915_GEM_DOMAIN_RENDER << 16 |
 					 I915_GEM_DOMAIN_RENDER |
@@ -3111,7 +3111,10 @@ sna_blt_composite__convert(struct sna *sna,
 		tmp->blt   = blt_composite_copy;
 		tmp->box   = blt_composite_copy_box;
 		tmp->boxes = blt_composite_copy_boxes;
-		tmp->thread_boxes = blt_composite_copy_boxes__thread;
+		if (sna->kgem.gen >= 0100)
+			tmp->thread_boxes = blt_composite_copy_boxes__thread64;
+		else
+			tmp->thread_boxes = blt_composite_copy_boxes__thread;
 
 		if (!sna_blt_copy_init(sna, &tmp->u.blt,
 				       tmp->src.bo, tmp->dst.bo,

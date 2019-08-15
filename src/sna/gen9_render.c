@@ -129,6 +129,20 @@ static const uint32_t ps_kernel_planar_bt709[][4] = {
 #include "exa_wm_write.g8b"
 };
 
+static const uint32_t ps_kernel_ayuv_bt601[][4] = {
+#include "exa_wm_src_affine.g8b"
+#include "exa_wm_src_sample_argb_ayuv.g8b"
+#include "exa_wm_yuv_rgb_bt601.g8b"
+#include "exa_wm_write.g8b"
+};
+
+static const uint32_t ps_kernel_ayuv_bt709[][4] = {
+#include "exa_wm_src_affine.g8b"
+#include "exa_wm_src_sample_argb_ayuv.g8b"
+#include "exa_wm_yuv_rgb_bt709.g8b"
+#include "exa_wm_write.g8b"
+};
+
 static const uint32_t ps_kernel_nv12_bt709[][4] = {
 #include "exa_wm_src_affine.g8b"
 #include "exa_wm_src_sample_nv12.g8b"
@@ -177,6 +191,8 @@ static const struct wm_kernel_info {
 	KERNEL(VIDEO_PLANAR_BT709, ps_kernel_planar_bt709, 7),
 	KERNEL(VIDEO_NV12_BT709, ps_kernel_nv12_bt709, 7),
 	KERNEL(VIDEO_PACKED_BT709, ps_kernel_packed_bt709, 2),
+	KERNEL(VIDEO_AYUV_BT601, ps_kernel_ayuv_bt601, 2),
+	KERNEL(VIDEO_AYUV_BT709, ps_kernel_ayuv_bt709, 2),
 	KERNEL(VIDEO_RGB, ps_kernel_rgb, 2),
 #endif
 };
@@ -226,19 +242,18 @@ static const struct blendinfo {
 
 #define COPY_SAMPLER 0
 #define COPY_VERTEX VERTEX_2s2s
-#define COPY_FLAGS(a) GEN9_SET_FLAGS(COPY_SAMPLER, (a) == GXcopy ? NO_BLEND : CLEAR, GEN9_WM_KERNEL_NOMASK, COPY_VERTEX)
+#define COPY_FLAGS(a) GEN9_SET_FLAGS(COPY_SAMPLER, (a) == GXcopy ? NO_BLEND : CLEAR, COPY_VERTEX)
 
 #define FILL_SAMPLER 1
 #define FILL_VERTEX VERTEX_2s2s
-#define FILL_FLAGS(op, format) GEN9_SET_FLAGS(FILL_SAMPLER, gen9_get_blend((op), false, (format)), GEN9_WM_KERNEL_NOMASK, FILL_VERTEX)
-#define FILL_FLAGS_NOBLEND GEN9_SET_FLAGS(FILL_SAMPLER, NO_BLEND, GEN9_WM_KERNEL_NOMASK, FILL_VERTEX)
+#define FILL_FLAGS(op, format) GEN9_SET_FLAGS(FILL_SAMPLER, gen9_get_blend((op), false, (format)), FILL_VERTEX)
+#define FILL_FLAGS_NOBLEND GEN9_SET_FLAGS(FILL_SAMPLER, NO_BLEND, FILL_VERTEX)
 
 #define GEN9_SAMPLER(f) (((f) >> 20) & 0xfff)
 #define GEN9_BLEND(f) (((f) >> 4) & 0x7ff)
 #define GEN9_READS_DST(f) (((f) >> 15) & 1)
-#define GEN9_KERNEL(f) (((f) >> 16) & 0xf)
 #define GEN9_VERTEX(f) (((f) >> 0) & 0xf)
-#define GEN9_SET_FLAGS(S, B, K, V)  ((S) << 20 | (K) << 16 | (B) | (V))
+#define GEN9_SET_FLAGS(S, B, V)  ((S) << 20 | (B) | (V))
 
 #define OUT_BATCH(v) batch_emit(sna, v)
 #define OUT_BATCH64(v) batch_emit64(sna, v)
@@ -1349,7 +1364,7 @@ gen9_emit_state(struct sna *sna,
 	gen9_emit_cc(sna, GEN9_BLEND(op->u.gen9.flags));
 	gen9_emit_sampler(sna, GEN9_SAMPLER(op->u.gen9.flags));
 	gen9_emit_sf(sna, GEN9_VERTEX(op->u.gen9.flags) >> 2);
-	gen9_emit_wm(sna, GEN9_KERNEL(op->u.gen9.flags));
+	gen9_emit_wm(sna, op->u.gen9.wm_kernel);
 	gen9_emit_vertex_elements(sna, op);
 	gen9_emit_binding_table(sna, wm_binding_table);
 
@@ -1618,7 +1633,7 @@ static int gen9_get_rectangles__flush(struct sna *sna,
 		if (gen9_magic_ca_pass(sna, op)) {
 			gen9_emit_pipe_invalidate(sna);
 			gen9_emit_cc(sna, GEN9_BLEND(op->u.gen9.flags));
-			gen9_emit_wm(sna, GEN9_KERNEL(op->u.gen9.flags));
+			gen9_emit_wm(sna, op->u.gen9.wm_kernel);
 		}
 	}
 
@@ -2147,11 +2162,6 @@ try_blt(struct sna *sna,
 {
 	struct kgem_bo *bo;
 
-	if (sna->kgem.mode == KGEM_BLT) {
-		DBG(("%s: already performing BLT\n", __FUNCTION__));
-		goto execute;
-	}
-
 	if (too_large(width, height)) {
 		DBG(("%s: operation too large for 3D pipe (%d, %d)\n",
 		     __FUNCTION__, width, height));
@@ -2192,7 +2202,7 @@ try_blt(struct sna *sna,
 			goto execute;
 	}
 
-	if (sna->kgem.ring == KGEM_BLT) {
+	if (sna->kgem.mode == KGEM_BLT) {
 		DBG(("%s: already performing BLT\n", __FUNCTION__));
 		goto execute;
 	}
@@ -2548,11 +2558,11 @@ gen9_render_composite(struct sna *sna,
 			       gen9_get_blend(tmp->op,
 					      tmp->has_component_alpha,
 					      tmp->dst.format),
-			       gen9_choose_composite_kernel(tmp->op,
-							    tmp->mask.bo != NULL,
-							    tmp->has_component_alpha,
-							    tmp->is_affine),
 			       gen4_choose_composite_emitter(sna, tmp));
+	tmp->u.gen9.wm_kernel = gen9_choose_composite_kernel(tmp->op,
+							     tmp->mask.bo != NULL,
+							     tmp->has_component_alpha,
+							     tmp->is_affine);
 
 	tmp->blt   = gen9_render_composite_blt;
 	tmp->box   = gen9_render_composite_box;
@@ -2781,8 +2791,9 @@ gen9_render_composite_spans(struct sna *sna,
 					      SAMPLER_FILTER_NEAREST,
 					      SAMPLER_EXTEND_PAD),
 			       gen9_get_blend(tmp->base.op, false, tmp->base.dst.format),
-			       GEN9_WM_KERNEL_OPACITY | !tmp->base.is_affine,
 			       gen4_choose_spans_emitter(sna, tmp));
+	tmp->base.u.gen9.wm_kernel =
+		GEN9_WM_KERNEL_OPACITY | !tmp->base.is_affine;
 
 	tmp->box   = gen9_render_composite_spans_box;
 	tmp->boxes = gen9_render_composite_spans_boxes;
@@ -2859,9 +2870,6 @@ prefer_blt_copy(struct sna *sna,
 		struct kgem_bo *dst_bo,
 		unsigned flags)
 {
-	if (sna->kgem.mode == KGEM_BLT)
-		return true;
-
 	assert((flags & COPY_SYNC) == 0);
 
 	if (untiled_tlb_miss(src_bo) ||
@@ -2871,7 +2879,7 @@ prefer_blt_copy(struct sna *sna,
 	if (flags & COPY_DRI && !sna->kgem.has_semaphores)
 		return false;
 
-	if (force_blt_ring(sna, dst_bo))
+	if (force_blt_ring(sna, dst_bo, src_bo))
 		return true;
 
 	if ((flags & COPY_SMALL ||
@@ -3045,6 +3053,7 @@ fallback_blt:
 	tmp.need_magic_ca_pass = 0;
 
 	tmp.u.gen9.flags = COPY_FLAGS(alu);
+	tmp.u.gen9.wm_kernel = GEN9_WM_KERNEL_NOMASK;
 
 	kgem_set_mode(&sna->kgem, KGEM_RENDER, tmp.dst.bo);
 	if (!kgem_check_bo(&sna->kgem, tmp.dst.bo, tmp.src.bo, NULL)) {
@@ -3214,6 +3223,7 @@ fallback:
 	op->base.floats_per_rect = 6;
 
 	op->base.u.gen9.flags = COPY_FLAGS(alu);
+	op->base.u.gen9.wm_kernel = GEN9_WM_KERNEL_NOMASK;
 
 	kgem_set_mode(&sna->kgem, KGEM_RENDER, dst_bo);
 	if (!kgem_check_bo(&sna->kgem, dst_bo, src_bo, NULL)) {
@@ -3366,6 +3376,7 @@ gen9_render_fill_boxes(struct sna *sna,
 	tmp.need_magic_ca_pass = false;
 
 	tmp.u.gen9.flags = FILL_FLAGS(op, format);
+	tmp.u.gen9.wm_kernel = GEN9_WM_KERNEL_NOMASK;
 
 	kgem_set_mode(&sna->kgem, KGEM_RENDER, dst_bo);
 	if (!kgem_check_bo(&sna->kgem, dst_bo, NULL)) {
@@ -3552,6 +3563,7 @@ gen9_render_fill(struct sna *sna, uint8_t alu,
 	op->base.floats_per_rect = 6;
 
 	op->base.u.gen9.flags = FILL_FLAGS_NOBLEND;
+	op->base.u.gen9.wm_kernel = GEN9_WM_KERNEL_NOMASK;
 
 	kgem_set_mode(&sna->kgem, KGEM_RENDER, dst_bo);
 	if (!kgem_check_bo(&sna->kgem, dst_bo, NULL)) {
@@ -3637,6 +3649,7 @@ gen9_render_fill_one(struct sna *sna, PixmapPtr dst, struct kgem_bo *bo,
 	tmp.need_magic_ca_pass = false;
 
 	tmp.u.gen9.flags = FILL_FLAGS_NOBLEND;
+	tmp.u.gen9.wm_kernel = GEN9_WM_KERNEL_NOMASK;
 
 	kgem_set_mode(&sna->kgem, KGEM_RENDER, bo);
 	if (!kgem_check_bo(&sna->kgem, bo, NULL)) {
@@ -3723,6 +3736,7 @@ gen9_render_clear(struct sna *sna, PixmapPtr dst, struct kgem_bo *bo)
 	tmp.need_magic_ca_pass = false;
 
 	tmp.u.gen9.flags = FILL_FLAGS_NOBLEND;
+	tmp.u.gen9.wm_kernel = GEN9_WM_KERNEL_NOMASK;
 
 	kgem_set_mode(&sna->kgem, KGEM_RENDER, bo);
 	if (!kgem_check_bo(&sna->kgem, bo, NULL)) {
@@ -3847,6 +3861,8 @@ static void gen9_emit_video_state(struct sna *sna,
 			src_surf_format[0] = SURFACEFORMAT_B8G8R8X8_UNORM;
 		else if (frame->id == FOURCC_UYVY)
 			src_surf_format[0] = SURFACEFORMAT_YCRCB_SWAPY;
+		else if (is_ayuv_fourcc(frame->id))
+			src_surf_format[0] = SURFACEFORMAT_B8G8R8X8_UNORM;
 		else
 			src_surf_format[0] = SURFACEFORMAT_YCRCB_NORMAL;
 
@@ -3896,6 +3912,11 @@ static unsigned select_video_kernel(const struct sna_video *video,
 	case FOURCC_RGB888:
 	case FOURCC_RGB565:
 		return GEN9_WM_KERNEL_VIDEO_RGB;
+
+	case FOURCC_AYUV:
+		return video->colorspace ?
+			GEN9_WM_KERNEL_VIDEO_AYUV_BT709 :
+			GEN9_WM_KERNEL_VIDEO_AYUV_BT601;
 
 	default:
 		return video->colorspace ?
@@ -3964,8 +3985,8 @@ gen9_render_video(struct sna *sna,
 		GEN9_SET_FLAGS(SAMPLER_OFFSET(filter, SAMPLER_EXTEND_PAD,
 					      SAMPLER_FILTER_NEAREST, SAMPLER_EXTEND_NONE),
 			       NO_BLEND,
-			       select_video_kernel(video, frame),
 			       2);
+	tmp.u.gen9.wm_kernel = select_video_kernel(video, frame);
 	tmp.priv = frame;
 
 	kgem_set_mode(&sna->kgem, KGEM_RENDER, tmp.dst.bo);
@@ -4134,6 +4155,9 @@ static bool gen9_render_setup(struct sna *sna)
 		}
 		assert(state->wm_kernel[m][0]|state->wm_kernel[m][1]|state->wm_kernel[m][2]);
 	}
+
+	COMPILE_TIME_ASSERT(GEN9_WM_KERNEL_COUNT <=
+			    1 << (sizeof(((struct sna_composite_op *)NULL)->u.gen9.wm_kernel) * 8));
 
 	COMPILE_TIME_ASSERT(SAMPLER_OFFSET(FILTER_COUNT, EXTEND_COUNT, FILTER_COUNT, EXTEND_COUNT) <= 0x7ff);
 	ss = sna_static_stream_map(&general,

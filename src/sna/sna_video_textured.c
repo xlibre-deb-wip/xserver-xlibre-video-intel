@@ -39,7 +39,7 @@
 static Atom xvBrightness, xvContrast, xvSyncToVblank, xvColorspace;
 
 static XvFormatRec Formats[] = {
-	{15}, {16}, {24}
+	{15}, {16}, {24}, {30}
 };
 
 static const XvAttributeRec Attributes[] = {
@@ -68,6 +68,16 @@ static const XvImageRec gen4_Images[] = {
 	XVIMAGE_I420,
 	XVIMAGE_NV12,
 	XVIMAGE_UYVY,
+	XVMC_YUV,
+};
+
+static const XvImageRec gen9_Images[] = {
+	XVIMAGE_YUY2,
+	XVIMAGE_YV12,
+	XVIMAGE_I420,
+	XVIMAGE_NV12,
+	XVIMAGE_UYVY,
+	XVIMAGE_AYUV,
 	XVMC_YUV,
 };
 
@@ -337,6 +347,12 @@ sna_video_textured_query(ddQueryImageAttributes_ARGS)
 			pitches[0] = size;
 		size *= *h;
 		break;
+	case FOURCC_AYUV:
+		size = *w << 2;
+		if (pitches)
+			pitches[0] = size;
+		size *= *h;
+		break;
 	case FOURCC_XVMC:
 		*h = (*h + 1) & ~1;
 		size = sizeof(uint32_t);
@@ -353,6 +369,12 @@ void sna_video_textured_setup(struct sna *sna, ScreenPtr screen)
 	XvAdaptorPtr adaptor;
 	struct sna_video *video;
 	int nports, i;
+
+	if (sna->scrn->depth == 8) {
+		xf86DrvMsg(sna->scrn->scrnIndex, X_INFO,
+			   "Textured video not supported in 8bpp mode\n");
+		return;
+	}
 
 	if (!sna->render.video) {
 		xf86DrvMsg(sna->scrn->scrnIndex, X_INFO,
@@ -408,9 +430,12 @@ void sna_video_textured_setup(struct sna *sna, ScreenPtr screen)
 	} else if (sna->kgem.gen < 040) {
 		adaptor->nImages = ARRAY_SIZE(gen3_Images);
 		adaptor->pImages = (XvImageRec *)gen3_Images;
-	} else {
+	} else if (sna->kgem.gen < 0110) {
 		adaptor->nImages = ARRAY_SIZE(gen4_Images);
 		adaptor->pImages = (XvImageRec *)gen4_Images;
+	} else {
+		adaptor->nImages = ARRAY_SIZE(gen9_Images);
+		adaptor->pImages = (XvImageRec *)gen9_Images;
 	}
 #if XORG_XV_VERSION < 2
 	adaptor->ddAllocatePort = sna_xv_alloc_port;

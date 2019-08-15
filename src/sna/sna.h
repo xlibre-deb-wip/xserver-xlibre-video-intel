@@ -482,6 +482,9 @@ extern void sna_crtc_config_notify(ScreenPtr screen);
 
 extern bool sna_cursors_init(ScreenPtr screen, struct sna *sna);
 
+extern CARD32 sna_mode_coldplug(OsTimerPtr timer, CARD32 now, void *data);
+#define COLDPLUG_DELAY_MS 2000
+
 typedef void (*sna_flip_handler_t)(struct drm_event_vblank *e,
 				   void *data);
 

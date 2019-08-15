@@ -47,10 +47,10 @@
 #define DRM_FORMAT_YUYV         fourcc_code('Y', 'U', 'Y', 'V') /* [31:0] Cr0:Y1:Cb0:Y0 8:8:8:8 little endian */
 #define DRM_FORMAT_UYVY         fourcc_code('U', 'Y', 'V', 'Y') /* [31:0] Y1:Cr0:Y0:Cb0 8:8:8:8 little endian */
 #define DRM_FORMAT_NV12         fourcc_code('N', 'V', '1', '2') /* 2x2 subsampled Cr:Cb plane */
+#define DRM_FORMAT_XYUV8888     fourcc_code('X', 'Y', 'U', 'V') /* [31:0] x:Y:U:V 8:8:8:8 little endian */
 
 #define has_hw_scaling(sna, video) ((sna)->kgem.gen < 071 || \
 				    (sna)->kgem.gen >= 0110)
-
 
 #define LOCAL_IOCTL_MODE_SETPLANE	DRM_IOWR(0xB7, struct local_mode_set_plane)
 struct local_mode_set_plane {
@@ -72,12 +72,14 @@ struct local_mode_set_plane {
 
 static Atom xvColorKey, xvAlwaysOnTop, xvSyncToVblank, xvColorspace;
 
-static XvFormatRec formats[] = { {15}, {16}, {24} };
+static XvFormatRec formats[] = { {8}, {15}, {16}, {24}, {30} };
 static const XvImageRec images[] = { XVIMAGE_YUY2, XVIMAGE_UYVY,
 				     XVMC_RGB888 };
 static const XvImageRec images_rgb565[] = { XVIMAGE_YUY2, XVIMAGE_UYVY,
 					    XVMC_RGB888, XVMC_RGB565 };
 static const XvImageRec images_nv12[] = { XVIMAGE_YUY2, XVIMAGE_UYVY,
+					  XVIMAGE_NV12, XVMC_RGB888, XVMC_RGB565 };
+static const XvImageRec images_ayuv[] = { XVIMAGE_AYUV, XVIMAGE_YUY2, XVIMAGE_UYVY,
 					  XVIMAGE_NV12, XVMC_RGB888, XVMC_RGB565 };
 static const XvAttributeRec attribs[] = {
 	{ XvSettable | XvGettable, 0, 1, (char *)"XV_COLORSPACE" }, /* BT.601, BT.709 */
@@ -228,6 +230,52 @@ update_dst_box_to_crtc_coords(struct sna *sna, xf86CrtcPtr crtc, BoxPtr dstBox)
 	}
 }
 
+static uint32_t ckey_chan(uint32_t value, int weight)
+{
+	return value << 8 >> weight;
+}
+
+static uint32_t ckey_value_chan(uint32_t value, uint32_t mask,
+				int offset, int weight)
+{
+	return ckey_chan((value & mask) >> offset, weight);
+}
+
+static uint32_t ckey_value(struct sna *sna,
+			   struct sna_video *video)
+{
+	ScrnInfoPtr scrn = sna->scrn;
+	uint32_t r, g ,b;
+
+	if (scrn->depth == 8) {
+		r = g = b = video->color_key & 0xff;
+	} else {
+		r = ckey_value_chan(video->color_key, scrn->mask.red,
+				    scrn->offset.red, scrn->weight.red);
+		g = ckey_value_chan(video->color_key, scrn->mask.green,
+				    scrn->offset.green, scrn->weight.green);
+		b = ckey_value_chan(video->color_key, scrn->mask.blue,
+				    scrn->offset.blue, scrn->weight.blue);
+	}
+
+	return r << 16 | g << 8 | b;
+}
+
+static uint32_t ckey_mask_chan(int weight)
+{
+	return ckey_chan((1 << weight) - 1, weight);
+}
+
+static uint32_t ckey_mask(struct sna *sna)
+{
+	ScrnInfoPtr scrn = sna->scrn;
+	uint32_t r = ckey_mask_chan(scrn->weight.red);
+	uint32_t g = ckey_mask_chan(scrn->weight.green);
+	uint32_t b = ckey_mask_chan(scrn->weight.blue);
+
+	return 0x7 << 24 | r << 16 | g << 8 | b;
+}
+
 static bool
 sna_video_sprite_show(struct sna *sna,
 		      struct sna_video *video,
@@ -260,9 +308,9 @@ sna_video_sprite_show(struct sna *sna,
 		     __FUNCTION__, video->color_key));
 
 		set.plane_id = s.plane_id;
-		set.min_value = video->color_key;
-		set.max_value = video->color_key; /* not used for destkey */
-		set.channel_mask = 0x7 << 24 | 0xff << 16 | 0xff << 8 | 0xff << 0;
+		set.min_value = ckey_value(sna, video);
+		set.max_value = 0; /* not used for destkey */
+		set.channel_mask = ckey_mask(sna);
 		set.flags = 0;
 		if (!video->AlwaysOnTop)
 			set.flags |= 1 << 1; /* COLORKEY_DESTINATION */
@@ -363,6 +411,10 @@ sna_video_sprite_show(struct sna *sna,
 			break;
 		case FOURCC_UYVY:
 			f.pixel_format = DRM_FORMAT_UYVY;
+			break;
+		case FOURCC_AYUV:
+			/* i915 doesn't support alpha, so we use XYUV */
+			f.pixel_format = DRM_FORMAT_XYUV8888;
 			break;
 		case FOURCC_YUY2:
 		default:
@@ -705,7 +757,12 @@ static int sna_video_sprite_query(ddQueryImageAttributes_ARGS)
 		tmp *= (*h >> 1);
 		size += tmp;
 		break;
-
+	case FOURCC_AYUV:
+		tmp = *w << 2;
+		if (pitches)
+			pitches[0] = tmp;
+		size = *h * tmp;
+		break;
 	default:
 		*w = (*w + 1) & ~1;
 		*h = (*h + 1) & ~1;
@@ -805,7 +862,10 @@ void sna_video_sprite_setup(struct sna *sna, ScreenPtr screen)
 	adaptor->nAttributes = ARRAY_SIZE(attribs);
 	adaptor->pAttributes = (XvAttributeRec *)attribs;
 
-	if (sna_has_sprite_format(sna, DRM_FORMAT_NV12)) {
+	if (sna_has_sprite_format(sna, DRM_FORMAT_XYUV8888)) {
+		adaptor->pImages = (XvImageRec *)images_ayuv;
+		adaptor->nImages = ARRAY_SIZE(images_ayuv);
+	} else if (sna_has_sprite_format(sna, DRM_FORMAT_NV12)) {
 		adaptor->pImages = (XvImageRec *)images_nv12;
 		adaptor->nImages = ARRAY_SIZE(images_nv12);
 	} else if (sna_has_sprite_format(sna, DRM_FORMAT_RGB565)) {

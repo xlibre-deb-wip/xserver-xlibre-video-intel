@@ -883,6 +883,9 @@ gen4_emit_invariant(struct sna *sna)
 	else
 		OUT_BATCH(GEN4_PIPELINE_SELECT | PIPELINE_SELECT_3D);
 
+	OUT_BATCH(GEN4_CONSTANT_BUFFER);
+	OUT_BATCH(0);
+
 	gen4_emit_state_base_address(sna);
 
 	sna->render_state.gen4.needs_invariant = false;

@@ -802,9 +802,14 @@ sna_handle_uevents(int fd, void *closure)
 		struct udev_device *dev;
 		dev_t devnum;
 
+		errno = 0;
 		dev = udev_monitor_receive_device(sna->uevent_monitor);
-		if (dev == NULL)
+		if (dev == NULL) {
+			if (errno == EINTR || errno == EAGAIN)
+				continue;
+
 			break;
+		}
 
 		devnum = udev_device_get_devnum(dev);
 		if (memcmp(&s.st_rdev, &devnum, sizeof(dev_t)) == 0) {
@@ -1110,6 +1115,9 @@ sna_mode_init(struct sna *sna, ScreenPtr screen)
 	if (rp) {
 		sna->mode.rrGetInfo = rp->rrGetInfo;
 		rp->rrGetInfo = sna_randr_getinfo;
+
+		/* Simulate a hotplug event on wakeup to force a RR probe */
+		TimerSet(NULL, 0, COLDPLUG_DELAY_MS, sna_mode_coldplug, sna);
 	}
 
 	return TRUE;
@@ -1152,7 +1160,7 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
 	if (!miInitVisuals(&visuals, &depths, &nvisuals, &ndepths, &rootdepth,
 			   &defaultVisual,
 			   ((unsigned long)1 << (scrn->bitsPerPixel - 1)),
-			   8, -1))
+			   scrn->rgbBits, -1))
 		return FALSE;
 
 	if (!miScreenInit(screen, NULL,
@@ -1223,8 +1231,11 @@ sna_screen_init(SCREEN_INIT_ARGS_DECL)
 	if (!miCreateDefColormap(screen))
 		return FALSE;
 
-	if (sna->mode.num_real_crtc &&
-	    !xf86HandleColormaps(screen, 256, 8, sna_load_palette, NULL,
+	/* X-Server < 1.20 mishandles > 256 slots / > 8 bpc color maps. */
+	if (sna->mode.num_real_crtc && (scrn->rgbBits <= 8 ||
+	    XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,20,0,0,0)) &&
+	    !xf86HandleColormaps(screen, 1 << scrn->rgbBits, scrn->rgbBits,
+				 sna_load_palette, NULL,
 				 CMAP_RELOAD_ON_MODE_SWITCH |
 				 CMAP_PALETTED_TRUECOLOR))
 		return FALSE;

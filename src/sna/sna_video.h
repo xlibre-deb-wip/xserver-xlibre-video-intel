@@ -39,6 +39,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define FOURCC_RGB565 ((16 << 24) + ('B' << 16) + ('G' << 8) + 'R')
 #define FOURCC_RGB888 ((24 << 24) + ('B' << 16) + ('G' << 8) + 'R')
 #define FOURCC_NV12 (('2' << 24) + ('1' << 16) + ('V' << 8) + 'N')
+#define FOURCC_AYUV (('V' << 24) + ('U' << 16) + ('Y' << 8) + 'A')
 
 /*
  * Below, a dummy picture type that is used in XvPutImage
@@ -76,6 +77,14 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 	{'N','V','1','2', 0x00,0x00,0x00,0x10,0x80,0x00,0x00,0xAA,0x00,0x38,0x9B,0x71}, \
 	12, XvPlanar, 2, 0, 0, 0, 0, 8, 8, 8, 1, 2, 2, 1, 2, 2, \
 	{'Y','U','V', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, \
+	XvTopToBottom \
+}
+
+#define XVIMAGE_AYUV { \
+	FOURCC_AYUV, XvYUV, LSBFirst, \
+	{'A', 'Y', 'U', 'V', 0x00, 0x00, 0x00, 0x10, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}, \
+	32, XvPacked, 1, 0, 0, 0, 0, 8, 8, 8, 1, 1, 1, 1, 1, 1, \
+	{'A', 'Y', 'U', 'V', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, \
 	XvTopToBottom \
 }
 
@@ -183,6 +192,16 @@ static inline int is_nv12_fourcc(int id)
 {
 	switch (id) {
 	case FOURCC_NV12:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+static inline int is_ayuv_fourcc(int id)
+{
+	switch (id) {
+	case FOURCC_AYUV:
 		return 1;
 	default:
 		return 0;

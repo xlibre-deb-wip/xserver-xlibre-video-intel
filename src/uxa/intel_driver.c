@@ -991,7 +991,11 @@ I830ScreenInit(SCREEN_INIT_ARGS_DECL)
 	if (!miCreateDefColormap(screen))
 		return FALSE;
 
-	if (!xf86HandleColormaps(screen, 256, 8, I830LoadPalette, NULL,
+	/* X-Server < 1.20 mishandles > 256 slots / > 8 bpc color maps. */
+	if ((scrn->rgbBits <= 8 ||
+	    XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,20,0,0,0)) &&
+	    !xf86HandleColormaps(screen, 1 << scrn->rgbBits, scrn->rgbBits,
+				 I830LoadPalette, NULL,
 				 CMAP_RELOAD_ON_MODE_SWITCH |
 				 CMAP_PALETTED_TRUECOLOR)) {
 		return FALSE;

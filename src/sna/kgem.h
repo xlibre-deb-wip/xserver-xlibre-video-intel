@@ -686,9 +686,12 @@ static inline bool __kgem_bo_is_busy(struct kgem *kgem, struct kgem_bo *bo)
 
 static inline bool kgem_bo_is_render(struct kgem_bo *bo)
 {
-	DBG(("%s: handle=%d, rq? %d [%d]\n", __FUNCTION__,
-	     bo->handle, bo->rq != NULL, (int)RQ_RING(bo->rq)));
+	DBG(("%s: handle=%d, tiling=%d, rq? %d [%d]\n", __FUNCTION__,
+	     bo->handle, bo->tiling, bo->rq != NULL, (int)RQ_RING(bo->rq)));
 	assert(bo->refcnt);
+	if (bo->tiling >= I915_TILING_Y)
+		return true;
+
 	return bo->rq && RQ_RING(bo->rq) != KGEM_BLT;
 }
 

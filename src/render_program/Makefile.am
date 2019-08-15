@@ -196,6 +196,7 @@ INTEL_G7B =				\
 INTEL_G8A =				\
 	exa_wm_src_affine.g8a 		\
 	exa_wm_src_sample_argb.g8a 	\
+	exa_wm_src_sample_argb_ayuv.g8a \
 	exa_wm_src_sample_nv12.g8a 	\
 	exa_wm_src_sample_planar.g8a 	\
 	exa_wm_write.g8a 		\
@@ -205,6 +206,7 @@ INTEL_G8A =				\
 
 INTEL_G8B =				\
 	exa_wm_src_affine.g8b 		\
+	exa_wm_src_sample_argb_ayuv.g8b \
 	exa_wm_src_sample_argb.g8b 	\
 	exa_wm_src_sample_nv12.g8b 	\
 	exa_wm_src_sample_planar.g8b 	\
