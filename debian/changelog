@@ -1,6 +1,7 @@
 xserver-xorg-video-intel (2:2.99.917+git20200226-1) UNRELEASED; urgency=medium
 
   * New upstream snapshot.
+  * control: Use debhelper-compat, bump to 12.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Wed, 26 Feb 2020 22:47:54 +0200
 
