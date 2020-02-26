@@ -1538,8 +1538,8 @@ static bool test_has_dirtyfb(struct kgem *kgem)
 	create.width = 32;
 	create.height = 32;
 	create.pitch = 4*32;
-	create.bpp = 24;
-	create.depth = 32; /* {bpp:24, depth:32} -> x8r8g8b8 */
+	create.bpp = 32;
+	create.depth = 24; /* {bpp:32, depth:24} -> x8r8g8b8 */
 	create.handle = gem_create(kgem->fd, 1);
 	if (create.handle == 0)
 		return false;
@@ -8148,13 +8148,9 @@ kgem_replace_bo(struct kgem *kgem,
 	}
 
 	br13 |= 0xcc << 16;
-	switch (bpp) {
-	default:
-	case 32: br00 |= BLT_WRITE_ALPHA | BLT_WRITE_RGB;
-		 br13 |= 1 << 25; /* RGB8888 */
-	case 16: br13 |= 1 << 24; /* RGB565 */
-	case 8: break;
-	}
+	br13 |= sna_br13_color_depth(bpp);
+	if (bpp == 32)
+		br00 |= BLT_WRITE_ALPHA | BLT_WRITE_RGB;
 
 	b = kgem->batch + kgem->nbatch;
 	if (kgem->gen >= 0100) {

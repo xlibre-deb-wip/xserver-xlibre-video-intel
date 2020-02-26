@@ -121,6 +121,7 @@
 
 #if XFONT2_CLIENT_FUNCS_VERSION >= 1
 #define AllocateFontPrivateIndex() xfont2_allocate_font_private_index()
+#undef FontSetPrivate
 #define FontSetPrivate(font, idx, data) xfont2_font_set_private(font, idx, data)
 #endif
 
@@ -4954,6 +4955,7 @@ try_upload__inplace(PixmapPtr pixmap, RegionRec *region,
 	case I915_TILING_X:
 		if (!sna->kgem.memcpy_to_tiled_x)
 			break;
+		/* fall through */
 	default:
 		if (try_upload__tiled_x(pixmap, region, x, y, w, h, bits, stride))
 			goto done;
@@ -8718,6 +8720,7 @@ sna_copy_plane_blt(DrawablePtr source, DrawablePtr drawable, GCPtr gc,
 				}
 			default:
 				assert(0);
+				/* fall through */
 			case 8:
 				{
 					uint8_t *src = src_pixmap->devPrivate.ptr;
@@ -10122,6 +10125,7 @@ spans_fallback:
 			switch (gc->lineStyle) {
 			default:
 				assert(0);
+				/* fall through */
 			case LineSolid:
 				if (gc->lineWidth == 0) {
 					DBG(("%s: miZeroLine\n", __FUNCTION__));
@@ -17514,7 +17518,11 @@ static bool has_offload_slaves(struct sna *sna)
 	PixmapDirtyUpdatePtr dirty;
 
 	xorg_list_for_each_entry(dirty, &screen->pixmap_dirty_list, ent) {
+#ifdef HAS_DIRTYTRACKING_DRAWABLE_SRC
+		assert(dirty->src == &sna->front->drawable);
+#else
 		assert(dirty->src == sna->front);
+#endif
 		if (RegionNotEmpty(DamageRegion(dirty->damage)))
 			return true;
 	}
@@ -17675,7 +17683,11 @@ static void sna_accel_post_damage(struct sna *sna)
 		if (RegionNil(damage))
 			continue;
 
+#ifdef HAS_DIRTYTRACKING_DRAWABLE_SRC
+		src = get_drawable_pixmap(dirty->src);
+#else
 		src = dirty->src;
+#endif
 		dst = dirty->slave_dst->master_pixmap;
 
 		region.extents.x1 = dirty->x;
@@ -17926,9 +17938,15 @@ migrate_dirty_tracking(PixmapPtr old_front, PixmapPtr new_front)
 	PixmapDirtyUpdatePtr dirty, safe;
 
 	xorg_list_for_each_entry_safe(dirty, safe, &screen->pixmap_dirty_list, ent) {
+#ifdef HAS_DIRTYTRACKING_DRAWABLE_SRC
+		assert(dirty->src == &old_front->drawable);
+		if (dirty->src != &old_front->drawable)
+			continue;
+#else
 		assert(dirty->src == old_front);
 		if (dirty->src != old_front)
 			continue;
+#endif
 
 		DamageUnregister(&dirty->src->drawable, dirty->damage);
 		DamageDestroy(dirty->damage);
@@ -17943,7 +17961,11 @@ migrate_dirty_tracking(PixmapPtr old_front, PixmapPtr new_front)
 		}
 
 		DamageRegister(&new_front->drawable, dirty->damage);
+#ifdef HAS_DIRTYTRACKING_DRAWABLE_SRC
+		dirty->src = &new_front->drawable;
+#else
 		dirty->src = new_front;
+#endif
 	}
 #endif
 }

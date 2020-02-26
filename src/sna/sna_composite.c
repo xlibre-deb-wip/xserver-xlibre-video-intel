@@ -1074,7 +1074,7 @@ sna_composite_rectangles(CARD8		 op,
 		}
 	} else {
 		for (i = 0; i < num_boxes; i++) {
-			RegionRec tmp = { boxes[i] };
+			RegionRec tmp = { .extents = boxes[i], };
 			if (pixman_region_intersect(&tmp, &tmp, dst->pCompositeClip)) {
 				int n = 0;
 

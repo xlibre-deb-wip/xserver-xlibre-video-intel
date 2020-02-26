@@ -603,6 +603,7 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int probe)
 		if ((sna->flags & SNA_IS_HOSTED) ||
 		    fb_supports_depth(fd, scrn->depth))
 			break;
+		/* fall through */
 	default:
 		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
 			   "Given depth (%d) is not supported by the Intel driver and this chipset.\n",

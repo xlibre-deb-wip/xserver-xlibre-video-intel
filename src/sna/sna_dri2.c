@@ -680,6 +680,7 @@ sna_dri2_create_buffer(DrawablePtr draw,
 			    (sna->flags & (SNA_LINEAR_FB | SNA_NO_WAIT | SNA_NO_FLIP)) == 0)
 				flags |= CREATE_SCANOUT;
 		}
+		/* fall through */
 	case DRI2BufferBackRight:
 	case DRI2BufferFrontRight:
 	case DRI2BufferFakeFrontLeft:
@@ -2601,7 +2602,7 @@ void sna_dri2_vblank_handler(struct drm_event_vblank *event)
 		    sna_dri2_flip(info))
 			return;
 
-		/* else fall through to blit */
+		/* fall through */
 	case SWAP:
 		assert(info->signal);
 		if (can_xchg(info->sna, draw, info->front, info->back)) {
@@ -2623,7 +2624,7 @@ void sna_dri2_vblank_handler(struct drm_event_vblank *event)
 		DBG(("%s -- requeue failed, errno=%d\n", __FUNCTION__, errno));
 		assert(info->pending.bo == NULL);
 		assert(info->keepalive == 1);
-		/* fall through to SwapComplete */
+		/* fall through */
 	case SWAP_COMPLETE:
 		DBG(("%s: %d complete, frame=%d tv=%d.%06d\n",
 		     __FUNCTION__, info->type,
@@ -2944,6 +2945,7 @@ static void sna_dri2_flip_event(struct sna_dri2_event *flip)
 			DBG(("%s: triple buffer swap complete, unblocking client\n", __FUNCTION__));
 			frame_swap_complete(flip, DRI2_FLIP_COMPLETE);
 		}
+		/* fall through */
 	case FLIP_COMPLETE:
 		assert(!flip->signal);
 		if (sna->dri2.flip_pending) {

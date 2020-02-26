@@ -2346,7 +2346,7 @@ gen6_render_composite(struct sna *sna,
 	case 0:
 		if (!gen4_channel_init_solid(sna, &tmp->src, 0))
 			goto cleanup_dst;
-		/* fall through to fixup */
+		/* fall through */
 	case 1:
 		/* Did we just switch rings to prepare the source? */
 		if (mask == NULL &&
@@ -2399,7 +2399,7 @@ gen6_render_composite(struct sna *sna,
 			case 0:
 				if (!gen4_channel_init_solid(sna, &tmp->mask, 0))
 					goto cleanup_src;
-				/* fall through to fixup */
+				/* fall through */
 			case 1:
 				gen6_composite_channel_convert(&tmp->mask);
 				break;
@@ -2653,7 +2653,7 @@ gen6_render_composite_spans(struct sna *sna,
 	case 0:
 		if (!gen4_channel_init_solid(sna, &tmp->base.src, 0))
 			goto cleanup_dst;
-		/* fall through to fixup */
+		/* fall through */
 	case 1:
 		gen6_composite_channel_convert(&tmp->base.src);
 		break;

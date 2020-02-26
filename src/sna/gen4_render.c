@@ -2019,7 +2019,7 @@ gen4_render_composite(struct sna *sna,
 	case 0:
 		if (!gen4_channel_init_solid(sna, &tmp->src, 0))
 			goto cleanup_dst;
-		/* fall through to fixup */
+		/* fall through */
 	case 1:
 		if (mask == NULL &&
 		    sna_blt_composite__convert(sna,
@@ -2071,7 +2071,7 @@ gen4_render_composite(struct sna *sna,
 			case 0:
 				if (!gen4_channel_init_solid(sna, &tmp->mask, 0))
 					goto cleanup_src;
-				/* fall through to fixup */
+				/* fall through */
 			case 1:
 				gen4_composite_channel_convert(&tmp->mask);
 				break;
@@ -2328,7 +2328,7 @@ gen4_render_composite_spans(struct sna *sna,
 	case 0:
 		if (!gen4_channel_init_solid(sna, &tmp->base.src, 0))
 			goto cleanup_dst;
-		/* fall through to fixup */
+		/* fall through */
 	case 1:
 		gen4_composite_channel_convert(&tmp->base.src);
 		break;

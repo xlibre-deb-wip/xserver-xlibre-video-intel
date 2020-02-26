@@ -7316,7 +7316,7 @@ next_crtc:
 }
 
 static const xf86CrtcConfigFuncsRec sna_mode_funcs = {
-	sna_mode_resize
+	.resize = sna_mode_resize,
 };
 
 static void set_size_range(struct sna *sna)
@@ -7441,7 +7441,6 @@ static bool crtc_get_gamma_legacy(xf86CrtcPtr crtc,
 
 static void crtc_init_gamma(xf86CrtcPtr crtc)
 {
-	struct sna *sna = to_sna(crtc->scrn);
 	struct sna_crtc *sna_crtc = to_sna_crtc(crtc);
 	uint16_t *gamma;
 	int size;
@@ -7459,11 +7458,10 @@ static void crtc_init_gamma(xf86CrtcPtr crtc)
 	if (gamma == NULL)
 		gamma = malloc(3 * size * sizeof(uint16_t));
 	if (gamma) {
-		struct drm_mode_crtc_lut lut;
-		bool gamma_set;
 		uint16_t *red = gamma;
 		uint16_t *green = gamma + size;
 		uint16_t *blue = gamma + 2 * size;
+		bool gamma_set;
 
 		if (sna_crtc->gamma_lut_size)
 			gamma_set = crtc_get_gamma_lut(crtc, red,
@@ -7784,7 +7782,7 @@ static bool has_flip__async(struct sna *sna)
 	struct local_get_cap {
 		uint64_t name;
 		uint64_t value;
-	} cap = { DRM_CAP_ASYNC_PAGE_FLIP };
+	} cap = { .name = DRM_CAP_ASYNC_PAGE_FLIP, };
 
 	if (sna->flags & SNA_NO_FLIP)
 		return false;
@@ -8232,7 +8230,7 @@ sna_covering_crtc(struct sna *sna, const BoxRec *box, xf86CrtcPtr desired)
 		     __FUNCTION__, c,
 		     crtc->bounds.x1, crtc->bounds.y1,
 		     crtc->bounds.x2, crtc->bounds.y2));
-		if (*(const uint64_t *)box == *(uint64_t *)&crtc->bounds) {
+		if (!memcmp(box, &crtc->bounds, sizeof(*box))) {
 			DBG(("%s: box exactly matches crtc [%d]\n",
 			     __FUNCTION__, c));
 			return crtc;
@@ -8309,7 +8307,7 @@ static bool sna_emit_wait_for_scanline_hsw(struct sna *sna,
 	sna->kgem.nbatch += 17;
 
 	switch (pipe) {
-	default: assert(0);
+	default: assert(0); /* fall through */
 	case 0: event = 1 << 0; break;
 	case 1: event = 1 << 8; break;
 	case 2: event = 1 << 14; break;
@@ -8325,7 +8323,7 @@ static bool sna_emit_wait_for_scanline_hsw(struct sna *sna,
 	/* The documentation says that the LOAD_SCAN_LINES command
 	 * always comes in pairs. Don't ask me why. */
 	switch (pipe) {
-	default: assert(0);
+	default: assert(0); /* fall through */
 	case 0: event = 0 << 19; break;
 	case 1: event = 1 << 19; break;
 	case 2: event = 4 << 19; break;
@@ -8334,7 +8332,7 @@ static bool sna_emit_wait_for_scanline_hsw(struct sna *sna,
 	b[9] = b[7] = (y1 << 16) | (y2-1);
 
 	switch (pipe) {
-	default: assert(0);
+	default: assert(0); /* fall through */
 	case 0: event = 1 << 0; break;
 	case 1: event = 1 << 8; break;
 	case 2: event = 1 << 14; break;
@@ -8374,6 +8372,7 @@ static bool sna_emit_wait_for_scanline_ivb(struct sna *sna,
 	switch (pipe) {
 	default:
 		assert(0);
+		/* fall through */
 	case 0:
 		event = 1 << (full_height ? 3 : 0);
 		break;
@@ -9681,7 +9680,7 @@ fixup_flip:
 			     __FUNCTION__, __sna_crtc_id(crtc), crtc->flip_bo->handle, crtc->flip_bo->active_scanout, crtc->flip_serial));
 
 			{
-				struct drm_i915_gem_busy busy = { flip_bo->handle };
+				struct drm_i915_gem_busy busy = { .handle = flip_bo->handle, };
 				if (drmIoctl(sna->kgem.fd, DRM_IOCTL_I915_GEM_BUSY, &busy) == 0) {
 					if (busy.busy) {
 						int mode = KGEM_RENDER;

@@ -388,7 +388,7 @@ static const struct pci_id_match intel_device_match[] = {
 	INTEL_VGA_DEVICE(PCI_MATCH_ANY, &intel_generic_info),
 #endif
 
-	{ 0, 0, 0 },
+	{},
 };
 
 void
@@ -692,6 +692,7 @@ static Bool intel_pci_probe(DriverPtr		driver,
 		case PCI_CHIP_I815:
 			if (!hosted())
 				break;
+			/* fall through */
 		default:
 			return FALSE;
 		}
