@@ -17,7 +17,7 @@ Build-Depends:
  libgl1-mesa-dev | libgl-dev,
  libpciaccess-dev (>= 0.8.0+git20071002),
 # following are only needed for xvmc:
- libxvmc-dev (>= 1:1.0.1),
+ libxvmc-dev (>= 2:1.0.12),
  libxext-dev,
  libxfixes-dev,
  libx11-xcb-dev,
