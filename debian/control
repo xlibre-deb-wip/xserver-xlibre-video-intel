@@ -42,7 +42,7 @@ Build-Depends:
 # tests, benchmarks:
 # libcairo2-dev,
 # libpng12-dev,
-Standards-Version: 3.9.8
+Standards-Version: 4.5.0
 Vcs-Git: https://salsa.debian.org/xorg-team/driver/xserver-xorg-video-intel.git
 Vcs-Browser: https://salsa.debian.org/xorg-team/driver/xserver-xorg-video-intel
 Homepage: https://www.x.org/
