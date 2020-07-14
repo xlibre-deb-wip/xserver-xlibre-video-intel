@@ -605,7 +605,7 @@ sna_dri2_create_buffer(DrawablePtr draw,
 	struct sna_dri2_private *private;
 	PixmapPtr pixmap;
 	struct kgem_bo *bo;
-	unsigned bpp = format ?: draw->bitsPerPixel;
+	unsigned bpp = format ? BitsPerPixel(format) : draw->bitsPerPixel;
 	unsigned flags = CREATE_EXACT;
 	uint32_t size;
 
@@ -1421,24 +1421,29 @@ sna_dri2_copy_region(DrawablePtr draw,
 	PixmapPtr pixmap = get_drawable_pixmap(draw);
 	struct sna *sna = to_sna_from_pixmap(pixmap);
 
-	DBG(("%s: pixmap=%ld, src=%u (refs=%d/%d, flush=%d, attach=%d) , dst=%u (refs=%d/%d, flush=%d, attach=%d)\n",
+	DBG(("%s: pixmap=%ld, src=%u (attach=%d, refs=%d/%d, flush=%d, stale=%d) , dst=%u (attach=%d, refs=%d/%d, flush=%d, stale=%d)\n",
 	     __FUNCTION__,
 	     pixmap->drawable.serialNumber,
 	     get_private(src)->bo->handle,
+	     src->attachment,
 	     get_private(src)->refcnt,
 	     get_private(src)->bo->refcnt,
 	     get_private(src)->bo->flush,
-	     src->attachment,
+	     get_private(src)->stale,
 	     get_private(dst)->bo->handle,
+	     dst->attachment,
 	     get_private(dst)->refcnt,
 	     get_private(dst)->bo->refcnt,
 	     get_private(dst)->bo->flush,
-	     dst->attachment));
+	     get_private(dst)->stale));
 
 	assert(src != dst);
 
 	assert(get_private(src)->refcnt);
 	assert(get_private(dst)->refcnt);
+
+	if (get_private(src)->stale)
+		return;
 
 	assert(get_private(src)->bo != get_private(dst)->bo);
 

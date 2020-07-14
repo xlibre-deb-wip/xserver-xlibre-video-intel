@@ -57,9 +57,11 @@ static Atom xvGamma0, xvGamma1, xvGamma2, xvGamma3, xvGamma4, xvGamma5;
 #define IMAGE_MAX_HEIGHT_LEGACY	1088
 
 static XvFormatRec Formats[] = {
+	{ .depth = 8, },
 	{ .depth = 15, },
 	{ .depth = 16, },
 	{ .depth = 24, },
+	{ .depth = 30, },
 };
 
 static const XvAttributeRec Attributes[] = {
