@@ -65,6 +65,6 @@ Description: X.Org X server -- Intel i8xx, i9xx display driver
  .
  This package is built from the X.org xf86-video-intel driver module.
  .
- The use of this driver is discouraged if your hw is new enough (ca.
+ The use of this driver is discouraged if your GPU is new enough (ca.
  2007 and newer). You can try uninstalling this driver and let the
- server use its builtin modesetting driver instead.
+ server use its built-in modesetting driver instead.
