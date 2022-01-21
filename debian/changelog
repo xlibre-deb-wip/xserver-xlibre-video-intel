@@ -1,6 +1,10 @@
 xserver-xorg-video-intel (2:2.99.917+git20200714-2) UNRELEASED; urgency=medium
 
+  [ Timo Aaltonen ]
   * control: Fix typos in description. (LP: #1653828)
+
+  [ Julien Cristau ]
+  * Fix SIGILL crash on non-SSE2 CPUs (closes: #979276)
 
  -- Timo Aaltonen <tjaalton@debian.org>  Mon, 21 Sep 2020 10:29:42 +0300
 
