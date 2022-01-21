@@ -1,0 +1,22 @@
+From 3d9f93d8bc5dfe2b79d4e16b8b5a6ce13b0792af Mon Sep 17 00:00:00 2001
+From: Julien Cristau <jcristau@debian.org>
+Date: Fri, 21 Jan 2022 13:50:12 +0100
+Subject: [PATCH xf86-video-intel] Fix SIGILL crash on non-SSE2 CPUs (closes:
+ #979276)
+
+diff --git a/src/sna/blt.c b/src/sna/blt.c
+index afc719f6..803c5142 100644
+--- a/src/sna/blt.c
++++ b/src/sna/blt.c
+@@ -631,7 +631,7 @@ memcpy_between_tiled_x__swizzle_0__sse2(const void *src, void *dst, int bpp,
+ 	}
+ }
+ 
+-#pragma GCC push_options
++#pragma GCC pop_options
+ #endif
+ 
+ fast void
+-- 
+2.30.2
+

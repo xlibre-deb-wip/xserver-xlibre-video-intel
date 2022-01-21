@@ -1,3 +1,10 @@
+xserver-xorg-video-intel (2:2.99.917+git20200714-1+deb11u1) UNRELEASED; urgency=medium
+
+  [ Julien Cristau ]
+  * Fix SIGILL crash on non-SSE2 CPUs (closes: #979276)
+
+ -- Julien Cristau <jcristau@debian.org>  Wed, 26 Jan 2022 17:46:13 +0100
+
 xserver-xorg-video-intel (2:2.99.917+git20200714-1) unstable; urgency=medium
 
   * New upstream snapshot. (Closes: #959400)
