@@ -6,6 +6,8 @@ BUILDER        := $(shell dpkg-parsechangelog | awk -F': ' '/^Maintainer: / {pri
 
 DEB_HOST_ARCH_OS ?= $(shell dpkg-architecture -qDEB_HOST_ARCH_OS)
 
+export DEB_BUILD_MAINT_OPTIONS = optimize=-lto
+
 ifeq ($(DEB_HOST_ARCH_OS), linux)
 valgrind = --enable-valgrind
 else
