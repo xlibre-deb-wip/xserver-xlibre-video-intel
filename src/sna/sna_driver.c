@@ -459,7 +459,18 @@ static bool enable_tear_free(struct sna *sna)
 	if (sna->flags & SNA_LINEAR_FB)
 		return false;
 
-	/* Under certain conditions, we should enable TearFree by default,
+	/*
+	 * On recent HW, where the display surfaces are in a seperate GTT
+	 * to userspace, there is much less contention on global resources
+	 * and also we can assume there is much more memory bandwidth
+	 * available (i.e. gen8+). This HW should rarely be under such
+	 * constaints as to need to disable TearFree, so enable by default.
+	 */
+	if (sna->kgem.has_full_ppgtt)
+		return true;
+
+	/*
+	 * Under certain conditions, we should enable TearFree by default,
 	 * for example when the hardware requires pageflipping to run within
 	 * its power/performance budget.
 	 */

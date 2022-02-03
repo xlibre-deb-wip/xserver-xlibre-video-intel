@@ -17696,7 +17696,7 @@ static void sna_accel_post_damage(struct sna *sna)
 #else
 		src = dirty->src;
 #endif
-		dst = dirty->slave_dst->master_pixmap;
+		dst = PixmapDirtyPrimary(dirty);
 
 		region.extents.x1 = dirty->x;
 		region.extents.x2 = dirty->x + dst->drawable.width;
@@ -17723,7 +17723,7 @@ static void sna_accel_post_damage(struct sna *sna)
 		dy += dirty->dst_y;
 #endif
 		RegionTranslate(&region, dx, dy);
-		DamageRegionAppend(&dirty->slave_dst->drawable, &region);
+		DamageRegionAppend(&PixmapDirtyDst(dirty)->drawable, &region);
 
 		DBG(("%s: slave:  ((%d, %d), (%d, %d))x%d\n", __FUNCTION__,
 		     region.extents.x1, region.extents.y1,
@@ -17800,7 +17800,7 @@ fallback:
 			kgem_bo_sync__gtt(&sna->kgem, __sna_pixmap_get_bo(dst));
 		}
 
-		DamageRegionProcessPending(&dirty->slave_dst->drawable);
+		DamageRegionProcessPending(&PixmapDirtyDst(dirty)->drawable);
 skip:
 		RegionUninit(&region);
 		DamageEmpty(dirty->damage);
