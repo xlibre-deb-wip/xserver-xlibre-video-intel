@@ -10,7 +10,7 @@ Uploaders:
 Build-Depends:
  debhelper-compat (= 12),
  pkg-config,
- xserver-xorg-dev (>= 2:1.11.99.901),
+ xserver-xorg-dev (>= 2:21.1),
  x11proto-dev,
  libx11-dev,
  libdrm-dev (>= 2.4.23),
