@@ -4,6 +4,7 @@ xserver-xorg-video-intel (2:2.99.917+git20210115-1) UNRELEASED; urgency=medium
   * Build against xserver 21.1.
   * rules: Disable building with lto.
   * control: Bump debhelper-compat to 13, policy to 4.6.0.
+  * Update README.source for salsa.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Thu, 03 Feb 2022 16:23:58 +0200
 
