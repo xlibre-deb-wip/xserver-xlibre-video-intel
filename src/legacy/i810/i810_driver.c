@@ -155,7 +155,7 @@ I810GetRec(ScrnInfoPtr scrn)
    if (((uintptr_t)scrn->driverPrivate & 3) == 0)
       return TRUE;
 
-   scrn->driverPrivate = xnfcalloc(sizeof(I810Rec), 1);
+   scrn->driverPrivate = XNFcallocarray(sizeof(I810Rec), 1);
    return TRUE;
 }
 
@@ -503,7 +503,7 @@ I810PreInit(ScrnInfoPtr scrn, int flags)
 	 pI810->MaxClock = 86000;
       }
    }
-   clockRanges = xnfcalloc(sizeof(ClockRange), 1);
+   clockRanges = XNFcallocarray(sizeof(ClockRange), 1);
    clockRanges->next = NULL;
    /* 9.4MHz appears to be the smallest that works. */
    clockRanges->minClock = 9500;
@@ -1544,7 +1544,7 @@ I810ScreenInit(SCREEN_INIT_ARGS_DECL)
    pI810 = I810PTR(scrn);
    hwp = VGAHWPTR(scrn);
 
-   pI810->LpRing = calloc(sizeof(I810RingBuffer),1);
+   pI810->LpRing = calloc(1, sizeof(I810RingBuffer));
    if (!pI810->LpRing) {
      xf86DrvMsg(scrn->scrnIndex, X_ERROR,
 		"Could not allocate lpring data structure.\n");

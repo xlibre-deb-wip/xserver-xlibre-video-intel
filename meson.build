@@ -5,7 +5,7 @@ project('xf86-video-intel', 'c',
 	  'c_std=gnu99',
 	],
 	license : 'MIT',
-	meson_version : '>0.40.0')
+	meson_version : '>=0.50.0')
 
 config = configuration_data()
 
@@ -157,6 +157,7 @@ endif
 
 with_xvmc = get_option('xvmc')
 if with_xvmc
+  dependency('xv', required : true)
   dependency('xvmc', required : true)
   dependency('dri2proto', required : true)
   dependency('x11', required : true)

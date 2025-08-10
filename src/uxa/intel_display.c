@@ -106,6 +106,7 @@ struct intel_crtc {
 	drmModeModeInfo kmode;
 	drmModeCrtcPtr mode_crtc;
 	int pipe;
+	int index;
 	dri_bo *cursor;
 	dri_bo *rotate_bo;
 	uint32_t rotate_pitch;
@@ -312,7 +313,7 @@ intel_crtc_apply(xf86CrtcPtr crtc)
 	int fb_id, x, y;
 	int i, ret = FALSE;
 
-	output_ids = calloc(sizeof(uint32_t), xf86_config->num_output);
+	output_ids = calloc(xf86_config->num_output, sizeof(uint32_t));
 	if (!output_ids)
 		return FALSE;
 
@@ -392,9 +393,6 @@ intel_crtc_apply(xf86CrtcPtr crtc)
 		    intel_output->dpms_mode = DPMSModeOn;
 		}
 	}
-
-	if (scrn->pScreen)
-		xf86_reload_cursors(scrn->pScreen);
 
 done:
 	free(output_ids);
@@ -565,7 +563,7 @@ intel_create_pixmap_header(ScreenPtr pScreen, int width, int height, int depth,
                 {
                         return pixmap;
                 }
-                (*pScreen->DestroyPixmap) (pixmap);
+                dixDestroyPixmap(pixmap, 0);
         }
         return NullPixmap;
 }
@@ -622,7 +620,7 @@ intel_crtc_shadow_destroy(xf86CrtcPtr crtc, PixmapPtr rotate_pixmap, void *data)
 
 	if (rotate_pixmap) {
                 intel_set_pixmap_bo(rotate_pixmap, NULL);
-                rotate_pixmap->drawable.pScreen->DestroyPixmap(rotate_pixmap);
+                dixDestroyPixmap(rotate_pixmap, 0);
 	}
 
 	if (data) {
@@ -733,7 +731,7 @@ intel_crtc_init(ScrnInfoPtr scrn, struct intel_mode *mode, drmModeResPtr mode_re
 	xf86CrtcPtr crtc;
 	struct intel_crtc *intel_crtc;
 
-	intel_crtc = calloc(sizeof(struct intel_crtc), 1);
+	intel_crtc = calloc(1, sizeof(struct intel_crtc));
 	if (intel_crtc == NULL)
 		return;
 
@@ -755,6 +753,7 @@ intel_crtc_init(ScrnInfoPtr scrn, struct intel_mode *mode, drmModeResPtr mode_re
 
 	intel_crtc->pipe = drm_intel_get_pipe_from_crtc_id(intel->bufmgr,
 							   crtc_id(intel_crtc));
+	intel_crtc->index = num;
 
 	intel_crtc->cursor = drm_intel_bo_alloc(intel->bufmgr, "ARGB cursor",
 						4*64*64, 4096);
@@ -1540,7 +1539,7 @@ intel_output_init(ScrnInfoPtr scrn, struct intel_mode *mode, drmModeResPtr mode_
 			return;
 		}
 	}
-	kencoders = calloc(sizeof(drmModeEncoderPtr), koutput->count_encoders);
+	kencoders = calloc(koutput->count_encoders, sizeof(drmModeEncoderPtr));
 	if (!kencoders) {
 		goto out_free_encoders;
 	}
@@ -1556,7 +1555,7 @@ intel_output_init(ScrnInfoPtr scrn, struct intel_mode *mode, drmModeResPtr mode_
 		goto out_free_encoders;
 	}
 
-	intel_output = calloc(sizeof(struct intel_output), 1);
+	intel_output = calloc(1, sizeof(struct intel_output));
 	if (!intel_output) {
 		xf86OutputDestroy(output);
 		goto out_free_encoders;
@@ -1768,7 +1767,7 @@ intel_do_pageflip(intel_screen_private *intel,
 		/* Only the reference crtc will finally deliver its page flip
 		 * completion event. All other crtc's events will be discarded.
 		 */
-		flip->dispatch_me = (intel_crtc_to_pipe(crtc->crtc) == ref_crtc_hw_id);
+		flip->dispatch_me = (intel_crtc_to_index(crtc->crtc) == ref_crtc_hw_id);
 		flip->mode = mode;
 
 		seq = intel_drm_queue_alloc(scrn, config->crtc[i], flip, intel_pageflip_handler, intel_pageflip_abort);
@@ -1913,11 +1912,11 @@ intel_drm_abort_scrn(ScrnInfoPtr scrn)
 	}
 }
 
-static uint32_t pipe_select(int pipe)
+static uint32_t crtc_select(int index)
 {
-	if (pipe > 1)
-		return pipe << DRM_VBLANK_HIGH_CRTC_SHIFT;
-	else if (pipe > 0)
+	if (index > 1)
+		return index << DRM_VBLANK_HIGH_CRTC_SHIFT;
+	else if (index > 0)
 		return DRM_VBLANK_SECONDARY;
 	else
 		return 0;
@@ -1933,7 +1932,7 @@ intel_get_msc_ust(ScrnInfoPtr scrn, xf86CrtcPtr crtc, uint32_t *msc, uint64_t *u
 	drmVBlank vbl;
 
 	/* Get current count */
-	vbl.request.type = DRM_VBLANK_RELATIVE | pipe_select(intel_crtc_to_pipe(crtc));
+	vbl.request.type = DRM_VBLANK_RELATIVE | crtc_select(intel_crtc_to_index(crtc));
 	vbl.request.sequence = 0;
 	vbl.request.signal = 0;
 	if (drmWaitVBlank(intel->drmSubFD, &vbl)) {
@@ -2349,6 +2348,12 @@ int intel_crtc_to_pipe(xf86CrtcPtr crtc)
 	return intel_crtc->pipe;
 }
 
+int intel_crtc_to_index(xf86CrtcPtr crtc)
+{
+	struct intel_crtc *intel_crtc = crtc->driver_private;
+	return intel_crtc->index;
+}
+
 Bool intel_crtc_on(xf86CrtcPtr crtc)
 {
 	struct intel_crtc *intel_crtc = crtc->driver_private;
@@ -2403,7 +2408,7 @@ intel_create_pixmap_for_bo(ScreenPtr pScreen, dri_bo *bo,
 					 width, height,
 					 depth, bpp,
 					 pitch, NULL)) {
-		pScreen->DestroyPixmap(pixmap);
+		dixDestroyPixmap(pixmap, 0);
 		return NullPixmap;
 	}
 
@@ -2510,9 +2515,9 @@ void intel_copy_fb(ScrnInfoPtr scrn)
 #endif
 
 cleanup_dst:
-	(*pScreen->DestroyPixmap)(dst);
+	dixDestroyPixmap(dst, 0);
 cleanup_src:
-	(*pScreen->DestroyPixmap)(src);
+	dixDestroyPixmap(src, 0);
 }
 
 void

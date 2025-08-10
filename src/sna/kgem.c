@@ -4263,7 +4263,7 @@ void _kgem_submit(struct kgem *kgem)
 
 		if (ret == -ENOSPC)
 			dump_gtt_info(kgem);
-		if (ret == -EDEADLK)
+		if (ret == -EDEADLK || ret == -ENOBUFS)
 			dump_fence_regs(kgem);
 
 		if (DEBUG_SYNC) {

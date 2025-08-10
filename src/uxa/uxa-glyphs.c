@@ -172,7 +172,7 @@ static Bool uxa_realize_glyph_caches(ScreenPtr pScreen)
 			goto bail;
 		if (!uxa_pixmap_is_offscreen(pixmap)) {
 			/* Presume shadow is in-effect */
-			pScreen->DestroyPixmap(pixmap);
+			dixDestroyPixmap(pixmap, 0);
 			uxa_unrealize_glyph_caches(pScreen);
 			return TRUE;
 		}
@@ -182,7 +182,7 @@ static Bool uxa_realize_glyph_caches(ScreenPtr pScreen)
 					CPComponentAlpha, &component_alpha,
 					serverClient, &error);
 
-		pScreen->DestroyPixmap(pixmap);
+		dixDestroyPixmap(pixmap, 0);
 
 		if (!picture)
 			goto bail;
@@ -190,7 +190,7 @@ static Bool uxa_realize_glyph_caches(ScreenPtr pScreen)
 		ValidatePicture(picture);
 
 		cache->picture = picture;
-		cache->glyphs = calloc(sizeof(GlyphPtr), GLYPH_CACHE_SIZE);
+		cache->glyphs = calloc(GLYPH_CACHE_SIZE, sizeof(GlyphPtr));
 		if (!cache->glyphs)
 			goto bail;
 
@@ -293,7 +293,7 @@ uxa_glyph_cache_upload_glyph(ScreenPtr screen,
 		      x, y);
 
 	if (scratch != pGlyphPixmap)
-		screen->DestroyPixmap(scratch);
+		dixDestroyPixmap(scratch, 0);
 
 	FreeScratchGC(gc);
 }
@@ -769,7 +769,7 @@ uxa_glyphs_via_mask(CARD8 op,
 		return 1;
 
 	if (!uxa_pixmap_is_offscreen(pixmap)) {
-		screen->DestroyPixmap(pixmap);
+		dixDestroyPixmap(pixmap, 0);
 		return -1;
 	}
 
@@ -780,7 +780,7 @@ uxa_glyphs_via_mask(CARD8 op,
 	if (!white_pixmap) {
 		if (white)
 			FreePicture(white, 0);
-		screen->DestroyPixmap(pixmap);
+		dixDestroyPixmap(pixmap, 0);
 		return -1;
 	}
 
@@ -790,7 +790,7 @@ uxa_glyphs_via_mask(CARD8 op,
 	mask = CreatePicture(0, &pixmap->drawable,
 			      maskFormat, CPComponentAlpha,
 			      &component_alpha, serverClient, &error);
-	screen->DestroyPixmap(pixmap);
+	dixDestroyPixmap(pixmap, 0);
 
 	if (!mask) {
 		FreePicture(white, 0);

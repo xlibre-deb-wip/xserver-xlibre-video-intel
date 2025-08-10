@@ -458,7 +458,6 @@ struct sna {
 
 bool sna_mode_pre_init(ScrnInfoPtr scrn, struct sna *sna);
 bool sna_mode_fake_init(struct sna *sna, int num_fake);
-bool sna_mode_wants_tear_free(struct sna *sna);
 void sna_mode_adjust_frame(struct sna *sna, int x, int y);
 extern void sna_mode_discover(struct sna *sna, bool tell);
 extern void sna_mode_check(struct sna *sna);
@@ -491,6 +490,7 @@ typedef void (*sna_flip_handler_t)(struct drm_event_vblank *e,
 extern bool sna_needs_page_flip(struct sna *sna, struct kgem_bo *bo);
 extern int sna_page_flip(struct sna *sna,
 			 struct kgem_bo *bo,
+			 bool async,
 			 sna_flip_handler_t handler,
 			 void *data);
 
@@ -668,6 +668,11 @@ static inline struct list *sna_crtc_vblank_queue(xf86CrtcPtr crtc)
 static inline unsigned sna_crtc_pipe(xf86CrtcPtr crtc)
 {
 	return *sna_crtc_flags(crtc) >> 8 & 0xff;
+}
+
+static inline unsigned sna_crtc_index(xf86CrtcPtr crtc)
+{
+	return *sna_crtc_flags(crtc) >> 16 & 0xff;
 }
 
 static inline bool sna_crtc_is_on(xf86CrtcPtr crtc)

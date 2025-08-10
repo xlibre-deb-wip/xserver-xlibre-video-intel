@@ -284,7 +284,7 @@ I810AccelInit(ScreenPtr pScreen)
 
       pI810->NumScanlineColorExpandBuffers = nr_buffers;
       pI810->ScanlineColorExpandBuffers = (unsigned char **)
-	    xnfcalloc(nr_buffers, sizeof(unsigned char *));
+	    XNFcallocarray(nr_buffers, sizeof(unsigned char *));
 
       for (i = 0; i < nr_buffers; i++, ptr += width)
 	 pI810->ScanlineColorExpandBuffers[i] = ptr;
@@ -295,7 +295,7 @@ I810AccelInit(ScreenPtr pScreen)
 							  | 0);
 
       infoPtr->ScanlineColorExpandBuffers = (unsigned char **)
-	    xnfcalloc(1, sizeof(unsigned char *));
+	    XNFcallocarray(1, sizeof(unsigned char *));
       infoPtr->NumScanlineColorExpandBuffers = 1;
 
       infoPtr->ScanlineColorExpandBuffers[0] =

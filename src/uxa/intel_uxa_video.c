@@ -339,7 +339,7 @@ XF86VideoAdaptorPtr intel_uxa_video_setup_image_textured(ScreenPtr screen)
 	adapt->flags = 0;
 	adapt->name = "Intel(R) Textured Video";
 	adapt->nEncodings = 1;
-	adapt->pEncodings = xnfalloc(sizeof(intel_xv_dummy_encoding));
+	adapt->pEncodings = XNFalloc(sizeof(intel_xv_dummy_encoding));
 	memcpy(adapt->pEncodings, intel_xv_dummy_encoding, sizeof(intel_xv_dummy_encoding));
 	adapt->nFormats = NUM_FORMATS;
 	adapt->pFormats = intel_xv_formats;

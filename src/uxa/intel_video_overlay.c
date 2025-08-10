@@ -465,7 +465,7 @@ XF86VideoAdaptorPtr intel_video_overlay_setup_image(ScreenPtr screen)
 	adapt->flags = VIDEO_OVERLAID_IMAGES /*| VIDEO_CLIP_TO_VIEWPORT */ ;
 	adapt->name = "Intel(R) Video Overlay";
 	adapt->nEncodings = 1;
-	adapt->pEncodings = xnfalloc(sizeof(intel_xv_dummy_encoding));
+	adapt->pEncodings = XNFalloc(sizeof(intel_xv_dummy_encoding));
 	memcpy(adapt->pEncodings, intel_xv_dummy_encoding, sizeof(intel_xv_dummy_encoding));
 	if (IS_845G(intel) || IS_I830(intel)) {
 		adapt->pEncodings->width = IMAGE_MAX_WIDTH_LEGACY;
@@ -483,7 +483,7 @@ XF86VideoAdaptorPtr intel_video_overlay_setup_image(ScreenPtr screen)
 	if (INTEL_INFO(intel)->gen >= 030)
 		adapt->nAttributes += GAMMA_ATTRIBUTES;	/* has gamma */
 	adapt->pAttributes =
-	    xnfalloc(sizeof(XF86AttributeRec) * adapt->nAttributes);
+	    XNFalloc(sizeof(XF86AttributeRec) * adapt->nAttributes);
 	/* Now copy the attributes */
 	att = adapt->pAttributes;
 	memcpy((char *)att, (char *)intel_xv_attributes,

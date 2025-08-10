@@ -104,27 +104,27 @@ static inline bool has_vblank(xf86CrtcPtr crtc)
 	return (uintptr_t)crtc & 1;
 }
 
-static inline int pipe_from_crtc(RRCrtcPtr crtc)
+static inline int crtc_index_from_crtc(RRCrtcPtr crtc)
 {
-	return crtc ? sna_crtc_pipe(crtc->devPrivate) : -1;
+	return crtc ? sna_crtc_index(crtc->devPrivate) : -1;
 }
 
-static uint32_t pipe_select(int pipe)
+static uint32_t crtc_select(int index)
 {
-	if (pipe > 1)
-		return pipe << DRM_VBLANK_HIGH_CRTC_SHIFT;
-	else if (pipe > 0)
+	if (index > 1)
+		return index << DRM_VBLANK_HIGH_CRTC_SHIFT;
+	else if (index > 0)
 		return DRM_VBLANK_SECONDARY;
 	else
 		return 0;
 }
 
-static inline int sna_wait_vblank(struct sna *sna, union drm_wait_vblank *vbl, int pipe)
+static inline int sna_wait_vblank(struct sna *sna, union drm_wait_vblank *vbl, int index)
 {
-	DBG(("%s(pipe=%d, waiting until seq=%u%s)\n",
-	     __FUNCTION__, pipe, vbl->request.sequence,
+	DBG(("%s(crtc=%d, waiting until seq=%u%s)\n",
+	     __FUNCTION__, index, vbl->request.sequence,
 	     vbl->request.type & DRM_VBLANK_RELATIVE ? " [relative]" : ""));
-	vbl->request.type |= pipe_select(pipe);
+	vbl->request.type |= crtc_select(index);
 	return drmIoctl(sna->kgem.fd, DRM_IOCTL_WAIT_VBLANK, vbl);
 }
 
@@ -158,8 +158,8 @@ static void vblank_complete(struct sna_present_event *info,
 
 		DBG(("%s: %d events complete\n", __FUNCTION__, info->n_event_id));
 		for (n = 0; n < info->n_event_id; n++) {
-			DBG(("%s: pipe=%d tv=%d.%06d msc=%lld (target=%lld), event=%lld complete%s\n", __FUNCTION__,
-			     sna_crtc_pipe(info->crtc),
+			DBG(("%s: certc=%d tv=%d.%06d msc=%lld (target=%lld), event=%lld complete%s\n", __FUNCTION__,
+			     sna_crtc_index(info->crtc),
 			     (int)(ust / 1000000), (int)(ust % 1000000),
 			     (long long)msc, (long long)info->target_msc,
 			     (long long)info->event_id[n],
@@ -226,9 +226,9 @@ static CARD32 sna_fake_vblank_handler(OsTimerPtr timer, CARD32 now, void *data)
 	assert(info->queued);
 
 	VG_CLEAR(vbl);
-	vbl.request.type = DRM_VBLANK_RELATIVE;
+	vbl.request.type = (uint32_t)DRM_VBLANK_RELATIVE;
 	vbl.request.sequence = 0;
-	if (sna_wait_vblank(info->sna, &vbl, sna_crtc_pipe(info->crtc)) == 0) {
+	if (sna_wait_vblank(info->sna, &vbl, sna_crtc_index(info->crtc)) == 0) {
 		ust = ust64(vbl.reply.tval_sec, vbl.reply.tval_usec);
 		msc = sna_crtc_record_vblank(info->crtc, &vbl);
 		DBG(("%s: event=%lld, target msc=%lld, now %lld\n",
@@ -243,7 +243,7 @@ static CARD32 sna_fake_vblank_handler(OsTimerPtr timer, CARD32 now, void *data)
 				vbl.request.type = DRM_VBLANK_ABSOLUTE | DRM_VBLANK_EVENT;
 				vbl.request.sequence = info->target_msc;
 				vbl.request.signal = (uintptr_t)MARK_PRESENT(info);
-				if (sna_wait_vblank(info->sna, &vbl, sna_crtc_pipe(info->crtc)) == 0) {
+				if (sna_wait_vblank(info->sna, &vbl, sna_crtc_index(info->crtc)) == 0) {
 					DBG(("%s: scheduled new vblank event for %lld\n", __FUNCTION__, (long long)info->target_msc));
 					add_to_crtc_vblank(info, delta);
 					free(timer);
@@ -261,9 +261,9 @@ static CARD32 sna_fake_vblank_handler(OsTimerPtr timer, CARD32 now, void *data)
 			 * Less than a millisecond for (hopefully) a rare case.
 			 */
 			DBG(("%s: blocking wait!\n", __FUNCTION__));
-			vbl.request.type = DRM_VBLANK_ABSOLUTE;
+			vbl.request.type = (uint32_t)DRM_VBLANK_ABSOLUTE;
 			vbl.request.sequence = info->target_msc;
-			if (sna_wait_vblank(info->sna, &vbl, sna_crtc_pipe(info->crtc)) == 0) {
+			if (sna_wait_vblank(info->sna, &vbl, sna_crtc_index(info->crtc)) == 0) {
 				ust = ust64(vbl.reply.tval_sec, vbl.reply.tval_usec);
 				msc = sna_crtc_record_vblank(info->crtc, &vbl);
 			} else {
@@ -337,7 +337,7 @@ static bool sna_present_queue(struct sna_present_event *info,
 	vbl.request.sequence = info->target_msc;
 	vbl.request.signal = (uintptr_t)MARK_PRESENT(info);
 	if (delta > 2 ||
-	    sna_wait_vblank(info->sna, &vbl, sna_crtc_pipe(info->crtc))) {
+	    sna_wait_vblank(info->sna, &vbl, sna_crtc_index(info->crtc))) {
 		DBG(("%s: vblank enqueue failed, faking delta=%d\n", __FUNCTION__, delta));
 		if (!sna_fake_vblank(info))
 			return false;
@@ -408,7 +408,7 @@ static void add_keepalive(struct sna *sna, xf86CrtcPtr crtc, uint64_t msc)
 	vbl.request.sequence = msc;
 	vbl.request.signal = (uintptr_t)MARK_PRESENT(info);
 
-	if (sna_wait_vblank(info->sna, &vbl, sna_crtc_pipe(crtc)) == 0) {
+	if (sna_wait_vblank(info->sna, &vbl, sna_crtc_index(crtc)) == 0) {
 		list_add_tail(&info->link, &tmp->link);
 		add_to_crtc_vblank(info, 1);
 		info->queued = true;
@@ -422,7 +422,7 @@ sna_present_get_ust_msc(RRCrtcPtr crtc, CARD64 *ust, CARD64 *msc)
 	struct sna *sna = to_sna_from_screen(crtc->pScreen);
 	union drm_wait_vblank vbl;
 
-	DBG(("%s(pipe=%d)\n", __FUNCTION__, sna_crtc_pipe(crtc->devPrivate)));
+	DBG(("%s(crtc=%d)\n", __FUNCTION__, sna_crtc_index(crtc->devPrivate)));
 	if (sna_crtc_has_vblank(crtc->devPrivate)) {
 		DBG(("%s: vblank active, reusing last swap msc/ust\n",
 		     __FUNCTION__));
@@ -430,9 +430,9 @@ sna_present_get_ust_msc(RRCrtcPtr crtc, CARD64 *ust, CARD64 *msc)
 	}
 
 	VG_CLEAR(vbl);
-	vbl.request.type = DRM_VBLANK_RELATIVE;
+	vbl.request.type = (uint32_t)DRM_VBLANK_RELATIVE;
 	vbl.request.sequence = 0;
-	if (sna_wait_vblank(sna, &vbl, sna_crtc_pipe(crtc->devPrivate)) == 0) {
+	if (sna_wait_vblank(sna, &vbl, sna_crtc_index(crtc->devPrivate)) == 0) {
 		*ust = ust64(vbl.reply.tval_sec, vbl.reply.tval_usec);
 		*msc = sna_crtc_record_vblank(crtc->devPrivate, &vbl);
 
@@ -445,8 +445,8 @@ last:
 		*msc = swap->msc;
 	}
 
-	DBG(("%s: pipe=%d, tv=%d.%06d seq=%d msc=%lld\n", __FUNCTION__,
-	     sna_crtc_pipe(crtc->devPrivate),
+	DBG(("%s: crtc=%d, tv=%d.%06d seq=%d msc=%lld\n", __FUNCTION__,
+	     sna_crtc_index(crtc->devPrivate),
 	     (int)(*ust / 1000000), (int)(*ust % 1000000),
 	     vbl.reply.sequence, (long long)*msc));
 
@@ -488,13 +488,13 @@ sna_present_queue_vblank(RRCrtcPtr crtc, uint64_t event_id, uint64_t msc)
 		return BadAlloc;
 
 	swap = sna_crtc_last_swap(crtc->devPrivate);
-	DBG(("%s(pipe=%d, event=%lld, msc=%lld, last swap=%lld)\n",
-	     __FUNCTION__, sna_crtc_pipe(crtc->devPrivate),
+	DBG(("%s(crtc=%d, event=%lld, msc=%lld, last swap=%lld)\n",
+	     __FUNCTION__, sna_crtc_index(crtc->devPrivate),
 	     (long long)event_id, (long long)msc, (long long)swap->msc));
 
 	if (warn_unless((int64_t)(msc - swap->msc) >= 0)) {
-		DBG(("%s: pipe=%d tv=%d.%06d msc=%lld (target=%lld), event=%lld complete\n", __FUNCTION__,
-		     sna_crtc_pipe(crtc->devPrivate),
+		DBG(("%s: crtc=%d tv=%d.%06d msc=%lld (target=%lld), event=%lld complete\n", __FUNCTION__,
+		     sna_crtc_index(crtc->devPrivate),
 		     swap->tv_sec, swap->tv_usec,
 		     (long long)swap->msc, (long long)msc,
 		     (long long)event_id));
@@ -561,8 +561,8 @@ sna_present_queue_vblank(RRCrtcPtr crtc, uint64_t event_id, uint64_t msc)
 static void
 sna_present_abort_vblank(RRCrtcPtr crtc, uint64_t event_id, uint64_t msc)
 {
-	DBG(("%s(pipe=%d, event=%lld, msc=%lld)\n",
-	     __FUNCTION__, pipe_from_crtc(crtc),
+	DBG(("%s(crtc=%d, event=%lld, msc=%lld)\n",
+	     __FUNCTION__, crtc_index_from_crtc(crtc),
 	     (long long)event_id, (long long)msc));
 }
 
@@ -604,9 +604,9 @@ sna_present_check_flip(RRCrtcPtr crtc,
 	struct sna *sna = to_sna_from_pixmap(pixmap);
 	struct sna_pixmap *flip;
 
-	DBG(("%s(pipe=%d, pixmap=%ld, sync_flip=%d)\n",
+	DBG(("%s(crtc=%d, pixmap=%ld, sync_flip=%d)\n",
 	     __FUNCTION__,
-	     pipe_from_crtc(crtc),
+	     crtc_index_from_crtc(crtc),
 	     pixmap->drawable.serialNumber,
 	     sync_flip));
 
@@ -675,34 +675,6 @@ sna_present_check_flip(RRCrtcPtr crtc,
 	return TRUE;
 }
 
-static Bool
-flip__async(struct sna *sna,
-	    RRCrtcPtr crtc,
-	    uint64_t event_id,
-	    uint64_t target_msc,
-	    struct kgem_bo *bo)
-{
-	DBG(("%s(pipe=%d, event=%lld, handle=%d)\n",
-	     __FUNCTION__,
-	     pipe_from_crtc(crtc),
-	     (long long)event_id,
-	     bo->handle));
-
-	if (!sna_page_flip(sna, bo, NULL, NULL)) {
-		DBG(("%s: async pageflip failed\n", __FUNCTION__));
-		present_info.capabilities &= ~PresentCapabilityAsync;
-		return FALSE;
-	}
-
-	DBG(("%s: pipe=%d tv=%ld.%06d msc=%lld (target=%lld), event=%lld complete\n", __FUNCTION__,
-	     pipe_from_crtc(crtc),
-	     (long)(gettime_ust64() / 1000000), (int)(gettime_ust64() % 1000000),
-	     crtc ? (long long)sna_crtc_last_swap(crtc->devPrivate)->msc : 0LL,
-	     (long long)target_msc, (long long)event_id));
-	present_event_notify(event_id, gettime_ust64(), target_msc);
-	return TRUE;
-}
-
 static void
 present_flip_handler(struct drm_event_vblank *event, void *data)
 {
@@ -725,8 +697,8 @@ present_flip_handler(struct drm_event_vblank *event, void *data)
 		swap = *sna_crtc_last_swap(info->crtc);
 	}
 
-	DBG(("%s: pipe=%d, tv=%d.%06d msc=%lld (target %lld), event=%lld complete%s\n", __FUNCTION__,
-	     info->crtc ? sna_crtc_pipe(info->crtc) : -1,
+	DBG(("%s: crtc=%d, tv=%d.%06d msc=%lld (target %lld), event=%lld complete%s\n", __FUNCTION__,
+	     info->crtc ? sna_crtc_index(info->crtc) : -1,
 	     swap.tv_sec, swap.tv_usec, (long long)swap.msc,
 	     (long long)info->target_msc,
 	     (long long)info->event_id[0],
@@ -748,17 +720,18 @@ present_flip_handler(struct drm_event_vblank *event, void *data)
 }
 
 static Bool
-flip(struct sna *sna,
-     RRCrtcPtr crtc,
-     uint64_t event_id,
-     uint64_t target_msc,
-     struct kgem_bo *bo)
+do_flip(struct sna *sna,
+	RRCrtcPtr crtc,
+	uint64_t event_id,
+	uint64_t target_msc,
+	struct kgem_bo *bo,
+	bool async)
 {
 	struct sna_present_event *info;
 
-	DBG(("%s(pipe=%d, event=%lld, handle=%d)\n",
+	DBG(("%s(crtc=%d, event=%lld, handle=%d)\n",
 	     __FUNCTION__,
-	     pipe_from_crtc(crtc),
+	     crtc_index_from_crtc(crtc),
 	     (long long)event_id,
 	     bo->handle));
 
@@ -774,7 +747,7 @@ flip(struct sna *sna,
 	info->target_msc = target_msc;
 	info->active = false;
 
-	if (!sna_page_flip(sna, bo, present_flip_handler, info)) {
+	if (!sna_page_flip(sna, bo, async, present_flip_handler, info)) {
 		DBG(("%s: pageflip failed\n", __FUNCTION__));
 		info_free(info);
 		return FALSE;
@@ -782,6 +755,26 @@ flip(struct sna *sna,
 
 	add_to_crtc_vblank(info, 1);
 	return TRUE;
+}
+
+static Bool
+flip__async(struct sna *sna,
+	    RRCrtcPtr crtc,
+	    uint64_t event_id,
+	    uint64_t target_msc,
+	    struct kgem_bo *bo)
+{
+	return do_flip(sna, crtc, event_id, target_msc, bo, true);
+}
+
+static Bool
+flip(struct sna *sna,
+     RRCrtcPtr crtc,
+     uint64_t event_id,
+     uint64_t target_msc,
+     struct kgem_bo *bo)
+{
+	return do_flip(sna, crtc, event_id, target_msc, bo, false);
 }
 
 static struct kgem_bo *
@@ -866,9 +859,9 @@ sna_present_flip(RRCrtcPtr crtc,
 	struct sna *sna = to_sna_from_pixmap(pixmap);
 	struct kgem_bo *bo;
 
-	DBG(("%s(pipe=%d, event=%lld, msc=%lld, pixmap=%ld, sync?=%d)\n",
+	DBG(("%s(crtc=%d, event=%lld, msc=%lld, pixmap=%ld, sync?=%d)\n",
 	     __FUNCTION__,
-	     pipe_from_crtc(crtc),
+	     crtc_index_from_crtc(crtc),
 	     (long long)event_id,
 	     (long long)target_msc,
 	     pixmap->drawable.serialNumber, sync_flip));
@@ -925,7 +918,7 @@ sna_present_unflip(ScreenPtr screen, uint64_t event_id)
 
 notify:
 		swap = sna_crtc_last_swap(sna_primary_crtc(sna));
-		DBG(("%s: pipe=%d, tv=%d.%06d msc=%lld, event=%lld complete\n", __FUNCTION__,
+		DBG(("%s: crtc=%d, tv=%d.%06d msc=%lld, event=%lld complete\n", __FUNCTION__,
 		     -1,
 		     swap->tv_sec, swap->tv_usec, (long long)swap->msc,
 		     (long long)event_id));

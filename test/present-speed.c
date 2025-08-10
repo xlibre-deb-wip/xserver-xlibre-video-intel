@@ -108,8 +108,10 @@ list_move(struct list *list, struct list *head)
 	}
 }
 
+#ifndef __container_of
 #define __container_of(ptr, sample, member)				\
     (void *)((char *)(ptr) - ((char *)&(sample)->member - (char *)(sample)))
+#endif
 
 #define list_for_each_entry(pos, head, member)				\
     for (pos = __container_of((head)->next, pos, member);		\

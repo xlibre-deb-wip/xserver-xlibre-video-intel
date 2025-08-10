@@ -68,7 +68,8 @@
 #define bswap_32 bswap32
 #endif
 #else
-#include <byteswap.h>
+/* use Xserver's implementation */
+#include "misc.h"
 #endif
 
 #ifdef SNA_XVMC
