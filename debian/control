@@ -43,7 +43,7 @@ Depends:
 Provides:
  xserver-xorg-video-intel,
  ${xviddriver:Provides}
-Description: X.Org X server -- Intel i8xx, i9xx display driver
+Description: XLibre X server -- Intel i8xx, i9xx display driver
  This package provides the driver for the Intel i8xx and i9xx family
  of chipsets, including i810, i815, i830, i845, i855, i865, i915, i945
  and i965 series chips.
@@ -51,7 +51,7 @@ Description: X.Org X server -- Intel i8xx, i9xx display driver
  This package also provides XvMC (XVideo Motion Compensation) drivers
  for i810/i815 and i9xx and newer chipsets.
  .
- This package is built from the X.org xf86-video-intel driver module.
+ This package is built from the XLibre xf86-video-intel driver module.
  .
  The use of this driver is discouraged if your GPU is new enough (ca.
  2007 and newer). You can try uninstalling this driver and let the
