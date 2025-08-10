@@ -1,3 +1,2 @@
-#git=https://gitlab.freedesktop.org/xorg/driver/xf86-video-intel
-version=3
-https://xorg.freedesktop.org/releases/individual/driver/ xf86-video-intel-(.*)\.tar\.gz
+version=4
+https://github.com/X11Libre/xf86-video-intel/tags .*/xlibre-xf86-video-intel-(.*)@ARCHIVE_EXT@
