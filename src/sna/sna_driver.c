@@ -266,7 +266,7 @@ static Bool sna_create_screen_resources(ScreenPtr screen)
 	screen->SetScreenPixmap(new_front);
 	assert(screen->GetScreenPixmap(screen) == new_front);
 	assert(sna->front == new_front);
-	screen->DestroyPixmap(new_front); /* transfer ownership to screen */
+	dixDestroyPixmap(new_front, 0); /* transfer ownership to screen */
 
 	sna_mode_set_primary(sna);
 
@@ -444,7 +444,8 @@ static void setup_dri(struct sna *sna)
 	sna->dri3.override =
 		!sna->dri3.available ||
 		xf86IsOptionSet(sna->Options, OPTION_DRI);
-	if (level >= 3 && sna->kgem.gen >= 040)
+	if (level >= 3 && (sna->kgem.gen >= 040 ||
+			   xf86IsOptionSet(sna->Options, OPTION_DRI)))
 		sna->dri3.enable = sna->dri3.available;
 #endif
 #if HAVE_DRI2
@@ -459,11 +460,17 @@ static bool enable_tear_free(struct sna *sna)
 	if (sna->flags & SNA_LINEAR_FB)
 		return false;
 
-	/* Under certain conditions, we should enable TearFree by default,
-	 * for example when the hardware requires pageflipping to run within
-	 * its power/performance budget.
+	/*
+	 * On recent HW, where the display surfaces are in a seperate GTT
+	 * to userspace, there is much less contention on global resources
+	 * and also we can assume there is much more memory bandwidth
+	 * available (i.e. gen8+). This HW should rarely be under such
+	 * constaints as to need to disable TearFree, so enable by default.
 	 */
-	if (sna_mode_wants_tear_free(sna))
+	if (sna->kgem.has_full_ppgtt)
+		return true;
+
+	if (!sna->kgem.has_dirtyfb)
 		return true;
 
 	return ENABLE_TEAR_FREE;
@@ -663,7 +670,7 @@ static Bool sna_pre_init(ScrnInfoPtr scrn, int probe)
 	}
 	scrn->currentMode = scrn->modes;
 
-	if (!setup_tear_free(sna) && sna_mode_wants_tear_free(sna))
+	if (!setup_tear_free(sna))
 		sna->kgem.needs_dirtyfb = sna->kgem.has_dirtyfb;
 
 	xf86SetGamma(scrn, zeros);
@@ -1004,7 +1011,7 @@ static Bool sna_early_close_screen(CLOSE_SCREEN_ARGS_DECL)
 	}
 
 	if (sna->front) {
-		screen->DestroyPixmap(sna->front);
+		dixDestroyPixmap(sna->front, 0);
 		sna->front = NULL;
 	}
 

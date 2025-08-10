@@ -191,6 +191,7 @@ struct kgem {
 	uint32_t has_pinned_batches :1;
 	uint32_t has_caching :1;
 	uint32_t has_coherent_mmap_gtt :1;
+	uint32_t has_full_ppgtt :1;
 	uint32_t has_llc :1;
 	uint32_t has_wt :1;
 	uint32_t has_no_reloc :1;
@@ -408,6 +409,15 @@ static inline void kgem_bo_destroy(struct kgem *kgem, struct kgem_bo *bo)
 	assert(bo->refcnt > bo->active_scanout);
 	if (--bo->refcnt == 0)
 		_kgem_bo_destroy(kgem, bo);
+}
+
+static inline void kgem_bo_replace(struct kgem *kgem,
+				   struct kgem_bo **bo,
+				   struct kgem_bo *new_bo)
+{
+	if (*bo)
+		kgem_bo_destroy(kgem, *bo);
+	*bo = new_bo ? kgem_bo_reference(new_bo) : NULL;
 }
 
 void kgem_clear_dirty(struct kgem *kgem);

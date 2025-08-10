@@ -51,6 +51,7 @@
 #include <shmint.h>
 
 #include <X11/extensions/damageproto.h>
+#include <X11/fonts/libxfont2.h>
 
 #include <sys/time.h>
 #include <sys/mman.h>
@@ -118,12 +119,6 @@
 #define IS_CLIPPED	0x2
 #define RECTILINEAR	0x4
 #define OVERWRITES	0x8
-
-#if XFONT2_CLIENT_FUNCS_VERSION >= 1
-#define AllocateFontPrivateIndex() xfont2_allocate_font_private_index()
-#undef FontSetPrivate
-#define FontSetPrivate(font, idx, data) xfont2_font_set_private(font, idx, data)
-#endif
 
 #if 0
 static void __sna_fallback_flush(DrawablePtr d)
@@ -982,7 +977,7 @@ fallback:
 
 		if (!screen->ModifyPixmapHeader(pixmap, width, height, depth,
 						bpp, pitch, addr)) {
-			screen->DestroyPixmap(pixmap);
+			dixDestroyPixmap(pixmap, 0);
 			return NULL;
 		}
 
@@ -6871,10 +6866,10 @@ discard_cow:
 						    box, n, 0)) {
 				DBG(("%s: fallback - accelerated copy boxes failed\n",
 				     __FUNCTION__));
-				tmp->drawable.pScreen->DestroyPixmap(tmp);
+				dixDestroyPixmap(tmp, 0);
 				goto fallback;
 			}
-			tmp->drawable.pScreen->DestroyPixmap(tmp);
+			dixDestroyPixmap(tmp, 0);
 
 			if (damage)
 				sna_damage_add_to_pixmap(damage, region, dst_pixmap);
@@ -14300,7 +14295,7 @@ static void
 sna_poly_fill_rect_stippled_n_box__imm(struct sna *sna,
 				       struct kgem_bo *bo,
 				       uint32_t br00, uint32_t br13,
-				       const GC *gc,
+				       const GCPtr gc,
 				       const BoxRec *box,
 				       const DDXPointRec *origin)
 {
@@ -14412,7 +14407,7 @@ sna_poly_fill_rect_stippled_n_box(struct sna *sna,
 				  struct kgem_bo *bo,
 				  struct kgem_bo **tile,
 				  uint32_t br00, uint32_t br13,
-				  const GC *gc,
+				  const GCPtr gc,
 				  const BoxRec *box,
 				  const DDXPointRec *origin)
 {
@@ -15393,7 +15388,7 @@ sna_realize_font(ScreenPtr screen, FontPtr font)
 	if (priv == NULL)
 		return FALSE;
 
-	if (!FontSetPrivate(font, sna_font_key, priv)) {
+	if (!xfont2_font_set_private(font, sna_font_key, priv)) {
 		free(priv);
 		return FALSE;
 	}
@@ -15428,7 +15423,7 @@ sna_unrealize_font(ScreenPtr screen, FontPtr font)
 	}
 	free(priv);
 
-	FontSetPrivate(font, sna_font_key, NULL);
+	xfont2_font_set_private(font, sna_font_key, NULL);
 	return TRUE;
 }
 
@@ -17696,7 +17691,7 @@ static void sna_accel_post_damage(struct sna *sna)
 #else
 		src = dirty->src;
 #endif
-		dst = dirty->slave_dst->master_pixmap;
+		dst = PixmapDirtyPrimary(dirty);
 
 		region.extents.x1 = dirty->x;
 		region.extents.x2 = dirty->x + dst->drawable.width;
@@ -17723,7 +17718,7 @@ static void sna_accel_post_damage(struct sna *sna)
 		dy += dirty->dst_y;
 #endif
 		RegionTranslate(&region, dx, dy);
-		DamageRegionAppend(&dirty->slave_dst->drawable, &region);
+		DamageRegionAppend(&PixmapDirtyDst(dirty)->drawable, &region);
 
 		DBG(("%s: slave:  ((%d, %d), (%d, %d))x%d\n", __FUNCTION__,
 		     region.extents.x1, region.extents.y1,
@@ -17800,7 +17795,7 @@ fallback:
 			kgem_bo_sync__gtt(&sna->kgem, __sna_pixmap_get_bo(dst));
 		}
 
-		DamageRegionProcessPending(&dirty->slave_dst->drawable);
+		DamageRegionProcessPending(&PixmapDirtyDst(dirty)->drawable);
 skip:
 		RegionUninit(&region);
 		DamageEmpty(dirty->damage);
@@ -18011,7 +18006,7 @@ sna_set_screen_pixmap(PixmapPtr pixmap)
 	pixmap->refcnt++;
 
 	if (old_front)
-		screen->DestroyPixmap(old_front);
+		dixDestroyPixmap(old_front, 0);
 }
 
 static Bool
@@ -18165,7 +18160,7 @@ bool sna_accel_init(ScreenPtr screen, struct sna *sna)
 
 	DBG(("%s\n", __FUNCTION__));
 
-	sna_font_key = AllocateFontPrivateIndex();
+	sna_font_key = xfont2_allocate_font_private_index();
 
 	list_init(&sna->flush_pixmaps);
 	list_init(&sna->active_pixmaps);

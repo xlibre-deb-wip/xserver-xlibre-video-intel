@@ -414,7 +414,7 @@ void sna_video_textured_setup(struct sna *sna, ScreenPtr screen)
 	adaptor->pScreen = screen;
 	adaptor->name = (char *)"Intel(R) Textured Video";
 	adaptor->nEncodings = 1;
-	adaptor->pEncodings = xnfalloc(sizeof(XvEncodingRec));
+	adaptor->pEncodings = XNFalloc(sizeof(XvEncodingRec));
 	adaptor->pEncodings[0].id = 0;
 	adaptor->pEncodings[0].pScreen = screen;
 	adaptor->pEncodings[0].name = (char *)"XV_IMAGE";

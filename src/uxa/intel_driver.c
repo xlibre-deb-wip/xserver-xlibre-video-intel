@@ -460,7 +460,7 @@ static Bool I830PreInit(ScrnInfoPtr scrn, int flags)
 		return TRUE;
 
 	if (((uintptr_t)scrn->driverPrivate) & 3) {
-		intel = xnfcalloc(sizeof(*intel), 1);
+		intel = XNFcallocarray(sizeof(*intel), 1);
 		if (intel == NULL)
 			return FALSE;
 
@@ -624,30 +624,30 @@ redisplay_dirty(ScreenPtr screen, PixmapDirtyUpdatePtr dirty)
 	RegionRec pixregion;
 	int was_blocked;
 
-	PixmapRegionInit(&pixregion, dirty->slave_dst->master_pixmap);
+	PixmapRegionInit(&pixregion, PixmapDirtyPrimary(dirty));
 	RegionTranslate(&pixregion, dirty->x, dirty->y);
 	RegionIntersect(&pixregion, &pixregion, DamageRegion(dirty->damage));
 	RegionTranslate(&pixregion, -dirty->x, -dirty->y);
 	was_blocked = RegionNil(&pixregion);
-	DamageRegionAppend(&dirty->slave_dst->drawable, &pixregion);
+	DamageRegionAppend(&PixmapDirtyDst(dirty)->drawable, &pixregion);
 	RegionUninit(&pixregion);
 	if (was_blocked)
 		return;
 
-	PixmapRegionInit(&pixregion, dirty->slave_dst->master_pixmap);
+	PixmapRegionInit(&pixregion, PixmapDirtyPrimary(dirty));
 	PixmapSyncDirtyHelper(dirty, &pixregion);
 	RegionUninit(&pixregion);
 
         intel_flush(intel);
 	if (!intel->has_prime_vmap_flush) {
-		drm_intel_bo *bo = intel_uxa_get_pixmap_bo(dirty->slave_dst->master_pixmap);
-		was_blocked = xf86BlockSIGIO();
+		drm_intel_bo *bo = intel_uxa_get_pixmap_bo(PixmapDirtyPrimary(dirty));
+		input_lock();
 		drm_intel_bo_map(bo, FALSE);
 		drm_intel_bo_unmap(bo);
-		xf86UnblockSIGIO(was_blocked);
+		input_unlock();
 	}
 
-	DamageRegionProcessPending(&dirty->slave_dst->drawable);
+	DamageRegionProcessPending(&PixmapDirtyDst(dirty)->drawable);
 	return;
 }
 

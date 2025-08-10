@@ -191,7 +191,7 @@ uxa_validate_gc(GCPtr pGC, unsigned long changes, DrawablePtr pDrawable)
 
 #ifdef FB_24_32BIT
 	if ((changes & GCTile) && fbGetRotatedPixmap(pGC)) {
-		(*pGC->pScreen->DestroyPixmap) (fbGetRotatedPixmap(pGC));
+		dixDestroyPixmap(fbGetRotatedPixmap(pGC), 0);
 		fbGetRotatedPixmap(pGC) = 0;
 	}
 
@@ -205,8 +205,7 @@ uxa_validate_gc(GCPtr pGC, unsigned long changes, DrawablePtr pDrawable)
 			    pNewTile->drawable.bitsPerPixel !=
 			    pDrawable->bitsPerPixel) {
 				if (pNewTile)
-					(*pGC->pScreen->
-					 DestroyPixmap) (pNewTile);
+					dixDestroyPixmap(pNewTile, 0);
 				/* fb24_32ReformatTile will do direct access
 				 * of a newly-allocated pixmap.  This isn't a
 				 * problem yet, since we don't put pixmaps in
@@ -470,7 +469,7 @@ Bool uxa_driver_init(ScreenPtr screen, uxa_driver_t * uxa_driver)
 	if (!dixRegisterPrivateKey(&uxa_screen_index, PRIVATE_SCREEN, 0))
 	    return FALSE;
 #endif
-	uxa_screen = calloc(sizeof(uxa_screen_t), 1);
+	uxa_screen = calloc(1, sizeof(uxa_screen_t));
 
 	if (!uxa_screen) {
 		LogMessage(X_WARNING,

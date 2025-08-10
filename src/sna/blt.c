@@ -631,7 +631,7 @@ memcpy_between_tiled_x__swizzle_0__sse2(const void *src, void *dst, int bpp,
 	}
 }
 
-#pragma GCC push_options
+#pragma GCC pop_options
 #endif
 
 fast void
