@@ -1,4 +1,4 @@
-xserver-xlibre-video-intel (3.0.0.1) unstable; urgency=low
+xserver-xlibre-video-intel (2:3.0.0.1-1) unstable; urgency=low
 
   * Initial release.
 
