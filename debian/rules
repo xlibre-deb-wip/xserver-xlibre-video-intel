@@ -17,12 +17,13 @@ endif
 # Enable SNA, pass builderstring:
 override_dh_auto_configure:
 	dh_auto_configure -- \
-	    --enable-sna \
-	    --enable-uxa \
-	    --libdir=/usr/lib \
-	    --libexecdir=/usr/lib/xserver-xorg-video-intel \
-	    --with-builderstring="$(SOURCE_NAME) $(SOURCE_VERSION) ($(BUILDER))" \
-	    $(valgrind)
+		--enable-sna \
+		--enable-uxa \
+		--libdir=/usr/lib \
+		--libexecdir=/usr/lib/xserver-xorg-video-intel \
+		--with-xorg-module-dir=/usr/lib/xorg/modules \
+		--with-builderstring="$(SOURCE_NAME) $(SOURCE_VERSION) ($(BUILDER))" \
+		$(valgrind)
 
 override_dh_auto_install:
 	dh_auto_install --destdir debian/tmp
