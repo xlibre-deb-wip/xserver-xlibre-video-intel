@@ -38,6 +38,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define _SNA_H_
 
 #include <stdint.h>
+#include <sys/select.h>
 
 #include <xorg-server.h>
 #include <xf86str.h>
