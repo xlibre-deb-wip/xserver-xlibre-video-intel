@@ -1,5 +1,5 @@
-xserver-xlibre-video-intel (2:3.0.0.1-1) unstable; urgency=low
+xserver-xlibre-video-intel (2:3.0.0.2-1) unstable; urgency=low
 
   * Initial release.
 
- -- apebl <a@pebl.cc>  Sun, 10 Aug 2025 23:41:00 +0000
+ -- apebl <a@pebl.cc>  Wed, 13 Aug 2025 12:45:00 +0000
