@@ -14,6 +14,9 @@ else
 valgrind = --disable-valgrind
 endif
 
+XDEP = $(shell cat /usr/share/xserver-xorg/videodrvdep)
+XSUB = debian/xserver-xlibre-video-intel.substvars
+
 # Enable SNA, pass builderstring:
 override_dh_auto_configure:
 	dh_auto_configure -- \
@@ -47,6 +50,11 @@ override_dh_strip:
 # That's a plugin, use appropriate warning level:
 override_dh_shlibdeps:
 	dh_shlibdeps -- --warnings=6
+
+override_dh_xsf_substvars:
+	echo "xviddriver:Depends=$(XDEP)" >> $(XSUB)
+	echo "xviddriver:Provides=xlibre-driver-video" >> $(XSUB)
+#	dh_xsf_substvars
 
 override_dh_installchangelogs:
 	dh_installchangelogs debian/upstream.changelog
