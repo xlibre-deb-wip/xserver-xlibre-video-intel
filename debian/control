@@ -41,7 +41,7 @@ Depends:
  ${misc:Depends},
  ${xviddriver:Depends},
 Provides:
- xserver-xorg-video-intel,
+ xserver-xorg-video-intel (= ${binary:Version}),
  ${xviddriver:Provides}
 Description: XLibre X server -- Intel i8xx, i9xx display driver
  This package provides the driver for the Intel i8xx and i9xx family
