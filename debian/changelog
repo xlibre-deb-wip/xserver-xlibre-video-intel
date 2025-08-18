@@ -1,3 +1,10 @@
+xserver-xlibre-video-intel (2:3.0.0.2-2) unstable; urgency=medium
+
+  * debian/control: Pin versions in Provides fields
+  * debian/gbp.conf: Use DEP-14 style branches
+
+ -- apebl <a@pebl.cc>  Mon, 18 Aug 2025 07:13:02 +0000
+
 xserver-xlibre-video-intel (2:3.0.0.2-1) unstable; urgency=low
 
   * Initial release.
