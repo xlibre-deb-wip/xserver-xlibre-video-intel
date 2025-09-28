@@ -542,6 +542,7 @@ if test "x$DRI" != "xno"; then
 		save_CFLAGS=$CFLAGS
 		CFLAGS="$XORG_CFLAGS $DRM_CFLAGS $DRI1_CFLAGS $DRI2_CFLAGS"
 		AC_CHECK_HEADERS([dri2.h], [], [have_dri2=no], [
+#include <xorg-server.h>
 #include <dixstruct.h>
 #include <drm.h>
 ])
